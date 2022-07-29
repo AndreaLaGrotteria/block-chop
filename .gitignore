@@ -91,5 +91,6 @@ $RECYCLE.BIN/
 # Code coverage reports
 lcov.info
 
-### Assets ###
-assets
+### Playground binary ###
+
+src/bin/playground.rs
