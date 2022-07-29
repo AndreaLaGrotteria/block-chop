@@ -1,6 +1,6 @@
-use std::path::Path;
-
 use doomstack::{here, Doom, ResultExt, Top};
+
+use std::path::Path;
 
 use talk::crypto::KeyCard;
 
@@ -102,5 +102,44 @@ impl Directory {
         }
 
         *self.keycards.get_mut(id as usize).unwrap() = Some(keycard);
+    }
+
+    pub fn save<P>(&self, path: P) -> Result<(), Top<DirectoryError>>
+    where
+        P: AsRef<Path>,
+    {
+        let database = sled::open(path)
+            .map_err(DirectoryError::open_failed)
+            .map_err(DirectoryError::into_top)
+            .spot(here!())?;
+
+        database
+            .clear()
+            .map_err(DirectoryError::clear_failed)
+            .map_err(DirectoryError::into_top)
+            .spot(here!())?;
+
+        for (index, keycard) in self.keycards.iter().enumerate() {
+            if let Some(keycard) = keycard {
+                let id = index as u64;
+
+                let key = bincode::serialize(&id).unwrap();
+                let value = bincode::serialize(&keycard).unwrap();
+
+                database
+                    .insert(key, value)
+                    .map_err(DirectoryError::save_failed)
+                    .map_err(DirectoryError::into_top)
+                    .spot(here!())?;
+            }
+        }
+
+        database
+            .flush()
+            .map_err(DirectoryError::flush_failed)
+            .map_err(DirectoryError::into_top)
+            .spot(here!())?;
+
+        Ok(())
     }
 }
