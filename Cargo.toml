@@ -7,6 +7,11 @@ edition = "2021"
 name = "chop_chop"
 path = "src/lib.rs"
 
+[[bin]]
+name = "generate_system"
+path = "bin/generate_system.rs"
+required-features = [ "benchmark" ]
+
 [features]
 benchmark = []
 
