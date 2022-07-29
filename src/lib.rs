@@ -1,3 +1,3 @@
 mod system;
 
-pub use system::Membership;
+pub use system::{Directory, Membership};
