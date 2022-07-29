@@ -19,6 +19,15 @@ pub enum MembershipError {
     #[doom(description("Failed to deserialize entry: {:?}", source))]
     #[doom(wrap(deserialize_failed))]
     DeserializeFailed { source: bincode::Error },
+    #[doom(description("Failed to clear database: {:?}", source))]
+    #[doom(wrap(clear_failed))]
+    ClearFailed { source: sled::Error },
+    #[doom(description("Failed to save entry: {:?}", source))]
+    #[doom(wrap(save_failed))]
+    SaveFailed { source: sled::Error },
+    #[doom(description("Failed to flush database: {:?}", source))]
+    #[doom(wrap(flush_failed))]
+    FlushFailed { source: sled::Error },
 }
 
 impl Membership {
@@ -78,5 +87,40 @@ impl Membership {
 
     pub fn quorum(&self) -> usize {
         self.servers.len() - self.plurality() + 1
+    }
+
+    pub fn save<P>(&self, path: P) -> Result<(), Top<MembershipError>>
+    where
+        P: AsRef<Path>,
+    {
+        let database = sled::open(path)
+            .map_err(MembershipError::open_failed)
+            .map_err(MembershipError::into_top)
+            .spot(here!())?;
+
+        database
+            .clear()
+            .map_err(MembershipError::clear_failed)
+            .map_err(MembershipError::into_top)
+            .spot(here!())?;
+
+        for (identity, keycard) in self.servers.iter() {
+            let key = bincode::serialize(identity).unwrap();
+            let value = bincode::serialize(keycard).unwrap();
+
+            database
+                .insert(key, value)
+                .map_err(MembershipError::save_failed)
+                .map_err(MembershipError::into_top)
+                .spot(here!())?;
+        }
+
+        database
+            .flush()
+            .map_err(MembershipError::flush_failed)
+            .map_err(MembershipError::into_top)
+            .spot(here!())?;
+
+        Ok(())
     }
 }
