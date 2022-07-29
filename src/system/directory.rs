@@ -16,9 +16,11 @@ pub enum DirectoryError {
     #[doom(description("Failed to load entry: {:?}", source))]
     #[doom(wrap(load_failed))]
     LoadFailed { source: sled::Error },
-    #[doom(description("Failed to deserialize entry: {:?}", source))]
-    #[doom(wrap(deserialize_failed))]
-    DeserializeFailed { source: bincode::Error },
+    #[doom(description("Failed to deserialize id"))]
+    DeserializeIdFailed,
+    #[doom(description("Failed to deserialize keycard: {:?}", source))]
+    #[doom(wrap(deserialize_keycard_failed))]
+    DeserializeKeyCardFailed { source: bincode::Error },
     #[doom(description("Failed to clear database: {:?}", source))]
     #[doom(wrap(clear_failed))]
     ClearFailed { source: sled::Error },
@@ -50,12 +52,15 @@ impl Directory {
                 .map_err(DirectoryError::into_top)
                 .spot(here!())?;
 
-            let index = bincode::deserialize::<u64>(key.as_ref())
-                .map_err(DirectoryError::deserialize_failed)
-                .map_err(DirectoryError::into_top)
-                .spot(here!())?;
+            let id = if key.len() == 8 {
+                let mut buffer = [0u8; 8];
+                buffer.clone_from_slice(key.as_ref());
+                u64::from_be_bytes(buffer)
+            } else {
+                return DirectoryError::DeserializeIdFailed.fail().spot(here!());
+            };
 
-            (index as usize) + 1
+            (id as usize) + 1
         } else {
             0
         };
@@ -68,17 +73,20 @@ impl Directory {
                 .map_err(DirectoryError::into_top)
                 .spot(here!())?;
 
-            let index = bincode::deserialize::<u64>(key.as_ref())
-                .map_err(DirectoryError::deserialize_failed)
-                .map_err(DirectoryError::into_top)
-                .spot(here!())?;
+            let id = if key.len() == 8 {
+                let mut buffer = [0u8; 8];
+                buffer.clone_from_slice(key.as_ref());
+                u64::from_be_bytes(buffer)
+            } else {
+                return DirectoryError::DeserializeIdFailed.fail().spot(here!());
+            };
 
             let keycard = bincode::deserialize::<KeyCard>(value.as_ref())
-                .map_err(DirectoryError::deserialize_failed)
+                .map_err(DirectoryError::deserialize_keycard_failed)
                 .map_err(DirectoryError::into_top)
                 .spot(here!())?;
 
-            *keycards.get_mut(index as usize).unwrap() = Some(keycard);
+            *keycards.get_mut(id as usize).unwrap() = Some(keycard);
         }
 
         Ok(Directory { keycards })
@@ -121,9 +129,7 @@ impl Directory {
 
         for (index, keycard) in self.keycards.iter().enumerate() {
             if let Some(keycard) = keycard {
-                let id = index as u64;
-
-                let key = bincode::serialize(&id).unwrap();
+                let key = (index as u64).to_be_bytes();
                 let value = bincode::serialize(&keycard).unwrap();
 
                 database
