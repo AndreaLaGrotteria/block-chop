@@ -123,4 +123,16 @@ impl Membership {
 
         Ok(())
     }
+
+    #[cfg(feature = "benchmark")]
+    pub fn truncate(self, size: usize) -> Membership {
+        let servers = self
+            .servers
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, entry)| if index < size { Some(entry) } else { None })
+            .collect::<BTreeMap<_, _>>();
+
+        Membership { servers }
+    }
 }
