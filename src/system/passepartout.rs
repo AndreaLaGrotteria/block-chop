@@ -44,7 +44,7 @@ impl Passepartout {
         Ok(Passepartout { database })
     }
 
-    pub fn get(&self, identity: &Identity) -> Result<KeyChain, Top<PassepartoutError>> {
+    pub fn get(&self, identity: Identity) -> Result<KeyChain, Top<PassepartoutError>> {
         let key = bincode::serialize(&identity).unwrap();
 
         let value = self
@@ -67,7 +67,7 @@ impl Passepartout {
     pub fn insert(
         &self,
         identity: Identity,
-        keychain: &KeyChain,
+        keychain: KeyChain,
     ) -> Result<(), Top<PassepartoutError>> {
         let key = bincode::serialize(&identity).unwrap();
         let value = bincode::serialize(&keychain).unwrap();

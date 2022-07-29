@@ -34,7 +34,7 @@ fn main() {
     let membership = Membership::new(iter::repeat_with(KeyChain::random).take(servers).map(
         |keychain| {
             let keycard = keychain.keycard();
-            passepartout.insert(keycard.identity(), &keychain).unwrap();
+            passepartout.insert(keycard.identity(), keychain).unwrap();
 
             keycard
         },
@@ -48,7 +48,7 @@ fn main() {
         let keychain = KeyChain::random();
         let keycard = keychain.keycard();
 
-        passepartout.insert(keycard.identity(), &keychain).unwrap();
+        passepartout.insert(keycard.identity(), keychain).unwrap();
         directory.insert(index as u64, keycard);
     }
 
