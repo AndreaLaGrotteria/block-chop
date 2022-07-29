@@ -23,6 +23,12 @@ pub enum PassepartoutError {
     #[doom(description("Failed to deserialize entry: {:?}", source))]
     #[doom(wrap(deserialize_failed))]
     DeserializeFailed { source: bincode::Error },
+    #[doom(description("Failed to save entry: {:?}", source))]
+    #[doom(wrap(save_failed))]
+    SaveFailed { source: sled::Error },
+    #[doom(description("Failed to flush database: {:?}", source))]
+    #[doom(wrap(flush_failed))]
+    FlushFailed { source: sled::Error },
 }
 
 impl Passepartout {
@@ -56,5 +62,28 @@ impl Passepartout {
             .spot(here!())?;
 
         Ok(keychain)
+    }
+
+    pub fn insert(
+        &self,
+        identity: &Identity,
+        keychain: &KeyChain,
+    ) -> Result<(), Top<PassepartoutError>> {
+        let key = bincode::serialize(&identity).unwrap();
+        let value = bincode::serialize(&keychain).unwrap();
+
+        self.database
+            .insert(key, value)
+            .map_err(PassepartoutError::save_failed)
+            .map_err(PassepartoutError::into_top)
+            .spot(here!())?;
+
+        self.database
+            .flush()
+            .map_err(PassepartoutError::flush_failed)
+            .map_err(PassepartoutError::into_top)
+            .spot(here!())?;
+
+        Ok(())
     }
 }
