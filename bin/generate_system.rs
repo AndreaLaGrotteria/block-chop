@@ -1,6 +1,9 @@
 use chop_chop::{Directory, Membership, Passepartout};
 
-use std::iter;
+use std::{
+    io::{self, prelude::*},
+    iter,
+};
 
 use talk::crypto::KeyChain;
 
@@ -29,7 +32,7 @@ fn main() {
 
     let passepartout = Passepartout::open(passepartout_path).unwrap();
 
-    println!("Generating `Membership`..");
+    println!("\nGenerating `Membership`..");
 
     let membership = Membership::new(iter::repeat_with(KeyChain::random).take(servers).map(
         |keychain| {
@@ -39,12 +42,18 @@ fn main() {
             keycard
         },
     ));
+    println!(" .. done!");
 
-    println!("Generating `Directory`..");
+    println!("\nGenerating `Directory`..");
 
     let mut directory = Directory::new();
 
     for index in 0..clients {
+        if index % 100 == 0 {
+            print!("\r  -> Generating id {}", (index as u64));
+            io::stdout().flush().unwrap();
+        }
+
         let keychain = KeyChain::random();
         let keycard = keychain.keycard();
 
@@ -52,7 +61,9 @@ fn main() {
         directory.insert(index as u64, keycard);
     }
 
-    println!("Saving `Membership` and `Directory`..");
+    println!("\r .. done!                    ");
+
+    println!("\nSaving `Membership` and `Directory`..");
 
     membership.save(membership_path).unwrap();
     directory.save(directory_path).unwrap();
