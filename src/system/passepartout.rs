@@ -66,7 +66,7 @@ impl Passepartout {
 
     pub fn insert(
         &self,
-        identity: &Identity,
+        identity: Identity,
         keychain: &KeyChain,
     ) -> Result<(), Top<PassepartoutError>> {
         let key = bincode::serialize(&identity).unwrap();
