@@ -32,7 +32,7 @@ pub enum PassepartoutError {
 }
 
 impl Passepartout {
-    pub fn new<P>(path: P) -> Result<Self, Top<PassepartoutError>>
+    pub fn open<P>(path: P) -> Result<Self, Top<PassepartoutError>>
     where
         P: AsRef<Path>,
     {

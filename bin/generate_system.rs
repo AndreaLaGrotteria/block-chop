@@ -27,7 +27,7 @@ fn main() {
 
     println!("Initializing `Passepartout`..");
 
-    let passepartout = Passepartout::new(passepartout_path).unwrap();
+    let passepartout = Passepartout::open(passepartout_path).unwrap();
 
     println!("Generating `Membership`..");
 
