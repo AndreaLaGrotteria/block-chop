@@ -5,10 +5,10 @@ mod certificate;
 mod header;
 
 #[allow(dead_code)]
-mod statements;
+pub(crate) mod records;
 
 #[allow(dead_code)]
-mod records;
+pub(crate) mod statements;
 
 #[allow(unused_imports)]
 pub(crate) use certificate::Certificate;

@@ -1,4 +1,4 @@
-use crate::broadcast::Message;
+use crate::{broadcast::Message, crypto::statements::Broadcast as BroadcastStatement};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
@@ -94,7 +94,7 @@ impl Client {
 
     async fn run(
         _id: u64,
-        _keychain: KeyChain,
+        keychain: KeyChain,
         brokers: Arc<StdMutex<Vec<SocketAddr>>>,
         mut broadcast_outlet: BroadcastOutlet,
     ) {
@@ -111,15 +111,24 @@ impl Client {
         let (sender, _receiver) = dispatcher.split();
         let sender = Arc::new(sender);
 
-        let _sequence = 0..=0;
+        let sequence = 0..=0;
 
         loop {
             // Wait for the next message to broadcast
 
-            let _message = match broadcast_outlet.recv().await {
+            let message = match broadcast_outlet.recv().await {
                 Some(message) => message,
                 None => return, // `Client` has dropped, shutdown
             };
+
+            // Build request
+
+            let statement = BroadcastStatement {
+                sequence: *sequence.start(),
+                message,
+            };
+
+            let _signature = keychain.sign(&statement).unwrap();
 
             // Spawn requesting task
 
