@@ -11,7 +11,7 @@ use std::{
 
 use talk::{
     crypto::KeyChain,
-    net::{DatagramDispatcher, DatagramDispatcherSettings},
+    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender},
     sync::fuse::Fuse,
 };
 
@@ -49,54 +49,61 @@ impl Client {
                 None => return, // `Client` has dropped, shutdown
             };
 
-            // Build request
-
-            let statement = BroadcastStatement {
-                sequence: *sequence.start(),
-                message,
-            };
-
-            let signature = keychain.sign(&statement).unwrap();
-
-            let request = Request::Broadcast {
-                id,
-                message,
-                signature,
-                height_record: None,
-            };
-
             // Spawn requesting task
 
             let fuse = Fuse::new();
 
-            {
-                let brokers = brokers.clone();
-                let sender = sender.clone();
+            fuse.spawn(Client::request(
+                id,
+                keychain.clone(),
+                brokers.clone(),
+                sender.clone(),
+                *sequence.start(),
+                message,
+            ));
+        }
+    }
 
-                fuse.spawn(async move {
-                    let request = bincode::serialize(&request).unwrap();
+    async fn request(
+        id: u64,
+        keychain: KeyChain,
+        brokers: Arc<StdMutex<Vec<SocketAddr>>>,
+        sender: Arc<DatagramSender>,
+        sequence: u64,
+        message: Message,
+    ) {
+        // Build request
 
-                    for index in 0.. {
-                        // Fetch next broker
+        let statement = BroadcastStatement { sequence, message };
+        let signature = keychain.sign(&statement).unwrap();
 
-                        let broker = loop {
-                            if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
-                                break broker;
-                            }
+        let request = Request::Broadcast {
+            id,
+            message,
+            signature,
+            height_record: None,
+        };
 
-                            time::sleep(Duration::from_secs(1)).await;
-                        };
+        let request = bincode::serialize(&request).unwrap();
 
-                        // Send request to `broker`
+        for index in 0.. {
+            // Fetch next broker
 
-                        sender.send(broker, request.clone()).await;
+            let broker = loop {
+                if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
+                    break broker;
+                }
 
-                        // Wait for timeout
+                time::sleep(Duration::from_secs(1)).await;
+            };
 
-                        time::sleep(Duration::from_secs(20)).await; // TODO: Add setting
-                    }
-                });
-            }
+            // Send request to `broker`
+
+            sender.send(broker, request.clone()).await;
+
+            // Wait for timeout
+
+            time::sleep(Duration::from_secs(20)).await; // TODO: Add setting
         }
     }
 }
