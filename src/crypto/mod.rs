@@ -7,6 +7,9 @@ mod header;
 #[allow(dead_code)]
 mod statements;
 
+#[allow(dead_code)]
+mod records;
+
 #[allow(unused_imports)]
 pub(crate) use certificate::Certificate;
 
