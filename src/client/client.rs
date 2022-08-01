@@ -1,4 +1,6 @@
-use crate::{broadcast::Message, crypto::statements::Broadcast as BroadcastStatement};
+use crate::{
+    broadcast::Message, broker::Request, crypto::statements::Broadcast as BroadcastStatement,
+};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
@@ -93,7 +95,7 @@ impl Client {
     }
 
     async fn run(
-        _id: u64,
+        id: u64,
         keychain: KeyChain,
         brokers: Arc<StdMutex<Vec<SocketAddr>>>,
         mut broadcast_outlet: BroadcastOutlet,
@@ -128,7 +130,14 @@ impl Client {
                 message,
             };
 
-            let _signature = keychain.sign(&statement).unwrap();
+            let signature = keychain.sign(&statement).unwrap();
+
+            let request = Request::Broadcast {
+                id,
+                message,
+                signature,
+                height_record: None,
+            };
 
             // Spawn requesting task
 
@@ -136,19 +145,29 @@ impl Client {
 
             {
                 let brokers = brokers.clone();
-                let _sender = sender.clone();
+                let sender = sender.clone();
 
                 fuse.spawn(async move {
+                    let request = bincode::serialize(&request).unwrap();
+
                     for index in 0.. {
                         // Fetch next broker
 
-                        let _broker = loop {
+                        let broker = loop {
                             if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
                                 break broker;
                             }
 
                             time::sleep(Duration::from_secs(1)).await;
                         };
+
+                        // Send request to `broker`
+
+                        sender.send(broker, request.clone()).await;
+
+                        // Wait for timeout
+
+                        time::sleep(Duration::from_secs(20)).await; // TODO: Add setting
                     }
                 });
             }
