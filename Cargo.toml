@@ -18,6 +18,7 @@ benchmark = []
 [dependencies]
 doomstack = { git = "https://github.com/distributed-epfl/doomstack" }
 talk = { git = "https://github.com/distributed-epfl/talk" }
+zebra = { git = "https://github.com/distributed-epfl/zebra" }
 
 tokio = { version = "1.12.0", features = [ "macros", "net", "rt-multi-thread", "io-util", "sync", "time" ] }
 rayon = { version = "1.5.1" }
