@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{
     crypto::{statements::Delivery, Certificate},
     system::Membership,
@@ -44,5 +46,25 @@ impl Height {
         self.certificate
             .verify_plurality(membership, &statement)
             .pot(HeightError::CertificateInvalid, here!())
+    }
+}
+
+impl PartialEq for Height {
+    fn eq(&self, rho: &Self) -> bool {
+        self.height == rho.height
+    }
+}
+
+impl Eq for Height {}
+
+impl PartialOrd for Height {
+    fn partial_cmp(&self, rho: &Self) -> Option<Ordering> {
+        Some(self.cmp(rho))
+    }
+}
+
+impl Ord for Height {
+    fn cmp(&self, rho: &Self) -> Ordering {
+        self.height.cmp(&rho.height)
     }
 }
