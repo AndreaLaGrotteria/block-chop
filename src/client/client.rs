@@ -111,6 +111,8 @@ impl Client {
         let (sender, receiver) = dispatcher.split();
         let sender = Arc::new(sender);
 
+        let mut sequence = 0..=0;
+
         loop {
             // Wait for the next message to broadcast
 
@@ -119,22 +121,28 @@ impl Client {
                 None => return, // `Client` has dropped, shutdown
             };
 
+            // Spawn requesting task
+
             let fuse = Fuse::new();
 
-            let brokers = brokers.clone();
-            let sender = sender.clone();
+            {
+                let brokers = brokers.clone();
+                let sender = sender.clone();
 
-            fuse.spawn(async move {
-                for index in 0.. {
-                    let broker = loop {
-                        if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
-                            break broker;
-                        }
+                fuse.spawn(async move {
+                    for index in 0.. {
+                        // Fetch next broker
 
-                        time::sleep(Duration::from_secs(1)).await;
-                    };
-                }
-            });
+                        let broker = loop {
+                            if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
+                                break broker;
+                            }
+
+                            time::sleep(Duration::from_secs(1)).await;
+                        };
+                    }
+                });
+            }
         }
     }
 }
