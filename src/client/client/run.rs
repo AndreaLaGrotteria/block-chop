@@ -1,6 +1,8 @@
 use crate::{
-    broadcast::Message, broker::Request, client::Client,
-    crypto::statements::Broadcast as BroadcastStatement,
+    broadcast::Message,
+    broker::Request,
+    client::Client,
+    crypto::{records::Height as HeightRecord, statements::Broadcast as BroadcastStatement},
 };
 
 use std::{
@@ -40,6 +42,7 @@ impl Client {
         let sender = Arc::new(sender);
 
         let sequence = 0..=0;
+        let height_record = None;
 
         loop {
             // Wait for the next message to broadcast
@@ -60,6 +63,7 @@ impl Client {
                 sender.clone(),
                 *sequence.start(),
                 message,
+                height_record.clone(),
             ));
         }
     }
@@ -71,6 +75,7 @@ impl Client {
         sender: Arc<DatagramSender>,
         sequence: u64,
         message: Message,
+        height_record: Option<HeightRecord>,
     ) {
         // Build request
 
@@ -81,7 +86,7 @@ impl Client {
             id,
             message,
             signature,
-            height_record: None,
+            height_record,
         };
 
         let request = bincode::serialize(&request).unwrap();
