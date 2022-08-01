@@ -108,15 +108,15 @@ impl Client {
         .await
         .unwrap(); // TODO: Determine if this error should be handled
 
-        let (sender, receiver) = dispatcher.split();
+        let (sender, _receiver) = dispatcher.split();
         let sender = Arc::new(sender);
 
-        let mut sequence = 0..=0;
+        let _sequence = 0..=0;
 
         loop {
             // Wait for the next message to broadcast
 
-            let message = match broadcast_outlet.recv().await {
+            let _message = match broadcast_outlet.recv().await {
                 Some(message) => message,
                 None => return, // `Client` has dropped, shutdown
             };
@@ -127,13 +127,13 @@ impl Client {
 
             {
                 let brokers = brokers.clone();
-                let sender = sender.clone();
+                let _sender = sender.clone();
 
                 fuse.spawn(async move {
                     for index in 0.. {
                         // Fetch next broker
 
-                        let broker = loop {
+                        let _broker = loop {
                             if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
                                 break broker;
                             }
