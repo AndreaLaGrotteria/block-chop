@@ -129,8 +129,7 @@ impl Membership {
         let servers = self
             .servers
             .into_iter()
-            .enumerate()
-            .filter_map(|(index, entry)| if index < size { Some(entry) } else { None })
+            .take(size)
             .collect::<BTreeMap<_, _>>();
 
         Membership { servers }
