@@ -4,6 +4,6 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum Header {
     Broadcast = 0,
     Reduction = 1,
-    Witness = 2,
+    BatchWitness = 2,
     BatchDelivery = 3,
 }
