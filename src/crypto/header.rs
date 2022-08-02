@@ -5,5 +5,5 @@ pub(crate) enum Header {
     Broadcast = 0,
     Reduction = 1,
     Witness = 2,
-    Delivery = 3,
+    BatchDelivery = 3,
 }

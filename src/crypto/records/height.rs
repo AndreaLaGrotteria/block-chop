@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use crate::{
-    crypto::{statements::Delivery, Certificate},
+    crypto::{statements::BatchDelivery, Certificate},
     system::Membership,
 };
 
@@ -38,7 +38,7 @@ impl Height {
     }
 
     pub fn verify(&self, membership: &Membership) -> Result<(), Top<HeightError>> {
-        let statement = Delivery {
+        let statement = BatchDelivery {
             height: self.height,
             root: self.root,
         };

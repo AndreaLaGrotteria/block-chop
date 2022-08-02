@@ -1,8 +1,8 @@
+mod batch_delivery;
 mod broadcast;
-mod delivery;
 
 #[allow(unused_imports)]
-pub(crate) use delivery::Delivery;
+pub(crate) use batch_delivery::BatchDelivery;
 
 #[allow(unused_imports)]
 pub(crate) use broadcast::Broadcast;
