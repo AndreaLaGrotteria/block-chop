@@ -8,6 +8,7 @@ pub(crate) enum Request {
     Broadcast {
         id: u64,
         message: Message,
+        sequence: u64,
         signature: Signature,
         height_record: Option<HeightRecord>,
     },

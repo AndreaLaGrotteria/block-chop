@@ -65,6 +65,8 @@ impl Client {
                 message,
                 height_record.clone(),
             ));
+
+            todo!();
         }
     }
 
@@ -85,6 +87,7 @@ impl Client {
         let request = Request::Broadcast {
             id,
             message,
+            sequence,
             signature,
             height_record,
         };

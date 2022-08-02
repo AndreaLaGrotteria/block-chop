@@ -42,7 +42,7 @@ impl Certificate {
         for (index, member) in membership.servers().keys().enumerate() {
             if signer_identities.peek() == Some(&member) {
                 signers.set(index, true);
-                signer_identities.next().unwrap();
+                signer_identities.next();
             }
         }
 

@@ -4,7 +4,7 @@ mod client;
 mod crypto;
 mod system;
 
-pub use broadcast::Message;
+pub use broadcast::{Message, MESSAGE_SIZE};
 pub use client::Client;
 pub use system::{Directory, Membership};
 
