@@ -3,7 +3,7 @@ use crate::{
     broker::{Request, Response},
     client::Client,
     crypto::{
-        records::Height as HeightRecord,
+        records::{Delivery as DeliveryRecord, Height as HeightRecord},
         statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     },
     Membership,
@@ -74,7 +74,7 @@ impl Client {
 
             // React to `Response`s until `message` is delivered
 
-            loop {
+            let record = loop {
                 let (source, response) = receiver.receive().await;
 
                 let response =
@@ -146,8 +146,48 @@ impl Client {
                         let request = bincode::serialize(&request).unwrap();
                         sender.send(source, request).await;
                     }
+
+                    Response::Delivery {
+                        height,
+                        root,
+                        certificate,
+                        sequence: dsequence,
+                        proof,
+                    } => {
+                        // Verify that the delivered sequence is within the current sequence range
+
+                        if !sequence.contains(&dsequence) {
+                            continue;
+                        }
+
+                        // Build and verify `DeliveryRecord`
+
+                        let entry = Entry {
+                            id,
+                            sequence: dsequence,
+                            message,
+                        };
+
+                        let record = DeliveryRecord::new(height, root, certificate, entry, proof);
+
+                        if record.verify(&membership).is_err() {
+                            continue;
+                        }
+
+                        // Message delivered!
+
+                        break record;
+                    }
                 }
-            }
+            };
+
+            // Shift `sequence`
+
+            sequence = (sequence.end() + 1)..=(sequence.end() + 1);
+
+            // TODO: Send `record` back
+
+            todo!();
         }
     }
 

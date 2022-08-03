@@ -1,4 +1,4 @@
-use crate::crypto::records::Height as HeightRecord;
+use crate::crypto::{records::Height as HeightRecord, Certificate};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,5 +14,12 @@ pub(crate) enum Response {
         proof: Proof,
         raise: u64,
         height_record: HeightRecord,
+    },
+    Delivery {
+        height: u64,
+        root: Hash,
+        certificate: Certificate,
+        sequence: u64,
+        proof: Proof,
     },
 }
