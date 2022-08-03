@@ -1,10 +1,10 @@
-use crate::{broadcast::Message, Membership};
+use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Membership};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, Mutex},
 };
 
 use talk::{crypto::KeyChain, sync::fuse::Fuse};
@@ -14,15 +14,16 @@ use tokio::{
     net::{self, ToSocketAddrs},
     sync::{
         mpsc::{self, Sender as MpscSender},
-        Mutex as TokioMutex,
+        oneshot::{self, Sender as OneshotSender},
     },
 };
 
-type BroadcastInlet = MpscSender<Message>;
+type BroadcastInlet = MpscSender<(Message, DeliveryInlet)>;
+type DeliveryInlet = OneshotSender<DeliveryRecord>;
 
 pub struct Client {
-    brokers: Arc<StdMutex<Vec<SocketAddr>>>,
-    broadcast_inlet: TokioMutex<BroadcastInlet>,
+    brokers: Arc<Mutex<Vec<SocketAddr>>>,
+    broadcast_inlet: BroadcastInlet,
     _fuse: Fuse,
 }
 
@@ -37,10 +38,8 @@ pub enum ClientError {
 
 impl Client {
     pub fn new(id: u64, keychain: KeyChain, membership: Membership) -> Self {
-        let brokers = Arc::new(StdMutex::new(Vec::new()));
-
-        let (broadcast_inlet, broadcast_outlet) = mpsc::channel(1); // Only one broadcast is performed at a time
-        let broadcast_inlet = TokioMutex::new(broadcast_inlet);
+        let brokers = Arc::new(Mutex::new(Vec::new()));
+        let (broadcast_inlet, broadcast_outlet) = mpsc::channel(1); // Only one broadcast is performed at a time anyway
 
         let fuse = Fuse::new();
 
@@ -82,13 +81,17 @@ impl Client {
         Ok(())
     }
 
-    pub async fn broadcast(&self, message: Message) {
-        let broadcast_inlet = self.broadcast_inlet.lock().await;
+    pub async fn broadcast(&self, message: Message) -> DeliveryRecord {
+        let (delivery_inlet, delivery_outlet) = oneshot::channel();
 
         // If the `Client` still exists, then `_fuse` has not
         // dropped, `run` is still running and `broadcast_outlet`
-        // still exists
-        broadcast_inlet.send(message).await.unwrap();
+        // still exists, so this is guaranteed to succeed
+        let _ = self.broadcast_inlet.send((message, delivery_inlet)).await;
+
+        // Similarly to `broadcast_inlet`, this is guaranteed to
+        // await indefinitely or eventually succeed
+        delivery_outlet.await.unwrap()
     }
 }
 

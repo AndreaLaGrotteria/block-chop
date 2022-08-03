@@ -12,7 +12,7 @@ use crate::{
 use std::{
     cmp,
     net::SocketAddr,
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -22,16 +22,20 @@ use talk::{
     sync::fuse::Fuse,
 };
 
-use tokio::{sync::mpsc::Receiver as MpscReceiver, time};
+use tokio::{
+    sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender},
+    time,
+};
 
-type BroadcastOutlet = MpscReceiver<Message>;
+type BroadcastOutlet = MpscReceiver<(Message, DeliveryInlet)>;
+type DeliveryInlet = OneshotSender<DeliveryRecord>;
 
 impl Client {
     pub(in crate::client::client) async fn run(
         id: u64,
         keychain: KeyChain,
         membership: Membership,
-        brokers: Arc<StdMutex<Vec<SocketAddr>>>,
+        brokers: Arc<Mutex<Vec<SocketAddr>>>,
         mut broadcast_outlet: BroadcastOutlet,
     ) {
         let dispatcher = DatagramDispatcher::bind(
@@ -53,8 +57,8 @@ impl Client {
         loop {
             // Wait for the next message to broadcast
 
-            let message = match broadcast_outlet.recv().await {
-                Some(message) => message,
+            let (message, delivery_inlet) = match broadcast_outlet.recv().await {
+                Some(broadcast) => broadcast,
                 None => return, // `Client` has dropped, shutdown
             };
 
@@ -185,16 +189,16 @@ impl Client {
 
             sequence = (sequence.end() + 1)..=(sequence.end() + 1);
 
-            // TODO: Send `record` back
+            // Send `record` back the invoking `broadcast` method
 
-            todo!();
+            let _ = delivery_inlet.send(record);
         }
     }
 
     async fn request(
         id: u64,
         keychain: KeyChain,
-        brokers: Arc<StdMutex<Vec<SocketAddr>>>,
+        brokers: Arc<Mutex<Vec<SocketAddr>>>,
         sender: Arc<DatagramSender>,
         sequence: u64,
         message: Message,
