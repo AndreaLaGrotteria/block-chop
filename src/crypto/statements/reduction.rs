@@ -11,5 +11,5 @@ pub(crate) struct Reduction {
 
 impl Statement for Reduction {
     type Header = Header;
-    const HEADER: Self::Header = Header::BatchDelivery;
+    const HEADER: Self::Header = Header::Reduction;
 }

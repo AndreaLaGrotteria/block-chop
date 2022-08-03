@@ -45,7 +45,7 @@ impl Client {
         let sender = Arc::new(sender);
 
         let mut sequence = 0..=0;
-        let height_record = None;
+        let mut height_record = None;
 
         loop {
             // Wait for the next message to broadcast
@@ -71,7 +71,7 @@ impl Client {
 
             // React to `Response`s until `message` is delivered
 
-            let record = loop {
+            let delivery_record = loop {
                 let (source, response) = receiver.receive().await;
 
                 let response =
@@ -115,11 +115,17 @@ impl Client {
 
                         // Verify that `raise` is justified by `height_record`
 
-                        if raise > height_record.height() {
-                            continue;
-                        }
+                        let height = if let Some(height_record) = height_record {
+                            if height_record.verify(&membership).is_err() {
+                                continue;
+                            }
 
-                        if height_record.verify(&membership).is_err() {
+                            height_record.height()
+                        } else {
+                            0 // No `Height` record is necessary for height 0
+                        };
+
+                        if raise > height {
                             continue;
                         }
 
@@ -178,13 +184,14 @@ impl Client {
                 }
             };
 
-            // Shift `sequence`
+            // Shift `sequence`, upgrade `height_record`
 
             sequence = (sequence.end() + 1)..=(sequence.end() + 1);
+            height_record = Some(delivery_record.height());
 
             // Send `record` back the invoking `broadcast` method
 
-            let _ = delivery_inlet.send(record);
+            let _ = delivery_inlet.send(delivery_record);
         }
     }
 }

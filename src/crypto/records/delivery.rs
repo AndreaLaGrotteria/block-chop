@@ -1,6 +1,6 @@
 use crate::{
     broadcast::Entry,
-    crypto::{statements::BatchDelivery, Certificate},
+    crypto::{records::Height, statements::BatchDelivery, Certificate},
     system::Membership,
 };
 
@@ -48,6 +48,10 @@ impl Delivery {
 
     pub fn entry(&self) -> &Entry {
         &self.entry
+    }
+
+    pub(crate) fn height(&self) -> Height {
+        Height::new(self.height, self.root, self.certificate.clone())
     }
 
     pub fn verify(&self, membership: &Membership) -> Result<(), Top<DeliveryError>> {
