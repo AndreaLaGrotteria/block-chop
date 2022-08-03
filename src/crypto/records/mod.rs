@@ -1,5 +1,6 @@
 mod delivery;
 mod height;
 
-pub(crate) use delivery::Delivery;
+pub use delivery::{Delivery, DeliveryError};
+
 pub(crate) use height::Height;

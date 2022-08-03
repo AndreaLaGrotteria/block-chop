@@ -13,7 +13,7 @@ use talk::crypto::primitives::hash::Hash;
 use zebra::vector::Proof;
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct Delivery {
+pub struct Delivery {
     height: u64,
     root: Hash,
     certificate: Certificate,
@@ -22,7 +22,7 @@ pub(crate) struct Delivery {
 }
 
 #[derive(Doom)]
-pub(crate) enum DeliveryError {
+pub enum DeliveryError {
     #[doom(description("Certificate invalid"))]
     CertificateInvalid,
     #[doom(description("Inclusion proof invalud"))]
@@ -30,7 +30,7 @@ pub(crate) enum DeliveryError {
 }
 
 impl Delivery {
-    pub fn new(
+    pub(crate) fn new(
         height: u64,
         root: Hash,
         certificate: Certificate,
