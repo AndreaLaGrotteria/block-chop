@@ -2,11 +2,15 @@ use crate::{
     broadcast::{Entry, Message},
     broker::{Request, Response},
     client::Client,
-    crypto::{records::Height as HeightRecord, statements::Broadcast as BroadcastStatement},
+    crypto::{
+        records::Height as HeightRecord,
+        statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
+    },
     Membership,
 };
 
 use std::{
+    cmp,
     net::SocketAddr,
     sync::{Arc, Mutex as StdMutex},
     time::Duration,
@@ -43,7 +47,7 @@ impl Client {
         let (sender, mut receiver) = dispatcher.split();
         let sender = Arc::new(sender);
 
-        let sequence = 0..=0;
+        let mut sequence = 0..=0;
         let height_record = None;
 
         loop {
@@ -99,7 +103,7 @@ impl Client {
                         let entry = Entry {
                             id,
                             message,
-                            sequence: *sequence.start(),
+                            sequence: raise,
                         };
 
                         if proof.verify(root, &entry).is_err() {
@@ -112,7 +116,7 @@ impl Client {
                             continue;
                         }
 
-                        // Verify that `raise` is justified
+                        // Verify that `raise` is justified by `height_record`
 
                         if raise > height_record.height() {
                             continue;
@@ -121,6 +125,15 @@ impl Client {
                         if height_record.verify(&membership).is_err() {
                             continue;
                         }
+
+                        // Extend `sequence`
+
+                        sequence = (*sequence.start())..=(cmp::max(*sequence.end(), raise));
+
+                        // Multi-sign `Reduction` statement
+
+                        let statement = ReductionStatement { root };
+                        let _signature = keychain.multisign(&statement).unwrap();
                     }
                 }
             }
