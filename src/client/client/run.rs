@@ -1,8 +1,9 @@
 use crate::{
-    broadcast::Message,
-    broker::Request,
+    broadcast::{Entry, Message},
+    broker::{Request, Response},
     client::Client,
     crypto::{records::Height as HeightRecord, statements::Broadcast as BroadcastStatement},
+    Membership,
 };
 
 use std::{
@@ -25,6 +26,7 @@ impl Client {
     pub(in crate::client::client) async fn run(
         id: u64,
         keychain: KeyChain,
+        membership: Membership,
         brokers: Arc<StdMutex<Vec<SocketAddr>>>,
         mut broadcast_outlet: BroadcastOutlet,
     ) {
@@ -38,7 +40,7 @@ impl Client {
         .await
         .unwrap(); // TODO: Determine if this error should be handled
 
-        let (sender, _receiver) = dispatcher.split();
+        let (sender, mut receiver) = dispatcher.split();
         let sender = Arc::new(sender);
 
         let sequence = 0..=0;
@@ -66,7 +68,62 @@ impl Client {
                 height_record.clone(),
             ));
 
-            todo!();
+            // React to `Response`s until `message` is delivered
+
+            loop {
+                let (_source, bytes) = receiver.receive().await;
+
+                let response =
+                    if let Ok(response) = bincode::deserialize::<Response>(bytes.as_slice()) {
+                        response
+                    } else {
+                        continue;
+                    };
+
+                match response {
+                    Response::Inclusion {
+                        id: rid,
+                        root,
+                        proof,
+                        raise,
+                        height_record,
+                    } => {
+                        // Verify that the `Response` concerns the local `Client`
+
+                        if rid != id {
+                            continue;
+                        }
+
+                        // Verify that `message` is included in `root`
+
+                        let entry = Entry {
+                            id,
+                            message,
+                            sequence: *sequence.start(),
+                        };
+
+                        if proof.verify(root, &entry).is_err() {
+                            continue;
+                        }
+
+                        // Verify that `raise` does not rewind `sequence`
+
+                        if raise < *sequence.start() {
+                            continue;
+                        }
+
+                        // Verify that `raise` is justified
+
+                        if raise > height_record.height() {
+                            continue;
+                        }
+
+                        if height_record.verify(&membership).is_err() {
+                            continue;
+                        }
+                    }
+                }
+            }
         }
     }
 
