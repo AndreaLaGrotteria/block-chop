@@ -2,10 +2,7 @@ use crate::{
     broadcast::{Entry, Message},
     broker::{Request, Response},
     client::Client,
-    crypto::{
-        records::{Delivery as DeliveryRecord, Height as HeightRecord},
-        statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
-    },
+    crypto::{records::Delivery as DeliveryRecord, statements::Reduction as ReductionStatement},
     Membership,
 };
 
@@ -13,19 +10,15 @@ use std::{
     cmp,
     net::SocketAddr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use talk::{
     crypto::KeyChain,
-    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender},
+    net::{DatagramDispatcher, DatagramDispatcherSettings},
     sync::fuse::Fuse,
 };
 
-use tokio::{
-    sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender},
-    time,
-};
+use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
 
 type BroadcastOutlet = MpscReceiver<(Message, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<DeliveryRecord>;
@@ -192,55 +185,6 @@ impl Client {
             // Send `record` back the invoking `broadcast` method
 
             let _ = delivery_inlet.send(record);
-        }
-    }
-
-    async fn request(
-        id: u64,
-        keychain: KeyChain,
-        brokers: Arc<Mutex<Vec<SocketAddr>>>,
-        sender: Arc<DatagramSender>,
-        sequence: u64,
-        message: Message,
-        height_record: Option<HeightRecord>,
-    ) {
-        // Build request
-
-        let statement = BroadcastStatement { sequence, message };
-        let signature = keychain.sign(&statement).unwrap();
-
-        let entry = Entry {
-            id,
-            sequence,
-            message,
-        };
-
-        let request = Request::Broadcast {
-            entry,
-            signature,
-            height_record,
-        };
-
-        let request = bincode::serialize(&request).unwrap();
-
-        for index in 0.. {
-            // Fetch next broker
-
-            let broker = loop {
-                if let Some(broker) = brokers.lock().unwrap().get(index).cloned() {
-                    break broker;
-                }
-
-                time::sleep(Duration::from_secs(1)).await;
-            };
-
-            // Send request to `broker`
-
-            sender.send(broker, request.clone()).await;
-
-            // Wait for timeout
-
-            time::sleep(Duration::from_secs(20)).await; // TODO: Add setting
         }
     }
 }
