@@ -102,8 +102,8 @@ impl Client {
 
                         let entry = Entry {
                             id,
-                            message,
                             sequence: raise,
+                            message,
                         };
 
                         if proof.verify(root, &entry).is_err() {
@@ -165,10 +165,14 @@ impl Client {
         let statement = BroadcastStatement { sequence, message };
         let signature = keychain.sign(&statement).unwrap();
 
-        let request = Request::Broadcast {
+        let entry = Entry {
             id,
-            message,
             sequence,
+            message,
+        };
+
+        let request = Request::Broadcast {
+            entry,
             signature,
             height_record,
         };

@@ -1,4 +1,4 @@
-use crate::{broadcast::Message, crypto::records::Height as HeightRecord};
+use crate::{broadcast::Entry, crypto::records::Height as HeightRecord};
 
 use serde::{Deserialize, Serialize};
 
@@ -7,9 +7,7 @@ use talk::crypto::primitives::{hash::Hash, multi::Signature as MultiSignature, s
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Request {
     Broadcast {
-        id: u64,
-        message: Message,
-        sequence: u64,
+        entry: Entry,
         signature: Signature,
         height_record: Option<HeightRecord>,
     },
