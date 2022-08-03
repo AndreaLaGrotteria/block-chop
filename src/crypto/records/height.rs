@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use crate::{
     crypto::{statements::BatchDelivery, Certificate},
     system::Membership,
@@ -8,6 +6,8 @@ use crate::{
 use doomstack::{here, Doom, ResultExt, Top};
 
 use serde::{Deserialize, Serialize};
+
+use std::cmp::Ordering;
 
 use talk::crypto::primitives::hash::Hash;
 
