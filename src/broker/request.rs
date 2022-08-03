@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
-use talk::crypto::primitives::sign::Signature;
-
 use crate::{broadcast::Message, crypto::records::Height as HeightRecord};
+
+use serde::{Deserialize, Serialize};
+
+use talk::crypto::primitives::sign::Signature;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Request {
