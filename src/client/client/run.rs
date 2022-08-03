@@ -75,10 +75,10 @@ impl Client {
             // React to `Response`s until `message` is delivered
 
             loop {
-                let (_source, bytes) = receiver.receive().await;
+                let (source, response) = receiver.receive().await;
 
                 let response =
-                    if let Ok(response) = bincode::deserialize::<Response>(bytes.as_slice()) {
+                    if let Ok(response) = bincode::deserialize::<Response>(response.as_slice()) {
                         response
                     } else {
                         continue;
@@ -133,7 +133,18 @@ impl Client {
                         // Multi-sign `Reduction` statement
 
                         let statement = ReductionStatement { root };
-                        let _signature = keychain.multisign(&statement).unwrap();
+                        let multisignature = keychain.multisign(&statement).unwrap();
+
+                        // Send `Reduction` back to `source`
+
+                        let request = Request::Reduction {
+                            root,
+                            id,
+                            multisignature,
+                        };
+
+                        let request = bincode::serialize(&request).unwrap();
+                        sender.send(source, request).await;
                     }
                 }
             }
