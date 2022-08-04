@@ -1,5 +1,10 @@
 use crate::{
     broker::{Broker, Request},
+    crypto::statements::{
+        Broadcast as BroadcastStatement,
+        BroadcastAuthentication as BroadcastAuthenticationStatement,
+        ReductionAuthentication as ReductionAuthenticationStatement,
+    },
     system::Directory,
 };
 
@@ -42,13 +47,74 @@ impl Broker {
                     signature,
                     height_record,
                     authentication,
-                } => {}
+                } => {
+                    // Fetch `KeyCard` from `directory`
+
+                    let keycard = if let Some(keycard) = directory.get(entry.id) {
+                        keycard
+                    } else {
+                        continue;
+                    };
+
+                    // Verify `signature`
+
+                    let broadcast_statement = BroadcastStatement {
+                        sequence: &entry.sequence,
+                        message: &entry.message,
+                    };
+
+                    if signature.verify(keycard, &broadcast_statement).is_err() {
+                        continue;
+                    }
+
+                    // Verify `authentication`
+
+                    if let Some(height_record) = height_record {
+                        let authentication = if let Some(authentication) = authentication {
+                            authentication
+                        } else {
+                            continue;
+                        };
+
+                        let authentication_statement =
+                            BroadcastAuthenticationStatement { height_record };
+
+                        if authentication
+                            .verify(keycard, &authentication_statement)
+                            .is_err()
+                        {
+                            continue;
+                        }
+                    }
+                }
                 Request::Reduction {
                     root,
                     id,
                     multisignature,
                     authentication,
-                } => {}
+                } => {
+                    // Fetch `KeyCard` from `directory`
+
+                    let keycard = if let Some(keycard) = directory.get(*id) {
+                        keycard
+                    } else {
+                        continue;
+                    };
+
+                    // Verify `authentication`
+
+                    let authentication_statement = ReductionAuthenticationStatement {
+                        root,
+                        multisignature,
+                    };
+
+                    if authentication
+                        .verify(keycard, &authentication_statement)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                }
             }
 
             // Send `request` over to `handle` task
