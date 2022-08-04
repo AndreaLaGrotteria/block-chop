@@ -8,12 +8,29 @@ use crate::{
     system::Directory,
 };
 
+use doomstack::{here, Doom, ResultExt, Top};
+
 use std::{net::SocketAddr, sync::Arc};
 
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 
 type DatagramOutlet = MpscReceiver<(SocketAddr, Vec<u8>)>;
 type RequestInlet = MpscSender<(SocketAddr, Request)>;
+
+#[derive(Doom)]
+enum FilterError {
+    #[doom(description("Failed to deserialize request: {:?}", source))]
+    #[doom(wrap(deserialize_failed))]
+    DeserializeFailed { source: bincode::Error },
+    #[doom(description("Id unknown"))]
+    IdUnknown,
+    #[doom(description("Invalid signature"))]
+    InvalidSignature,
+    #[doom(description("Missing authentication"))]
+    MissingAuthentication,
+    #[doom(description("Invalid authentication"))]
+    InvalidAuthentication,
+}
 
 impl Broker {
     pub(in crate::broker::broker) async fn process(
@@ -22,8 +39,6 @@ impl Broker {
         request_inlet: RequestInlet,
     ) {
         loop {
-            // Get next `Request`
-
             let (source, request) = if let Some(datagram) = datagram_outlet.recv().await {
                 datagram
             } else {
@@ -31,96 +46,89 @@ impl Broker {
                 return;
             };
 
-            // Deserialize `request`
+            if let Ok(request) = Broker::filter(directory.as_ref(), request) {
+                // This fails only if the `Broker` is shutting down
+                let _ = request_inlet.send((source, request)).await;
+            }
+        }
+    }
 
-            let request = if let Ok(request) = bincode::deserialize(request.as_slice()) {
-                request
-            } else {
-                continue;
-            };
+    fn filter(directory: &Directory, request: Vec<u8>) -> Result<Request, Top<FilterError>> {
+        // Deserialize `request`
 
-            // Verify `request`'s signatures
+        let request = bincode::deserialize(request.as_slice())
+            .map_err(FilterError::deserialize_failed)
+            .map_err(FilterError::into_top)
+            .spot(here!())?;
 
-            match &request {
-                Request::Broadcast {
-                    entry,
-                    signature,
-                    height_record,
-                    authentication,
-                } => {
-                    // Fetch `KeyCard` from `directory`
+        // Verify `request`'s signatures
 
-                    let keycard = if let Some(keycard) = directory.get(entry.id) {
-                        keycard
-                    } else {
-                        continue;
-                    };
+        match &request {
+            Request::Broadcast {
+                entry,
+                signature,
+                height_record,
+                authentication,
+            } => {
+                // Fetch `KeyCard` from `directory`
 
-                    // Verify `signature`
+                let keycard = directory
+                    .get(entry.id)
+                    .ok_or(FilterError::IdUnknown.into_top())
+                    .spot(here!())?;
 
-                    let broadcast_statement = BroadcastStatement {
-                        sequence: &entry.sequence,
-                        message: &entry.message,
-                    };
+                // Verify `signature`
 
-                    if signature.verify(keycard, &broadcast_statement).is_err() {
-                        continue;
-                    }
+                let broadcast_statement = BroadcastStatement {
+                    sequence: &entry.sequence,
+                    message: &entry.message,
+                };
 
-                    // Verify `authentication`
+                signature
+                    .verify(keycard, &broadcast_statement)
+                    .pot(FilterError::InvalidSignature, here!())?;
 
-                    if let Some(height_record) = height_record {
-                        let authentication = if let Some(authentication) = authentication {
-                            authentication
-                        } else {
-                            continue;
-                        };
+                // Verify `authentication`
 
-                        let authentication_statement =
-                            BroadcastAuthenticationStatement { height_record };
+                if let Some(height_record) = height_record {
+                    let authentication = authentication
+                        .ok_or(FilterError::MissingAuthentication.into_top())
+                        .spot(here!())?;
 
-                        if authentication
-                            .verify(keycard, &authentication_statement)
-                            .is_err()
-                        {
-                            continue;
-                        }
-                    }
-                }
-                Request::Reduction {
-                    root,
-                    id,
-                    multisignature,
-                    authentication,
-                } => {
-                    // Fetch `KeyCard` from `directory`
+                    let authentication_statement =
+                        BroadcastAuthenticationStatement { height_record };
 
-                    let keycard = if let Some(keycard) = directory.get(*id) {
-                        keycard
-                    } else {
-                        continue;
-                    };
-
-                    // Verify `authentication`
-
-                    let authentication_statement = ReductionAuthenticationStatement {
-                        root,
-                        multisignature,
-                    };
-
-                    if authentication
+                    authentication
                         .verify(keycard, &authentication_statement)
-                        .is_err()
-                    {
-                        continue;
-                    }
+                        .pot(FilterError::InvalidAuthentication, here!())?;
                 }
             }
+            Request::Reduction {
+                root,
+                id,
+                multisignature,
+                authentication,
+            } => {
+                // Fetch `KeyCard` from `directory`
 
-            // Send `request` over to `handle` task
+                let keycard = directory
+                    .get(*id)
+                    .ok_or(FilterError::IdUnknown.into_top())
+                    .spot(here!())?;
 
-            // This fails only if the `Broker` is shutting down
-            let _ = request_inlet.send((source, request)).await;
+                // Verify `authentication`
+
+                let authentication_statement = ReductionAuthenticationStatement {
+                    root,
+                    multisignature,
+                };
+
+                authentication
+                    .verify(keycard, &authentication_statement)
+                    .pot(FilterError::InvalidAuthentication, here!())?;
+            }
         }
+
+        Ok(request)
     }
 }
