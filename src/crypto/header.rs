@@ -5,9 +5,10 @@ pub(crate) enum Header {
     // Client-issued statements
     Broadcast = 0,
     Reduction = 1,
-    ReductionAuthentication = 2,
+    BroadcastAuthentication = 2,
+    ReductionAuthentication = 3,
 
     // Server-issued statements
-    BatchWitness = 3,
-    BatchDelivery = 4,
+    BatchWitness = 4,
+    BatchDelivery = 5,
 }
