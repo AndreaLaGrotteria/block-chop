@@ -56,8 +56,8 @@ impl Delivery {
 
     pub fn verify(&self, membership: &Membership) -> Result<(), Top<DeliveryError>> {
         let statement = BatchDelivery {
-            height: self.height,
-            root: self.root,
+            height: &self.height,
+            root: &self.root,
         };
 
         self.certificate

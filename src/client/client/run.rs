@@ -141,12 +141,12 @@ impl Client {
 
                         // Multi-sign and authenticate `Reduction` statement
 
-                        let reduction_statement = ReductionStatement { root };
+                        let reduction_statement = ReductionStatement { root: &root };
                         let multisignature = keychain.multisign(&reduction_statement).unwrap();
 
                         let authentication_statement = ReductionAuthenticationStatement {
-                            root,
-                            multisignature,
+                            root: &root,
+                            multisignature: &multisignature,
                         };
 
                         let authentication = keychain.sign(&authentication_statement).unwrap();

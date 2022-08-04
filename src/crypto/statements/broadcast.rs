@@ -5,12 +5,12 @@ use serde::Serialize;
 use talk::crypto::Statement;
 
 #[derive(Serialize)]
-pub(crate) struct Broadcast {
-    pub sequence: u64,
-    pub message: Message,
+pub(crate) struct Broadcast<'a> {
+    pub sequence: &'a u64,
+    pub message: &'a Message,
 }
 
-impl Statement for Broadcast {
+impl<'a> Statement for Broadcast<'a> {
     type Header = Header;
     const HEADER: Self::Header = Header::Broadcast;
 }

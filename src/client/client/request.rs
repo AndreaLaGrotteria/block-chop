@@ -27,7 +27,11 @@ impl Client {
     ) {
         // Build request
 
-        let statement = BroadcastStatement { sequence, message };
+        let statement = BroadcastStatement {
+            sequence: &sequence,
+            message: &message,
+        };
+
         let signature = keychain.sign(&statement).unwrap();
 
         let entry = Entry {

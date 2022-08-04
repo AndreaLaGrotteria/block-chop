@@ -8,12 +8,12 @@ use talk::crypto::{
 };
 
 #[derive(Serialize)]
-pub(crate) struct ReductionAuthentication {
-    pub root: Hash,
-    pub multisignature: MultiSignature,
+pub(crate) struct ReductionAuthentication<'a> {
+    pub root: &'a Hash,
+    pub multisignature: &'a MultiSignature,
 }
 
-impl Statement for ReductionAuthentication {
+impl<'a> Statement for ReductionAuthentication<'a> {
     type Header = Header;
     const HEADER: Self::Header = Header::ReductionAuthentication;
 }
