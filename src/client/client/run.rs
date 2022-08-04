@@ -41,7 +41,7 @@ impl Client {
             "0.0.0.0:0",
             DatagramDispatcherSettings {
                 workers: 1,
-                ..Default::default()
+                ..Default::default() // TODO: Forward settings?
             },
         )
         .await
