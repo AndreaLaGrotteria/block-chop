@@ -2,7 +2,13 @@ use crate::{
     broadcast::{Entry, Message},
     broker::{Request, Response},
     client::Client,
-    crypto::{records::Delivery as DeliveryRecord, statements::Reduction as ReductionStatement},
+    crypto::{
+        records::Delivery as DeliveryRecord,
+        statements::{
+            Reduction as ReductionStatement,
+            ReductionAuthentication as ReductionAuthenticationStatement,
+        },
+    },
     Membership,
 };
 
@@ -133,10 +139,17 @@ impl Client {
 
                         sequence = (*sequence.start())..=(cmp::max(*sequence.end(), raise));
 
-                        // Multi-sign `Reduction` statement
+                        // Multi-sign and authenticate `Reduction` statement
 
-                        let statement = ReductionStatement { root };
-                        let multisignature = keychain.multisign(&statement).unwrap();
+                        let reduction_statement = ReductionStatement { root };
+                        let multisignature = keychain.multisign(&reduction_statement).unwrap();
+
+                        let authentication_statement = ReductionAuthenticationStatement {
+                            root,
+                            multisignature,
+                        };
+
+                        let authentication = keychain.sign(&authentication_statement).unwrap();
 
                         // Send `Reduction` back to `source`
 
@@ -144,6 +157,7 @@ impl Client {
                             root,
                             id,
                             multisignature,
+                            authentication,
                         };
 
                         let request = bincode::serialize(&request).unwrap();

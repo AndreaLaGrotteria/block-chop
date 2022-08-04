@@ -15,5 +15,6 @@ pub(crate) enum Request {
         root: Hash,
         id: u64,
         multisignature: MultiSignature,
+        authentication: Signature,
     },
 }
