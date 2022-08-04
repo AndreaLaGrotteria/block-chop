@@ -41,6 +41,7 @@ impl Broker {
                     entry,
                     signature,
                     height_record,
+                    authentication,
                 } => {}
                 Request::Reduction {
                     root,

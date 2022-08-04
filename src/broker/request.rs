@@ -10,6 +10,7 @@ pub(crate) enum Request {
         entry: Entry,
         signature: Signature,
         height_record: Option<HeightRecord>,
+        authentication: Option<Signature>,
     },
     Reduction {
         root: Hash,

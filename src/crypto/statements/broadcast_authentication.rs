@@ -6,7 +6,7 @@ use talk::crypto::Statement;
 
 #[derive(Serialize)]
 pub(crate) struct BroadcastAuthentication<'a> {
-    height_record: &'a HeightRecord,
+    pub height_record: &'a HeightRecord,
 }
 
 impl<'a> Statement for BroadcastAuthentication<'a> {

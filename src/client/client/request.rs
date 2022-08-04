@@ -2,7 +2,13 @@ use crate::{
     broadcast::{Entry, Message},
     broker::Request,
     client::Client,
-    crypto::{records::Height as HeightRecord, statements::Broadcast as BroadcastStatement},
+    crypto::{
+        records::Height as HeightRecord,
+        statements::{
+            Broadcast as BroadcastStatement,
+            BroadcastAuthentication as BroadcastAuthenticationStatement,
+        },
+    },
 };
 
 use std::{
@@ -27,23 +33,29 @@ impl Client {
     ) {
         // Build request
 
-        let statement = BroadcastStatement {
-            sequence: &sequence,
-            message: &message,
-        };
-
-        let signature = keychain.sign(&statement).unwrap();
-
         let entry = Entry {
             id,
             sequence,
             message,
         };
 
+        let broadcast_statement = BroadcastStatement {
+            sequence: &entry.sequence,
+            message: &entry.message,
+        };
+
+        let signature = keychain.sign(&broadcast_statement).unwrap();
+
+        let authentication = height_record.as_ref().map(|height_record| {
+            let authentication_statement = BroadcastAuthenticationStatement { height_record };
+            keychain.sign(&authentication_statement).unwrap()
+        });
+
         let request = Request::Broadcast {
             entry,
             signature,
             height_record,
+            authentication,
         };
 
         let request = bincode::serialize(&request).unwrap();
