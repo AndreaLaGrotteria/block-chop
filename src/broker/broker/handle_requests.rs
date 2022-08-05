@@ -1,6 +1,6 @@
 use crate::{
     broadcast::Entry,
-    broker::{Broker, Request, Response, Submission},
+    broker::{Broker, Reduction, Request, Response, Submission},
     crypto::records::Height as HeightRecord,
     system::{Directory, Membership},
 };
@@ -48,7 +48,7 @@ impl Broker {
         let mut next_flush = None;
         let mut pool = HashMap::new();
 
-        let (reduction_inlet, _) = broadcast::channel(1024); // TODO: Add Settings
+        let (reduction_inlet, _) = broadcast::channel(65536); // TODO: Add Settings
 
         let fuse = Fuse::new();
 
@@ -79,7 +79,20 @@ impl Broker {
                                 next_flush.or(Some(Instant::now() + Duration::from_secs(1)));
                         }
                     }
-                    Request::Reduction { .. } => todo!(),
+                    Request::Reduction {
+                        root,
+                        id,
+                        multisignature,
+                        ..
+                    } => {
+                        let reduction = Reduction {
+                            root,
+                            id,
+                            multisignature,
+                        };
+
+                        let _ = reduction_inlet.send(reduction);
+                    }
                 }
             }
 
