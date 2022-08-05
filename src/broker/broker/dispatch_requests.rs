@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender as MpscSender;
 type DatagramInlet = MpscSender<(SocketAddr, Vec<u8>)>;
 
 impl Broker {
-    pub(in crate::broker::broker) async fn dispatch(
+    pub(in crate::broker::broker) async fn dispatch_requests(
         mut receiver: DatagramReceiver,
         datagram_inlets: Vec<DatagramInlet>,
     ) {

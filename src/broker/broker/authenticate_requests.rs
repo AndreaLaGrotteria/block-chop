@@ -33,7 +33,7 @@ enum FilterError {
 }
 
 impl Broker {
-    pub(in crate::broker::broker) async fn process(
+    pub(in crate::broker::broker) async fn authenticate_requests(
         directory: Arc<Directory>,
         mut datagram_outlet: DatagramOutlet,
         request_inlet: RequestInlet,

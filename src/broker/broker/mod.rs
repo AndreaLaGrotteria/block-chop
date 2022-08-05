@@ -58,16 +58,16 @@ impl Broker {
             let (datagram_inlet, datagram_outlet) = mpsc::channel(1024); // TODO: Add settings
             datagram_inlets.push(datagram_inlet);
 
-            fuse.spawn(Broker::process(
+            fuse.spawn(Broker::authenticate_requests(
                 directory.clone(),
                 datagram_outlet,
                 request_inlet.clone(),
             ));
         }
 
-        fuse.spawn(Broker::dispatch(receiver, datagram_inlets));
+        fuse.spawn(Broker::dispatch_requests(receiver, datagram_inlets));
 
-        fuse.spawn(Broker::handle(
+        fuse.spawn(Broker::handle_requests(
             membership.clone(),
             directory.clone(),
             request_outlet,
@@ -79,6 +79,6 @@ impl Broker {
     }
 }
 
-mod dispatch;
-mod handle;
-mod process;
+mod authenticate_requests;
+mod dispatch_requests;
+mod handle_requests;
