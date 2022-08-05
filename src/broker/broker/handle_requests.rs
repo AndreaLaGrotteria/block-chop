@@ -9,6 +9,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 
 use std::{
     collections::HashMap,
+    mem,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -17,9 +18,13 @@ use std::{
 use talk::{
     crypto::primitives::sign::Signature,
     net::{DatagramSender, SessionConnector},
+    sync::fuse::Fuse,
 };
 
-use tokio::{sync::mpsc::Receiver as MpscReceiver, time};
+use tokio::{
+    sync::{broadcast, mpsc::Receiver as MpscReceiver},
+    time,
+};
 
 type RequestOutlet = MpscReceiver<(SocketAddr, Request)>;
 
@@ -34,15 +39,18 @@ enum FilterError {
 impl Broker {
     pub(in crate::broker::broker) async fn handle_requests(
         membership: Arc<Membership>,
-        _directory: Arc<Directory>,
+        directory: Arc<Directory>,
         mut handle_outlet: RequestOutlet,
-        _sender: Arc<DatagramSender<Response>>,
-        _connector: Arc<SessionConnector>,
+        sender: Arc<DatagramSender<Response>>,
+        connector: Arc<SessionConnector>,
     ) {
         let mut top_record = None;
         let mut next_flush = None;
-
         let mut pool = HashMap::new();
+
+        let (reduction_inlet, _) = broadcast::channel(1024); // TODO: Add Settings
+
+        let fuse = Fuse::new();
 
         loop {
             if let Some((source, request)) = tokio::select! {
@@ -80,7 +88,14 @@ impl Broker {
             {
                 next_flush = None;
 
-                todo!() // Flush `pool`
+                fuse.spawn(Broker::manage_batch(
+                    membership.clone(),
+                    directory.clone(),
+                    mem::take(&mut pool),
+                    reduction_inlet.subscribe(),
+                    sender.clone(),
+                    connector.clone(),
+                ));
             }
         }
     }

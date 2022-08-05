@@ -82,3 +82,4 @@ impl Broker {
 mod authenticate_requests;
 mod dispatch_requests;
 mod handle_requests;
+mod manage_batch;
