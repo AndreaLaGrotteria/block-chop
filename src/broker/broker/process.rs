@@ -46,14 +46,14 @@ impl Broker {
                 return;
             };
 
-            if let Ok(request) = Broker::filter(directory.as_ref(), request) {
+            if let Ok(request) = Broker::filter_request(directory.as_ref(), request) {
                 // This fails only if the `Broker` is shutting down
                 let _ = request_inlet.send((source, request)).await;
             }
         }
     }
 
-    fn filter(directory: &Directory, request: Vec<u8>) -> Result<Request, Top<FilterError>> {
+    fn filter_request(directory: &Directory, request: Vec<u8>) -> Result<Request, Top<FilterError>> {
         // Deserialize `request`
 
         let request = bincode::deserialize(request.as_slice())
