@@ -53,7 +53,10 @@ impl Broker {
         }
     }
 
-    fn filter_request(directory: &Directory, request: Vec<u8>) -> Result<Request, Top<FilterError>> {
+    fn filter_request(
+        directory: &Directory,
+        request: Vec<u8>,
+    ) -> Result<Request, Top<FilterError>> {
         // Deserialize `request`
 
         let request = bincode::deserialize(request.as_slice())
