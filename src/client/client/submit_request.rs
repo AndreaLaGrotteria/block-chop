@@ -26,7 +26,7 @@ impl Client {
         id: u64,
         keychain: KeyChain,
         brokers: Arc<Mutex<Vec<SocketAddr>>>,
-        sender: Arc<DatagramSender>,
+        sender: Arc<DatagramSender<Request>>,
         sequence: u64,
         message: Message,
         height_record: Option<HeightRecord>,
@@ -57,8 +57,6 @@ impl Client {
             height_record,
             authentication,
         };
-
-        let request = bincode::serialize(&request).unwrap();
 
         for index in 0.. {
             // Fetch next broker

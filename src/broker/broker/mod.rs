@@ -50,27 +50,27 @@ impl Broker {
 
         let fuse = Fuse::new();
 
-        let mut datagram_inlets = Vec::new();
-        let (request_inlet, request_outlet) = mpsc::channel(1024); // TODO: Add settings
+        let mut authenticate_inlets = Vec::new();
+        let (handle_inlet, handle_outlet) = mpsc::channel(1024); // TODO: Add settings
 
         // TODO: Add settings
         for _ in 0..32 {
-            let (datagram_inlet, datagram_outlet) = mpsc::channel(1024); // TODO: Add settings
-            datagram_inlets.push(datagram_inlet);
+            let (authenticate_inlet, authenticate_outlet) = mpsc::channel(1024); // TODO: Add settings
+            authenticate_inlets.push(authenticate_inlet);
 
             fuse.spawn(Broker::authenticate_requests(
                 directory.clone(),
-                datagram_outlet,
-                request_inlet.clone(),
+                authenticate_outlet,
+                handle_inlet.clone(),
             ));
         }
 
-        fuse.spawn(Broker::dispatch_requests(receiver, datagram_inlets));
+        fuse.spawn(Broker::dispatch_requests(receiver, authenticate_inlets));
 
         fuse.spawn(Broker::handle_requests(
             membership.clone(),
             directory.clone(),
-            request_outlet,
+            handle_outlet,
             sender,
             connector,
         ));

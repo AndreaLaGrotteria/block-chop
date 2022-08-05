@@ -1,5 +1,5 @@
 use crate::{
-    broker::{Broker, Request},
+    broker::{Broker, Request, Response},
     system::{Directory, Membership},
 };
 
@@ -15,8 +15,8 @@ impl Broker {
     pub(in crate::broker::broker) async fn handle_requests(
         _membership: Arc<Membership>,
         _directory: Arc<Directory>,
-        _request_outlet: RequestOutlet,
-        _sender: Arc<DatagramSender>,
+        _handle_outlet: RequestOutlet,
+        _sender: Arc<DatagramSender<Response>>,
         _connector: Arc<SessionConnector>,
     ) {
     }

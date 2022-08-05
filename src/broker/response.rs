@@ -6,7 +6,7 @@ use talk::crypto::primitives::hash::Hash;
 
 use zebra::vector::Proof;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Response {
     Inclusion {
         id: u64,

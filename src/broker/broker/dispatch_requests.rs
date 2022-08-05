@@ -1,4 +1,4 @@
-use crate::broker::Broker;
+use crate::broker::{Broker, Request};
 
 use std::net::SocketAddr;
 
@@ -6,12 +6,12 @@ use talk::net::DatagramReceiver;
 
 use tokio::sync::mpsc::Sender as MpscSender;
 
-type DatagramInlet = MpscSender<(SocketAddr, Vec<u8>)>;
+type RequestInlet = MpscSender<(SocketAddr, Request)>;
 
 impl Broker {
     pub(in crate::broker::broker) async fn dispatch_requests(
-        mut receiver: DatagramReceiver,
-        datagram_inlets: Vec<DatagramInlet>,
+        mut receiver: DatagramReceiver<Request>,
+        authenticate_inlets: Vec<RequestInlet>,
     ) {
         let mut robin = 0;
 
@@ -19,8 +19,8 @@ impl Broker {
             let datagram = receiver.receive().await;
 
             // This fails only if the `Broker` is shutting down
-            let _ = datagram_inlets
-                .get(robin % datagram_inlets.len())
+            let _ = authenticate_inlets
+                .get(robin % authenticate_inlets.len())
                 .unwrap()
                 .send(datagram);
 

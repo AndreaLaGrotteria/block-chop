@@ -34,9 +34,6 @@ type DeliveryInlet = OneshotSender<DeliveryRecord>;
 
 #[derive(Doom)]
 enum HandleError {
-    #[doom(description("Failed to deserialize response: {:?}", source))]
-    #[doom(wrap(deserialize_failed))]
-    DeserializeFailed { source: bincode::Error },
     #[doom(description("Misdirected response"))]
     MisdirectedResponse,
     #[doom(description("Invalid proof of inclusion"))]
@@ -138,14 +135,9 @@ impl Client {
         sequence_range: &mut RangeInclusive<u64>,
         message: Message,
         source: SocketAddr,
-        response: Vec<u8>,
-        sender: &DatagramSender,
+        response: Response,
+        sender: &DatagramSender<Request>,
     ) -> Result<Option<DeliveryRecord>, Top<HandleError>> {
-        let response = bincode::deserialize(response.as_slice())
-            .map_err(HandleError::deserialize_failed)
-            .map_err(HandleError::into_top)
-            .spot(here!())?;
-
         match response {
             Response::Inclusion {
                 id: rid,
@@ -220,7 +212,6 @@ impl Client {
                     authentication,
                 };
 
-                let request = bincode::serialize(&request).unwrap();
                 sender.send(source, request).await;
 
                 Ok(None)

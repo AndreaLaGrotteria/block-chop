@@ -14,14 +14,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 
-type DatagramOutlet = MpscReceiver<(SocketAddr, Vec<u8>)>;
 type RequestInlet = MpscSender<(SocketAddr, Request)>;
+type RequestOutlet = MpscReceiver<(SocketAddr, Request)>;
 
 #[derive(Doom)]
 enum FilterError {
-    #[doom(description("Failed to deserialize request: {:?}", source))]
-    #[doom(wrap(deserialize_failed))]
-    DeserializeFailed { source: bincode::Error },
     #[doom(description("Id unknown"))]
     IdUnknown,
     #[doom(description("Invalid signature"))]
@@ -35,11 +32,11 @@ enum FilterError {
 impl Broker {
     pub(in crate::broker::broker) async fn authenticate_requests(
         directory: Arc<Directory>,
-        mut datagram_outlet: DatagramOutlet,
-        request_inlet: RequestInlet,
+        mut authenticate_outlet: RequestOutlet,
+        handle_inlet: RequestInlet,
     ) {
         loop {
-            let (source, request) = if let Some(datagram) = datagram_outlet.recv().await {
+            let (source, request) = if let Some(datagram) = authenticate_outlet.recv().await {
                 datagram
             } else {
                 // `Broker` has dropped, shutdown
@@ -48,24 +45,15 @@ impl Broker {
 
             if let Ok(request) = Broker::filter_request(directory.as_ref(), request) {
                 // This fails only if the `Broker` is shutting down
-                let _ = request_inlet.send((source, request)).await;
+                let _ = handle_inlet.send((source, request)).await;
             }
         }
     }
 
     fn filter_request(
         directory: &Directory,
-        request: Vec<u8>,
+        request: Request,
     ) -> Result<Request, Top<FilterError>> {
-        // Deserialize `request`
-
-        let request = bincode::deserialize(request.as_slice())
-            .map_err(FilterError::deserialize_failed)
-            .map_err(FilterError::into_top)
-            .spot(here!())?;
-
-        // Verify `request`'s signatures
-
         match &request {
             Request::Broadcast {
                 entry,

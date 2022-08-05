@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use talk::crypto::primitives::{hash::Hash, multi::Signature as MultiSignature, sign::Signature};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Request {
     Broadcast {
         entry: Entry,
