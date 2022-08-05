@@ -104,7 +104,7 @@ impl Client {
             let delivery_record = loop {
                 let (source, response) = receiver.receive().await;
 
-                if let Ok(Some(delivery_record)) = Client::handle(
+                if let Ok(Some(delivery_record)) = Client::handle_response(
                     id,
                     &keychain,
                     &membership,
@@ -131,7 +131,7 @@ impl Client {
         }
     }
 
-    async fn handle(
+    async fn handle_response(
         id: u64,
         keychain: &KeyChain,
         membership: &Membership,
