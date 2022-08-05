@@ -22,7 +22,7 @@ use talk::{crypto::KeyChain, net::DatagramSender};
 use tokio::time;
 
 impl Client {
-    pub(in crate::client::client) async fn request(
+    pub(in crate::client::client) async fn submit_request(
         id: u64,
         keychain: KeyChain,
         brokers: Arc<Mutex<Vec<SocketAddr>>>,

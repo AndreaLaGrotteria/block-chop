@@ -89,7 +89,7 @@ impl Client {
 
             let fuse = Fuse::new();
 
-            fuse.spawn(Client::request(
+            fuse.spawn(Client::submit_request(
                 id,
                 keychain.clone(),
                 brokers.clone(),
