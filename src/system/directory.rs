@@ -4,6 +4,7 @@ use std::path::Path;
 
 use talk::crypto::KeyCard;
 
+#[derive(Clone)]
 pub struct Directory {
     keycards: Vec<Option<KeyCard>>,
 }

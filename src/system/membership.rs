@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use talk::crypto::{Identity, KeyCard};
 
+#[derive(Clone)]
 pub struct Membership {
     servers: BTreeMap<Identity, KeyCard>,
 }

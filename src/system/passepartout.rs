@@ -6,6 +6,7 @@ use std::path::Path;
 
 use talk::crypto::{Identity, KeyChain};
 
+#[derive(Clone)]
 pub struct Passepartout {
     database: Db,
 }
