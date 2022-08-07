@@ -154,11 +154,11 @@ impl Client {
 
                 // Verify that `message` is included in `root`
 
-                let entry = Entry {
+                let entry = Some(Entry {
                     id,
                     sequence: raise,
                     message,
-                };
+                });
 
                 proof
                     .verify(root, &entry)
