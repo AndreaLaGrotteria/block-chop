@@ -15,10 +15,11 @@ impl Broker {
     pub(in crate::broker::broker) async fn manage_batch(
         _membership: Arc<Membership>,
         _directory: Arc<Directory>,
-        _pool: HashMap<u64, Submission>,
+        pool: HashMap<u64, Submission>,
         _reduction_outlet: ReductionOutlet,
-        _sender: Arc<DatagramSender<Response>>,
+        sender: Arc<DatagramSender<Response>>,
         _connector: Arc<SessionConnector>,
     ) {
+        let batch = Broker::setup_batch(pool, sender.as_ref()).await;
     }
 }
