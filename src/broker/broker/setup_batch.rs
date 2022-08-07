@@ -18,7 +18,7 @@ use zebra::vector::Vector;
 impl Broker {
     pub(in crate::broker::broker) async fn setup_batch(
         pool: HashMap<u64, Submission>,
-        height_record: Option<HeightRecord>,
+        top_record: Option<HeightRecord>,
         sender: &DatagramSender<Response>,
     ) -> Batch {
         // Build `Batch` fields
@@ -58,7 +58,7 @@ impl Broker {
                     root: entries.root(),
                     proof: entries.prove(index),
                     raise,
-                    height_record: height_record.clone(),
+                    top_record: top_record.clone(),
                 };
 
                 (address, inclusion)

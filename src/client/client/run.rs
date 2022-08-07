@@ -144,7 +144,7 @@ impl Client {
                 root,
                 proof,
                 raise,
-                height_record,
+                top_record: height_record,
             } => {
                 // Verify that the `Response` concerns the local `Client`
 

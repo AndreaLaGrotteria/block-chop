@@ -1,8 +1,15 @@
+#[allow(dead_code)]
 mod batch;
+
 mod broker;
+
+#[allow(dead_code)]
 mod reduction;
+
 mod request;
 mod response;
+
+#[allow(dead_code)]
 mod submission;
 
 pub use broker::Broker;

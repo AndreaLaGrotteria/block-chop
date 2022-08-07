@@ -13,7 +13,7 @@ pub(crate) enum Response {
         root: Hash,
         proof: Proof,
         raise: u64,
-        height_record: Option<HeightRecord>,
+        top_record: Option<HeightRecord>,
     },
     Delivery {
         height: u64,
