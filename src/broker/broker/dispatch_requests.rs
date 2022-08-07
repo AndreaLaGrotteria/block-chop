@@ -22,7 +22,8 @@ impl Broker {
             let _ = authenticate_inlets
                 .get(robin % authenticate_inlets.len())
                 .unwrap()
-                .send(datagram);
+                .send(datagram)
+                .await;
 
             robin += 1;
         }
