@@ -105,6 +105,7 @@ impl Broker {
                     membership.clone(),
                     directory.clone(),
                     mem::take(&mut pool),
+                    top_record.clone(),
                     reduction_inlet.subscribe(),
                     sender.clone(),
                     connector.clone(),

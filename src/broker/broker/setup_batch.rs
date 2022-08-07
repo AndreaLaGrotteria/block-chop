@@ -1,6 +1,7 @@
 use crate::{
     broadcast::Entry,
     broker::{Batch, BatchStatus, Broker, Response, Submission},
+    crypto::records::Height as HeightRecord,
 };
 
 use rayon::{
@@ -17,9 +18,10 @@ use zebra::vector::Vector;
 impl Broker {
     pub(in crate::broker::broker) async fn setup_batch(
         pool: HashMap<u64, Submission>,
+        height_record: Option<HeightRecord>,
         sender: &DatagramSender<Response>,
     ) -> Batch {
-        // Build `Batch`
+        // Build `Batch` fields
 
         let mut submissions = pool.into_values().collect::<Vec<_>>();
         submissions.par_sort_unstable_by_key(|submission| submission.entry.id);
@@ -43,17 +45,35 @@ impl Broker {
 
         let entries = Vector::new(entries).unwrap();
 
-        let batch = Batch {
+        // Disseminate proofs of inclusion
+
+        let inclusions = submissions
+            .iter()
+            .enumerate()
+            .map(|(index, submission)| {
+                let address = submission.address;
+
+                let inclusion = Response::Inclusion {
+                    id: submission.entry.id,
+                    root: entries.root(),
+                    proof: entries.prove(index),
+                    raise,
+                    height_record: height_record.clone(),
+                };
+
+                (address, inclusion)
+            })
+            .collect::<Vec<_>>();
+
+        sender.pace(inclusions, 65536.).await; // TODO: Add settings
+
+        // Assemble and return `Batch`
+
+        Batch {
             status: BatchStatus::Reducing,
             submissions,
             raise,
             entries,
-        };
-
-        // TODO: Disseminate proofs of inclusion
-
-        todo!();
-
-        batch
+        }
     }
 }
