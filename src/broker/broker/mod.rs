@@ -83,4 +83,5 @@ mod authenticate_requests;
 mod dispatch_requests;
 mod handle_requests;
 mod manage_batch;
+mod reduce_batch;
 mod setup_batch;
