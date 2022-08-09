@@ -79,19 +79,19 @@ impl Client {
         loop {
             // Wait for the next message to broadcast
 
-            info!("[client] Waiting for next message to broadcast..");
+            info!("Waiting for next message to broadcast..");
 
             let (message, delivery_inlet) = match broadcast_outlet.recv().await {
                 Some(broadcast) => broadcast,
                 None => return, // `Client` has dropped, shutdown
             };
 
-            info!("[client] Broadcasting a new message.");
-            debug!("[client] Message to broadcast: {:?}", message);
+            info!("Broadcasting a new message.");
+            debug!("Message to broadcast: {:?}", message);
 
             // Spawn requesting task
 
-            info!("[client] Spawning requesting task.");
+            info!("Spawning requesting task.");
 
             let fuse = Fuse::new();
 
@@ -110,7 +110,7 @@ impl Client {
             let delivery_record = loop {
                 let (source, response) = receiver.receive().await;
 
-                debug!("[client] Received new datagram.");
+                debug!("Received new datagram.");
 
                 if let Ok(Some(delivery_record)) = Client::handle_response(
                     id,
@@ -157,7 +157,7 @@ impl Client {
                 raise,
                 top_record: height_record,
             } => {
-                info!("[client] Handling inclusion.");
+                info!("Handling inclusion.");
 
                 // Verify that the `Response` concerns the local `Client`
 
@@ -199,7 +199,7 @@ impl Client {
                     return HandleError::UnjustifiedRaise.fail().spot(here!());
                 }
 
-                info!("[client] All inclusion checks successfully completed.");
+                info!("All inclusion checks successfully completed.");
 
                 // Extend `sequence_range`
 
@@ -220,7 +220,7 @@ impl Client {
 
                 // Send `Reduction` back to `source`
 
-                info!("[client] Sending reduction.");
+                info!("Sending reduction.");
 
                 let request = Request::Reduction {
                     root,
@@ -241,7 +241,7 @@ impl Client {
                 sequence,
                 proof,
             } => {
-                info!("[client] Handling delivery.");
+                info!("Handling delivery.");
 
                 // Verify that the delivered sequence is within the current sequence range
 
@@ -263,7 +263,7 @@ impl Client {
                     return HandleError::InvalidDeliveryRecord.fail().spot(here!());
                 }
 
-                info!("[client] All delivery checks completed successfully.");
+                info!("All delivery checks completed successfully.");
 
                 // Message delivered!
 

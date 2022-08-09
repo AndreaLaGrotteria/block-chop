@@ -73,7 +73,7 @@ impl Broker {
                         height_record,
                         ..
                     } => {
-                        info!("[broker] Handling broadcast request.");
+                        info!("Handling broadcast request.");
 
                         if let Ok(submission) = Broker::filter_broadcast(
                             membership.as_ref(),
@@ -96,7 +96,7 @@ impl Broker {
                         multisignature,
                         ..
                     } => {
-                        info!("[broker] Forwarding reduction request.");
+                        info!("Forwarding reduction request.");
 
                         let reduction = Reduction {
                             root,
@@ -112,7 +112,7 @@ impl Broker {
             if pool.len() >= 65536 // TODO: Add settings
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
-                info!("[broker] Flushing pool into a batch.");
+                info!("Flushing pool into a batch.");
 
                 next_flush = None;
 
@@ -159,7 +159,7 @@ impl Broker {
             return FilterError::UnjustifiedHeight.fail().spot(here!())?;
         }
 
-        info!("[broker] All broadcast checks completed successfully.");
+        info!("All broadcast checks completed successfully.");
 
         Ok(Submission {
             address: source,
