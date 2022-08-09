@@ -7,6 +7,8 @@ use crate::{
 
 use doomstack::{here, Doom, ResultExt, Top};
 
+use log::info;
+
 use std::{
     collections::HashMap,
     mem,
@@ -71,6 +73,8 @@ impl Broker {
                         height_record,
                         ..
                     } => {
+                        info!("[broker] Handling broadcast request.");
+
                         if let Ok(submission) = Broker::filter_broadcast(
                             membership.as_ref(),
                             &mut top_record,
@@ -92,6 +96,8 @@ impl Broker {
                         multisignature,
                         ..
                     } => {
+                        info!("[broker] Forwarding reduction request.");
+
                         let reduction = Reduction {
                             root,
                             id,
@@ -106,6 +112,8 @@ impl Broker {
             if pool.len() >= 65536 // TODO: Add settings
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
+                info!("[broker] Flushing pool into a batch.");
+
                 next_flush = None;
 
                 fuse.spawn(Broker::manage_batch(
@@ -150,6 +158,8 @@ impl Broker {
         if entry.sequence > top {
             return FilterError::UnjustifiedHeight.fail().spot(here!())?;
         }
+
+        info!("[broker] All broadcast checks completed successfully.");
 
         Ok(Submission {
             address: source,
