@@ -30,7 +30,7 @@ impl Broker {
             .par_iter()
             .map(|submission| submission.entry.sequence)
             .max()
-            .unwrap();
+            .unwrap(); // `submissions` is always non-empty
 
         let entries = submissions
             .par_iter()

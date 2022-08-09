@@ -91,7 +91,7 @@ impl Broker {
             }
         }
 
-        // Aggregate correct reductions into `batch`-wide multisignature, add
+        // Aggregate correct reductions into `batch`-wide `MultiSignature`, add
         // to `stragglers` those Byzantine clients that reduced incorrectly.
         // (Accountability measures will be put in place).
 
@@ -104,65 +104,89 @@ impl Broker {
         stragglers.append(&mut byzantine);
 
         // TODO: Update `batch`, build `CompressedBatch`
+        todo!()
     }
 
     fn aggregate_reductions(
         root: Hash,
         reducers: &[Reducer],
     ) -> (Option<MultiSignature>, Vec<Straggler>) {
-        let aggregation = MultiSignature::aggregate(
-            reducers
-                .iter()
-                .map(|reducer| reducer.multisignature)
-                .cloned(),
-        )
-        .ok();
+        // Aggregate `MultiSignature`s
+
+        let multisignatures = reducers
+            .iter()
+            .map(|reducer| reducer.multisignature)
+            .cloned();
+
+        let aggregation = MultiSignature::aggregate(multisignatures).ok(); // If `aggregate` fails, at least one `multisignature` is malformed
+
+        // Verify `aggregation` against `ReductionStatement`
 
         let statement = ReductionStatement { root: &root };
+        let keycards = reducers.iter().map(|reducer| reducer.keycard);
 
-        let aggregation = aggregation.filter(|aggregation| {
-            aggregation
-                .verify(reducers.iter().map(|reducer| reducer.keycard), &statement)
-                .is_ok()
-        });
+        let aggregation =
+            aggregation.filter(|aggregation| aggregation.verify(keycards, &statement).is_ok());
 
-        if let Some(aggregation) = aggregation {
-            (Some(aggregation), Vec::new())
+        // Return `aggregation` or recurd
+
+        if aggregation.is_some() {
+            // Successfully verified and aggregated: no Byzantine in `reducers`
+            (aggregation, Vec::new())
         } else {
-            if reducers.len() == 1 {
-                let reducer = reducers.first().unwrap();
+            // Failed to verify or aggregate: at least one Byzantine in `reducers`
+            Broker::split_reductions(root, reducers)
+        }
+    }
 
-                let straggler = Straggler {
-                    id: reducer.entry.id,
-                    sequence: reducer.entry.sequence,
-                    signature: *reducer.signature,
-                };
+    fn split_reductions(
+        root: Hash,
+        reducers: &[Reducer],
+    ) -> (Option<MultiSignature>, Vec<Straggler>) {
+        if reducers.len() == 1 {
+            // Terminating case: the only `Reducer` is necessarily Byzantine
 
-                (None, vec![straggler])
-            } else {
-                let mid = reducers.len() / 2;
-                let (left, right) = reducers.split_at(mid);
+            let reducer = reducers.first().unwrap();
 
-                let (left_aggregation, mut left_stragglers) =
-                    Broker::aggregate_reductions(root, left);
+            let straggler = Straggler {
+                id: reducer.entry.id,
+                sequence: reducer.entry.sequence,
+                signature: *reducer.signature,
+            };
 
-                let (right_aggregation, mut right_stragglers) =
-                    Broker::aggregate_reductions(root, right);
+            (None, vec![straggler])
+        } else {
+            // Recurring case: find Byzantine(s) by splitting `reducers` in half
 
-                let aggregation = match (left_aggregation, right_aggregation) {
-                    (Some(left_aggregation), Some(right_aggregation)) => {
-                        MultiSignature::aggregate([left_aggregation, right_aggregation]).ok()
-                    }
-                    (Some(left_aggregation), None) => Some(left_aggregation),
-                    (None, Some(right_aggregation)) => Some(right_aggregation),
-                    (None, None) => None,
-                };
+            let mid = reducers.len() / 2; // Guaranteed: `reducers.len() >= 2` ..
+            let (left, right) = reducers.split_at(mid); // .. so both `left` and `right` are non-empty
 
-                left_stragglers.append(&mut right_stragglers);
-                let stragglers = left_stragglers;
+            // Recur on `left` and `right`
 
-                (aggregation, stragglers)
-            }
+            let (left_aggregation, mut left_stragglers) = Broker::aggregate_reductions(root, left);
+
+            let (right_aggregation, mut right_stragglers) =
+                Broker::aggregate_reductions(root, right);
+
+            // Aggregate `left_aggregation` and `right_aggregation`
+
+            let aggregation = match (left_aggregation, right_aggregation) {
+                (Some(left_aggregation), Some(right_aggregation)) => {
+                    // This is guaranteed to work
+                    MultiSignature::aggregate([left_aggregation, right_aggregation]).ok()
+                }
+                (Some(left_aggregation), None) => Some(left_aggregation),
+                (None, Some(right_aggregation)) => Some(right_aggregation),
+                (None, None) => None,
+            };
+
+            // Merge `left_stragglers` and `right_stragglers`
+
+            let mut stragglers = Vec::new();
+            stragglers.append(&mut left_stragglers);
+            stragglers.append(&mut right_stragglers);
+
+            (aggregation, stragglers)
         }
     }
 }
