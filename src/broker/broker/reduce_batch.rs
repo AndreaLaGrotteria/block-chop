@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{Entry, Straggler},
+    broadcast::{CompressedBatch, Entry, Straggler},
     broker::{Batch, BatchStatus, Broker, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     system::Directory,
@@ -13,6 +13,8 @@ use talk::crypto::{
 };
 
 use tokio::{sync::broadcast::Receiver as BroadcastReceiver, time};
+
+use varcram::VarCram;
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
 
@@ -28,7 +30,7 @@ impl Broker {
         directory: &Directory,
         batch: &mut Batch,
         mut reduction_outlet: ReductionOutlet,
-    ) {
+    ) -> CompressedBatch {
         // Receive `Reduction`s until timeout
 
         let start = Instant::now();
@@ -40,8 +42,16 @@ impl Broker {
                     if reduction.is_ok() {
                         reduction.ok()
                     } else {
-                        // `Broker` has dropped, shutdown
-                        return;
+                        // `Broker` has dropped, which means that this task will soon
+                        // be shut down by the `handle_requests`' `Fuse`. Just wait
+                        // indefinitely for that to happen. Note: `return`ing is not
+                        // feasible here: the function would have to return an `Option`,
+                        // which would force a counter-intuitive `unwrap()` on the caller
+                        // side, making code more bloated and less understandable.
+
+                        loop {
+                            time::sleep(Duration::from_secs(1)).await;
+                        }
                     }
                 }
                 _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
@@ -123,8 +133,26 @@ impl Broker {
                 .unwrap();
         }
 
-        // TODO: Build `CompressedBatch`
-        todo!()
+        // Return `CompressedBatch`
+
+        let mut ids = Vec::with_capacity(batch.submissions.len());
+        let mut messages = Vec::with_capacity(batch.submissions.len());
+
+        for submission in batch.submissions.iter() {
+            ids.push(submission.entry.id);
+            messages.push(submission.entry.message.clone());
+        }
+
+        let ids = VarCram::cram(ids.as_slice());
+        let raise = batch.raise;
+
+        CompressedBatch {
+            ids,
+            messages,
+            raise,
+            multisignature,
+            stragglers,
+        }
     }
 
     fn aggregate_reductions(

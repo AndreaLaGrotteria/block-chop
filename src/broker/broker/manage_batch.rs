@@ -23,6 +23,8 @@ impl Broker {
         _connector: Arc<SessionConnector>,
     ) {
         let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
-        Broker::reduce_batch(directory.as_ref(), &mut batch, reduction_outlet).await;
+
+        let _compressed_batch =
+            Broker::reduce_batch(directory.as_ref(), &mut batch, reduction_outlet).await;
     }
 }
