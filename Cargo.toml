@@ -34,4 +34,5 @@ bit-vec = { version = "0.6", features = ["serde"] }
 sled = { version = "0.34.7" }
 
 lapp = { version = "0.4.0" }
+log = { version = "0.4.17" }
 env_logger = { version = "0.9.0" }
