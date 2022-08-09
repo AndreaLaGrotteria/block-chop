@@ -27,6 +27,11 @@ struct Reducer<'a> {
     multisignature: &'a MultiSignature,
 }
 
+struct AggregationNode {
+    multisignature: Option<MultiSignature>,
+    children: Option<(Box<AggregationNode>, Box<AggregationNode>)>,
+}
+
 impl Broker {
     pub(in crate::broker::broker) async fn reduce_batch(
         directory: &Directory,
@@ -117,8 +122,14 @@ impl Broker {
         // to `stragglers` those Byzantine clients that reduced incorrectly.
         // (Accountability measures will be put in place).
 
+        let aggregation_root = Broker::aggregation_tree(reducers.as_slice(), 32); // TODO: Add settings
+
         let (multisignature, mut byzantine) = if reducers.len() > 0 {
-            Broker::aggregate_reductions(batch.entries.root(), reducers.as_slice())
+            Broker::aggregate_reductions(
+                batch.entries.root(),
+                reducers.as_slice(),
+                Some(aggregation_root),
+            )
         } else {
             (None, Vec::new())
         };
@@ -177,18 +188,57 @@ impl Broker {
         }
     }
 
+    fn aggregation_tree(reducers: &[Reducer], chunk: usize) -> AggregationNode {
+        if reducers.len() > chunk {
+            let mid = reducers.len() / 2;
+            let (left, right) = reducers.split_at(mid);
+
+            let (left_node, right_node) = rayon::join(
+                || Broker::aggregation_tree(left, chunk),
+                || Broker::aggregation_tree(right, chunk),
+            );
+
+            let multisignature = match (&left_node.multisignature, &right_node.multisignature) {
+                (Some(left_multisignature), Some(right_multisignature)) => {
+                    MultiSignature::aggregate([*left_multisignature, *right_multisignature]).ok()
+                }
+                _ => None,
+            };
+
+            AggregationNode {
+                multisignature,
+                children: Some((Box::new(left_node), Box::new(right_node))),
+            }
+        } else {
+            AggregationNode {
+                multisignature: MultiSignature::aggregate(
+                    reducers
+                        .iter()
+                        .map(|reducer| reducer.multisignature)
+                        .copied(),
+                )
+                .ok(),
+                children: None,
+            }
+        }
+    }
+
     fn aggregate_reductions(
         root: Hash,
         reducers: &[Reducer],
+        aggregation_node: Option<AggregationNode>,
     ) -> (Option<MultiSignature>, Vec<Straggler>) {
         // Aggregate `MultiSignature`s
 
         let multisignatures = reducers
             .iter()
             .map(|reducer| reducer.multisignature)
-            .cloned();
+            .copied();
 
-        let aggregation = MultiSignature::aggregate(multisignatures).ok(); // If `aggregate` fails, at least one `multisignature` is malformed
+        let (aggregation, aggregation_children) = match aggregation_node {
+            Some(aggregation_node) => (aggregation_node.multisignature, aggregation_node.children),
+            None => (MultiSignature::aggregate(multisignatures).ok(), None), // If `aggregate` fails, at least one `multisignature` is malformed
+        };
 
         // Verify `aggregation` against `ReductionStatement`
 
@@ -205,13 +255,14 @@ impl Broker {
             (aggregation, Vec::new())
         } else {
             // Failed to verify or aggregate: at least one Byzantine in `reducers`
-            Broker::split_reductions(root, reducers)
+            Broker::split_reductions(root, reducers, aggregation_children)
         }
     }
 
     fn split_reductions(
         root: Hash,
         reducers: &[Reducer],
+        aggregation_children: Option<(Box<AggregationNode>, Box<AggregationNode>)>,
     ) -> (Option<MultiSignature>, Vec<Straggler>) {
         if reducers.len() == 1 {
             // Terminating case: the only `Reducer` is necessarily Byzantine
@@ -233,10 +284,16 @@ impl Broker {
 
             // Recur on `left` and `right`
 
-            let (left_aggregation, mut left_stragglers) = Broker::aggregate_reductions(root, left);
+            let (left_child, right_child) = match aggregation_children {
+                Some((left_child, right_child)) => (Some(*left_child), Some(*right_child)),
+                None => (None, None),
+            };
+
+            let (left_aggregation, mut left_stragglers) =
+                Broker::aggregate_reductions(root, left, left_child);
 
             let (right_aggregation, mut right_stragglers) =
-                Broker::aggregate_reductions(root, right);
+                Broker::aggregate_reductions(root, right, right_child);
 
             // Aggregate `left_aggregation` and `right_aggregation`
 
