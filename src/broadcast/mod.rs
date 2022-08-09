@@ -1,6 +1,10 @@
+#[allow(dead_code)]
 mod compressed_batch;
+
 mod entry;
 mod message;
+
+#[allow(dead_code)]
 mod straggler;
 
 pub use entry::Entry;
