@@ -8,6 +8,6 @@ pub(crate) struct CompressedBatch {
     pub ids: VarCram,
     pub messages: Vec<Message>,
     pub raise: u64,
-    pub multisignature: MultiSignature,
+    pub multisignature: Option<MultiSignature>,
     pub stragglers: Vec<Straggler>,
 }
