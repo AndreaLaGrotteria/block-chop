@@ -54,7 +54,14 @@ impl Broker {
 
         loop {
             if let Some((source, request)) = tokio::select! {
-                request = handle_outlet.recv() => request, // If the channel is closed, the task will soon shutdown anyway
+                request = handle_outlet.recv() => {
+                    if request.is_some() {
+                        request
+                    } else {
+                        // `Broker` has dropped, shutdown
+                        return;
+                    }
+                }
                 _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
             } {
                 match request {

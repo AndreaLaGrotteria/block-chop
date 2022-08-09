@@ -33,7 +33,14 @@ impl Broker {
 
         loop {
             if let Some(reduction) = tokio::select! {
-                reduction = reduction_outlet.recv() => reduction.ok(), // If the channel is closed, the task will soon shutdown anyway, and unlikely lags are not a problem
+                reduction = reduction_outlet.recv() => {
+                    if reduction.is_ok() {
+                        reduction.ok()
+                    } else {
+                        // `Broker` has dropped, shutdown
+                        return;
+                    }
+                }
                 _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
             } {
                 if reduction.root != batch.entries.root() {
