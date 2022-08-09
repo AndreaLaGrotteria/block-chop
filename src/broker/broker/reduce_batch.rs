@@ -5,6 +5,8 @@ use crate::{
     system::Directory,
 };
 
+use log::{debug, info};
+
 use std::time::{Duration, Instant};
 
 use talk::crypto::{
@@ -31,6 +33,8 @@ impl Broker {
         batch: &mut Batch,
         mut reduction_outlet: ReductionOutlet,
     ) -> CompressedBatch {
+        info!("Reducing batch..");
+
         // Receive `Reduction`s until timeout
 
         let start = Instant::now();
@@ -58,11 +62,13 @@ impl Broker {
             } {
                 // Acquire `reduction` only if relevant to an existing `Submission` in `batch`
 
-                if reduction.root != batch.entries.root() {
+                if reduction.root == batch.entries.root() {
                     if let Ok(index) = batch
                         .submissions
                         .binary_search_by_key(&reduction.id, |submission| submission.entry.id)
                     {
+                        debug!("Received reduction for id {}.", reduction.id);
+
                         let submission = batch.submissions.get_mut(index).unwrap();
 
                         if submission.reduction.is_none() {
@@ -78,6 +84,12 @@ impl Broker {
                 break;
             }
         }
+
+        info!(
+            "Reductions collected ({} / {}).",
+            reduced,
+            batch.submissions.len()
+        );
 
         // Separate reducers from stragglers
 
@@ -111,6 +123,11 @@ impl Broker {
             (None, Vec::new())
         };
 
+        info!(
+            "Reductions aggregated ({} Byzantine clients detected).",
+            byzantine.len()
+        );
+
         stragglers.append(&mut byzantine);
 
         // Update `batch.status` and `batch.entries`
@@ -134,6 +151,11 @@ impl Broker {
         }
 
         // Return `CompressedBatch`
+
+        info!(
+            "Compressing batch ({} total stragglers)..",
+            stragglers.len()
+        );
 
         let mut ids = Vec::with_capacity(batch.submissions.len());
         let mut messages = Vec::with_capacity(batch.submissions.len());
