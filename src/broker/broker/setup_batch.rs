@@ -4,6 +4,8 @@ use crate::{
     crypto::records::Height as HeightRecord,
 };
 
+use log::info;
+
 use rayon::{
     iter::{IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -22,6 +24,8 @@ impl Broker {
         sender: &DatagramSender<Response>,
     ) -> Batch {
         // Build `Batch` fields
+
+        info!("Building batch..");
 
         let mut submissions = pool.into_values().collect::<Vec<_>>();
         submissions.par_sort_unstable_by_key(|submission| submission.entry.id);
@@ -46,6 +50,8 @@ impl Broker {
         let entries = Vector::new(entries).unwrap();
 
         // Disseminate proofs of inclusion
+
+        info!("Disseminating proofs of inclusion.");
 
         let inclusions = submissions
             .iter()
