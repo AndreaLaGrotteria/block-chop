@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, Straggler},
-    broker::{Batch, Broker, Reduction},
+    broker::{Batch, BatchStatus, Broker, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     system::Directory,
 };
@@ -103,7 +103,27 @@ impl Broker {
 
         stragglers.append(&mut byzantine);
 
-        // TODO: Update `batch`, build `CompressedBatch`
+        // Update `batch.status` and `batch.entries`
+
+        batch.status = BatchStatus::Witnessing;
+
+        stragglers.sort_unstable_by_key(|straggler| straggler.id);
+
+        for straggler in stragglers.iter() {
+            let index = batch
+                .submissions
+                .binary_search_by_key(&straggler.id, |submission| submission.entry.id)
+                .unwrap();
+
+            let submission = batch.submissions.get(index).unwrap();
+
+            batch
+                .entries
+                .set(index, Some(submission.entry.clone()))
+                .unwrap();
+        }
+
+        // TODO: Build `CompressedBatch`
         todo!()
     }
 
