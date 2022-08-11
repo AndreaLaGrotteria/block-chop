@@ -4,7 +4,7 @@ use crate::{broadcast::Entry, broker::Submission};
 
 pub(in crate::broker) enum BatchStatus {
     Reducing,
-    Witnessing,
+    Submitting,
     Delivered,
 }
 
