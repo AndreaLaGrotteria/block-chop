@@ -16,8 +16,8 @@ use talk::crypto::{primitives::sign::Signature, KeyCard};
 
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 
-type RequestInlet = MpscSender<(SocketAddr, Request)>;
 type BurstOutlet = MpscReceiver<Vec<(SocketAddr, Request)>>;
+type RequestInlet = MpscSender<(SocketAddr, Request)>;
 
 struct BurstItem<'a> {
     source: SocketAddr,
@@ -44,6 +44,8 @@ impl Broker {
         handle_inlet: RequestInlet,
     ) {
         loop {
+            // Receive next burst of `Request`s (from `dispatch_requests`)
+
             let burst = if let Some(burst) = authenticate_outlet.recv().await {
                 burst
             } else {
@@ -51,12 +53,21 @@ impl Broker {
                 return;
             };
 
+            // Remove from `burst` all `Request`s whose fields are trivially invalid
+            // (i.e., unknown id or missing authentication). To each `Request` attach
+            // a reference to the relevant `KeyCard`.
+
             let burst = burst
                 .into_iter()
                 .filter_map(|(source, request)| {
                     Broker::filter_fields(directory.as_ref(), source, request).ok()
                 })
                 .collect::<Vec<_>>();
+
+            // Remove from `brust` all `Request`s that are incorrectly authenticated.
+            // First, optimistically check if all `Request`s in `burst` are correctly
+            // authenticated (this enables `Signature::batch_verify`). If not, loop
+            // through each `Request` and filter out the incorrectly authenticated ones.
 
             let burst = if Broker::batch_authenticate(burst.iter()).is_ok() {
                 burst
@@ -66,6 +77,8 @@ impl Broker {
                     .filter_map(|item| Broker::filter_authentication(item).ok())
                     .collect::<Vec<_>>()
             };
+
+            // Forward all `Request`s in `burst` to `handle_requests`
 
             for item in burst {
                 let _ = handle_inlet.send((item.source, item.request)).await;
@@ -85,14 +98,14 @@ impl Broker {
                 authentication,
                 ..
             } => {
-                // Fetch `KeyCard` from `directory`
+                // Fetch relevant `KeyCard` from `directory`
 
                 let keycard = directory
                     .get(entry.id)
                     .ok_or(FilterError::IdUnknown.into_top())
                     .spot(here!())?;
 
-                // Verify that `height_record` is justified
+                // Verify that `height_record` is justified by `authentication`
 
                 if height_record.is_some() && authentication.is_none() {
                     return FilterError::MissingAuthentication.fail().spot(here!());
@@ -101,7 +114,7 @@ impl Broker {
                 keycard
             }
             Request::Reduction { id, .. } => {
-                // Fetch `KeyCard` from `directory`
+                // Fetch relevant `KeyCard` from `directory`
 
                 let keycard = directory
                     .get(*id)
@@ -123,17 +136,22 @@ impl Broker {
     where
         I: IntoIterator<Item = &'a BurstItem<'a>>,
     {
-        let mut broadcast_keycards = Vec::new();
-        let mut broadcast_statements = Vec::new();
-        let mut broadcast_signatures = Vec::new();
+        // Initialize buffers to `Signature::batch_verify` `BroadcastStatement`s,
+        // `BroadcastAuthenticationStatement`s and `ReductionAuthenticationStatement`s
 
-        let mut broadcast_authentication_keycards = Vec::new();
-        let mut broadcast_authentication_statements = Vec::new();
-        let mut broadcast_authentication_signatures = Vec::new();
+        let mut broadcast_keycards = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_statements = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_signatures = Vec::with_capacity(2000); // TODO: Add settings
 
-        let mut reduction_authentication_keycards = Vec::new();
-        let mut reduction_authentication_statements = Vec::new();
-        let mut reduction_authentication_signatures = Vec::new();
+        let mut broadcast_authentication_keycards = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_authentication_statements = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_authentication_signatures = Vec::with_capacity(2000); // TODO: Add settings
+
+        let mut reduction_authentication_keycards = Vec::with_capacity(2000); // TODO: Add settings
+        let mut reduction_authentication_statements = Vec::with_capacity(2000); // TODO: Add settings
+        let mut reduction_authentication_signatures = Vec::with_capacity(2000); // TODO: Add settings
+
+        // Fill `Signature::batch_verify` buffers
 
         for item in burst {
             match &item.request {
@@ -144,6 +162,8 @@ impl Broker {
                     authentication,
                     ..
                 } => {
+                    // `BroadcastStatement`
+
                     broadcast_keycards.push(item.keycard);
 
                     broadcast_statements.push(BroadcastStatement {
@@ -153,12 +173,15 @@ impl Broker {
 
                     broadcast_signatures.push(signature);
 
+                    // `BroadcastAuthenticationStatement` (optional)
+
                     if let Some(height_record) = height_record {
                         broadcast_authentication_keycards.push(item.keycard);
 
                         broadcast_authentication_statements
                             .push(BroadcastAuthenticationStatement { height_record });
 
+                        // We previously checked that `authentication` is `Some`
                         broadcast_authentication_signatures.push(authentication.as_ref().unwrap());
                     }
                 }
@@ -168,6 +191,8 @@ impl Broker {
                     authentication,
                     ..
                 } => {
+                    // `ReductionAuthenticationStatement`
+
                     reduction_authentication_keycards.push(item.keycard);
 
                     reduction_authentication_statements.push(ReductionAuthenticationStatement {
@@ -179,6 +204,9 @@ impl Broker {
                 }
             }
         }
+
+        // `Signature::batch_verify` all three types of statements.
+        // Return `Ok` only if all verifications are successful.
 
         Signature::batch_verify(
             broadcast_keycards,
@@ -205,6 +233,8 @@ impl Broker {
     }
 
     fn filter_authentication(item: BurstItem) -> Result<BurstItem, Top<FilterError>> {
+        // Individually verify the authentication of `item`
+
         match &item.request {
             Request::Broadcast {
                 entry,
@@ -213,6 +243,8 @@ impl Broker {
                 authentication,
                 ..
             } => {
+                // `BroadcastStatement`
+
                 let broadcast_statement = BroadcastStatement {
                     sequence: &entry.sequence,
                     message: &entry.message,
@@ -222,13 +254,15 @@ impl Broker {
                     .verify(item.keycard, &broadcast_statement)
                     .pot(FilterError::InvalidSignature, here!())?;
 
+                // `BroadcastAuthenticationStatement` (optional)
+
                 if let Some(height_record) = height_record {
                     let broadcast_authentication_statement =
                         BroadcastAuthenticationStatement { height_record };
 
                     authentication
                         .as_ref()
-                        .unwrap()
+                        .unwrap() // We previously checked that `authentication` is `Some`
                         .verify(item.keycard, &broadcast_authentication_statement)
                         .pot(FilterError::InvalidAuthentication, here!())?;
                 }
@@ -239,6 +273,8 @@ impl Broker {
                 authentication,
                 ..
             } => {
+                // `ReductionAuthenticationStatement`
+
                 let reduction_authentication_statement = ReductionAuthenticationStatement {
                     root,
                     multisignature,

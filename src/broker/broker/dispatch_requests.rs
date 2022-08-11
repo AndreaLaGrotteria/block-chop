@@ -19,10 +19,12 @@ impl Broker {
     ) {
         let mut robin = 0;
 
-        let mut burst_buffer = Vec::new();
-        let mut last_burst = Instant::now();
+        let mut burst_buffer = Vec::with_capacity(2000); // TODO: Add settings
+        let mut last_flush = Instant::now();
 
         loop {
+            // Receive next `Request` (with a timeout to ensure timely flushing)
+
             if let Some(datagram) = tokio::select! {
                 datagram = receiver.receive() => Some(datagram),
                 _ = time::sleep(Duration::from_millis(10)) => None
@@ -31,16 +33,21 @@ impl Broker {
             }
 
             // TODO: Add settings
-            if burst_buffer.len() >= 2000 || last_burst.elapsed() >= Duration::from_millis(100) {
+            if burst_buffer.len() >= 2000 || last_flush.elapsed() >= Duration::from_millis(100) {
+                // Flush `burst_buffer` into the next element of `authenticate_inlets`
+
+                let mut burst = Vec::with_capacity(2000); // Better performance than `mem::take`
+                mem::swap(&mut burst, &mut burst_buffer);
+
                 // This fails only if the `Broker` is shutting down
                 let _ = authenticate_inlets
                     .get(robin % authenticate_inlets.len())
                     .unwrap()
-                    .send(mem::take(&mut burst_buffer))
+                    .send(burst)
                     .await;
 
                 robin += 1;
-                last_burst = Instant::now();
+                last_flush = Instant::now();
             }
         }
     }
