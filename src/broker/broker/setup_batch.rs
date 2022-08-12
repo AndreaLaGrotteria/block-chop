@@ -49,6 +49,8 @@ impl Broker {
 
         let entries = Vector::new(entries).unwrap();
 
+        info!("Batch built with root {:#?}.", entries.root());
+
         // Disseminate proofs of inclusion
 
         info!("Disseminating proofs of inclusion.");

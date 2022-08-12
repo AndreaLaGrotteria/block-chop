@@ -5,6 +5,8 @@ use crate::{
     system::Directory,
 };
 
+use log::info;
+
 use rayon::slice::ParallelSliceMut;
 
 use std::{
@@ -64,6 +66,11 @@ impl Broker {
         //  - When all reductions are collected or the timeout expires, collect the
         //    aggregation and list of Byzantines from `Broker::stream_reduction`.
 
+        info!(
+            "Collecting reductions for root {:#?}..",
+            batch.entries.root(),
+        );
+
         let reduction_deadline = Instant::now() + Duration::from_secs(1); // TODO: Add settings
 
         let mut pending_reducers = batch
@@ -101,6 +108,12 @@ impl Broker {
                 // If this is the first reduction from this id, batch it in `burst_buffer`
 
                 if pending_reducers.remove(&reduction.id) {
+                    info!(
+                        "Received reduction for {:#?} from id {}.",
+                        batch.entries.root(),
+                        reduction.id,
+                    );
+
                     burst_buffer.push((reduction.id, reduction.multisignature));
 
                     // If `burst_buffer` is large enough, flush it to `Broker::stream_reduction`
@@ -134,6 +147,8 @@ impl Broker {
         let (multisignature, byzantines) = stream_reduction_task.await.unwrap().unwrap();
 
         // Collect and sort straggler ids (both late and Byzantine)
+
+        info!("Building compressed batch..");
 
         let mut straggler_ids = pending_reducers.into_iter().collect::<Vec<_>>();
         straggler_ids.extend(byzantines);
@@ -179,6 +194,13 @@ impl Broker {
         batch.status = BatchStatus::Submitting;
 
         // Assemble and return `CompressedBatch`
+
+        info!(
+            "Built compressed batch (root {:#?}, {} messages, {} stragglers).",
+            batch.entries.root(),
+            messages.len(),
+            stragglers.len(),
+        );
 
         CompressedBatch {
             ids,
