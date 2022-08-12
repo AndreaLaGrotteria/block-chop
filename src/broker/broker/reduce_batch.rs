@@ -5,6 +5,8 @@ use crate::{
     system::Directory,
 };
 
+use rayon::slice::ParallelSliceMut;
+
 use std::{
     collections::HashSet,
     mem,
@@ -12,7 +14,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rayon::slice::ParallelSliceMut;
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -28,12 +29,13 @@ use tokio::{
     },
     time,
 };
+
 use varcram::VarCram;
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
-type StreamReductionRequestOutlet = UnboundedMpscReceiver<StreamReductionRequest>;
+type StreamReductionCommandOutlet = UnboundedMpscReceiver<StreamReductionCommand>;
 
-enum StreamReductionRequest {
+enum StreamReductionCommand {
     Aggregate(Vec<(u64, MultiSignature)>),
     Terminate,
 }
@@ -44,15 +46,25 @@ impl Broker {
         batch: &mut Batch,
         mut reduction_outlet: ReductionOutlet,
     ) -> CompressedBatch {
-        let (stream_reduction_inlet, stream_reduction_outlet) = mpsc::unbounded_channel();
+        // Spawn the stream reduction task
+
+        let (command_inlet, command_outlet) = mpsc::unbounded_channel();
 
         let fuse = Fuse::new();
 
         let stream_reduction_task = fuse.spawn(Broker::stream_reduction(
             directory.clone(),
             batch.entries.root(),
-            stream_reduction_outlet,
+            command_outlet,
         ));
+
+        // Listen for reductions until all reductions are collected or the timeout expires:
+        //  - Organize reductions in bursts to send to `Broker::stream_reduction`.
+        //  - Send only one reduction per id.
+        //  - When all reductions are collected or the timeout expires, collect the
+        //    aggregation and list of Byzantines from `Broker::stream_reduction`.
+
+        let reduction_deadline = Instant::now() + Duration::from_secs(1); // TODO: Add settings
 
         let mut pending_reducers = batch
             .submissions
@@ -60,9 +72,7 @@ impl Broker {
             .map(|submission| submission.entry.id)
             .collect::<HashSet<_>>();
 
-        let mut stream_buffer = Vec::new();
-
-        let start = Instant::now();
+        let mut burst_buffer = Vec::with_capacity(512); // TODO: Add settings
 
         loop {
             if let Some(reduction) = tokio::select! {
@@ -82,38 +92,55 @@ impl Broker {
                 },
                 _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
             } {
+                // Filter out reductions for other batches
+
                 if reduction.root != batch.entries.root() {
                     continue;
                 }
 
-                if pending_reducers.remove(&reduction.id) {
-                    stream_buffer.push((reduction.id, reduction.multisignature));
+                // If this is the first reduction from this id, batch it in `burst_buffer`
 
-                    if stream_buffer.len() >= 512 {
-                        let _ = stream_reduction_inlet.send(StreamReductionRequest::Aggregate(
-                            mem::take(&mut stream_buffer),
-                        ));
+                if pending_reducers.remove(&reduction.id) {
+                    burst_buffer.push((reduction.id, reduction.multisignature));
+
+                    // If `burst_buffer` is large enough, flush it to `Broker::stream_reduction`
+
+                    // TODO: Add settings
+                    if burst_buffer.len() >= 512 {
+                        // TODO: Add settings
+                        let mut burst = Vec::with_capacity(512); // Better performance than `mem:take`ing
+                        mem::swap(&mut burst, &mut burst_buffer);
+
+                        let _ = command_inlet.send(StreamReductionCommand::Aggregate(burst));
                     }
                 }
             };
 
-            // TODO: Add settings
-            if pending_reducers.is_empty() || start.elapsed() >= Duration::from_secs(1) {
+            if pending_reducers.is_empty() || Instant::now() >= reduction_deadline {
                 break;
             }
         }
 
-        if !stream_buffer.is_empty() {
-            let _ = stream_reduction_inlet.send(StreamReductionRequest::Aggregate(stream_buffer));
-            let _ = stream_reduction_inlet.send(StreamReductionRequest::Terminate);
+        // Flush reductions lingering in `burst_buffer` to `Broker::stream_reduction`,
+        // join `Broker::stream_reduction` to obtain aggregate multisignature and
+        // a list of (Byzantine) clients that reduced incorrectly.
+
+        if !burst_buffer.is_empty() {
+            let _ = command_inlet.send(StreamReductionCommand::Aggregate(burst_buffer));
         }
 
+        let _ = command_inlet.send(StreamReductionCommand::Terminate);
+
         let (multisignature, byzantines) = stream_reduction_task.await.unwrap().unwrap();
+
+        // Collect and sort straggler ids (both late and Byzantine)
 
         let mut straggler_ids = pending_reducers.into_iter().collect::<Vec<_>>();
         straggler_ids.extend(byzantines);
 
         straggler_ids.par_sort_unstable();
+
+        // Build `CompressedBatch` fields and update `batch.entries` to account for stragglers
 
         let mut straggler_ids = straggler_ids.into_iter().peekable();
 
@@ -125,8 +152,13 @@ impl Broker {
             ids.push(submission.entry.id);
             messages.push(submission.entry.message.clone());
 
+            // Note that both `straggler_ids` and `batch.subimssions[..].entry.id` are sorted
             if straggler_ids.peek() == Some(&submission.entry.id) {
                 straggler_ids.next().unwrap();
+
+                // If `submission` is from a straggler, add appropriate `Straggler`
+                // to `stragglers` and update `batch.entries` with the originally
+                // submitted sequence number.
 
                 stragglers.push(Straggler {
                     id: submission.entry.id,
@@ -146,6 +178,8 @@ impl Broker {
 
         batch.status = BatchStatus::Submitting;
 
+        // Assemble and return `CompressedBatch`
+
         CompressedBatch {
             ids,
             messages,
@@ -158,30 +192,40 @@ impl Broker {
     async fn stream_reduction(
         directory: Arc<Directory>,
         root: Hash,
-        mut stream_reduction_outlet: StreamReductionRequestOutlet,
+        mut command_outlet: StreamReductionCommandOutlet,
     ) -> (Option<MultiSignature>, Vec<u64>) {
+        let statement = ReductionStatement { root: &root };
+
         let mut aggregation = None;
         let mut exceptions = Vec::new();
 
         loop {
-            let request = if let Some(request) = stream_reduction_outlet.recv().await {
-                request
+            // Receive next `StreamReductionCommand`
+
+            let command = if let Some(command) = command_outlet.recv().await {
+                command
             } else {
                 // `Broker` has dropped, shutdown
-                return (aggregation, exceptions);
+                return (aggregation, exceptions); // Note: the returned values will never be read
             };
 
-            match request {
-                StreamReductionRequest::Aggregate(reductions) => {
-                    let statement = ReductionStatement { root: &root };
+            match command {
+                StreamReductionCommand::Aggregate(reductions) => {
+                    // Map ids to `KeyCard`s
 
                     let entries = reductions.iter().map(|(id, multisignature)| {
                         let keycard = directory.get(*id).unwrap();
                         (keycard, multisignature)
                     });
 
+                    // Aggregate `entries`
+
                     let (burst_aggregation, burst_exceptions) =
                         crypto_procedures::filter_aggregate(&statement, entries);
+
+                    // Aggregate `burst_aggregation` into the `aggregation` accumulator (note
+                    // that both are `Option<MultiSignature>`, so unless both are `Some` the
+                    // operation reduces to an `Option::or`).
 
                     aggregation = match (aggregation, burst_aggregation) {
                         (Some(aggregation), Some(burst_aggregation)) => Some(
@@ -190,13 +234,18 @@ impl Broker {
                         (aggregation, burst_aggregation) => aggregation.or(burst_aggregation),
                     };
 
+                    // Map positional exceptions back to id exceptions
+
                     let burst_exceptions = burst_exceptions
                         .into_iter()
                         .map(|exception| reductions.get(exception).unwrap().0);
 
+                    // Add `burst_exceptions` to `exceptions`
+                    // (Note: `exceptions` is unsorted but not duplicated.)
+
                     exceptions.extend(burst_exceptions);
                 }
-                StreamReductionRequest::Terminate => {
+                StreamReductionCommand::Terminate => {
                     return (aggregation, exceptions);
                 }
             }
