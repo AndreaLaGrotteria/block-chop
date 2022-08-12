@@ -5,7 +5,7 @@ use crate::{
     system::Directory,
 };
 
-use log::info;
+use log::{debug, info};
 
 use rayon::slice::ParallelSliceMut;
 
@@ -108,7 +108,7 @@ impl Broker {
                 // If this is the first reduction from this id, batch it in `burst_buffer`
 
                 if pending_reducers.remove(&reduction.id) {
-                    info!(
+                    debug!(
                         "Received reduction for {:#?} from id {}.",
                         batch.entries.root(),
                         reduction.id,
@@ -196,10 +196,14 @@ impl Broker {
         // Assemble and return `CompressedBatch`
 
         info!(
-            "Built compressed batch (root {:#?}, {} messages, {} stragglers).",
+            "Built compressed batch (root {:#?}, {} messages, {} stragglers: {:?}).",
             batch.entries.root(),
             messages.len(),
             stragglers.len(),
+            stragglers
+                .iter()
+                .map(|straggler| straggler.id)
+                .collect::<Vec<_>>()
         );
 
         CompressedBatch {

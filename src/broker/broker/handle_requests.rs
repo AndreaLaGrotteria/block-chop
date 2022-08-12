@@ -7,7 +7,7 @@ use crate::{
 
 use doomstack::{here, Doom, ResultExt, Top};
 
-use log::info;
+use log::{debug, info};
 
 use std::{
     collections::HashMap,
@@ -73,7 +73,7 @@ impl Broker {
                         height_record,
                         ..
                     } => {
-                        info!("Handling broadcast request.");
+                        debug!("Handling broadcast request.");
 
                         if let Ok(submission) = Broker::filter_broadcast(
                             membership.as_ref(),
@@ -96,7 +96,7 @@ impl Broker {
                         multisignature,
                         ..
                     } => {
-                        info!("Forwarding reduction request.");
+                        debug!("Forwarding reduction request.");
 
                         let reduction = Reduction {
                             root,
@@ -159,7 +159,7 @@ impl Broker {
             return FilterError::UnjustifiedHeight.fail().spot(here!())?;
         }
 
-        info!("All broadcast checks completed successfully.");
+        debug!("All broadcast checks completed successfully.");
 
         Ok(Submission {
             address: source,
