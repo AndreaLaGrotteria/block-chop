@@ -37,7 +37,10 @@ pub enum ClientError {
 }
 
 impl Client {
-    pub fn new(id: u64, keychain: KeyChain, membership: Membership) -> Self {
+    pub fn new<A>(id: u64, keychain: KeyChain, membership: Membership, bind: A) -> Self
+    where
+        A: 'static + Send + Sync + Clone + ToSocketAddrs,
+    {
         let brokers = Arc::new(Mutex::new(Vec::new()));
         let (broadcast_inlet, broadcast_outlet) = mpsc::channel(1); // Only one broadcast is performed at a time anyway
 
@@ -49,6 +52,7 @@ impl Client {
                 id,
                 keychain,
                 membership,
+                bind,
                 brokers,
                 broadcast_outlet,
             ));

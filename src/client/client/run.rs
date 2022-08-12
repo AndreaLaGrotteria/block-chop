@@ -29,7 +29,10 @@ use talk::{
     sync::fuse::Fuse,
 };
 
-use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
+use tokio::{
+    net::ToSocketAddrs,
+    sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender},
+};
 
 type BroadcastOutlet = MpscReceiver<(Message, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<DeliveryRecord>;
@@ -53,15 +56,18 @@ enum HandleError {
 }
 
 impl Client {
-    pub(in crate::client::client) async fn run(
+    pub(in crate::client::client) async fn run<A>(
         id: u64,
         keychain: KeyChain,
         membership: Membership,
+        bind: A,
         brokers: Arc<Mutex<Vec<SocketAddr>>>,
         mut broadcast_outlet: BroadcastOutlet,
-    ) {
+    ) where
+        A: 'static + Send + Sync + Clone + ToSocketAddrs,
+    {
         let dispatcher = DatagramDispatcher::bind(
-            "0.0.0.0:0",
+            bind,
             DatagramDispatcherSettings {
                 workers: 1,
                 ..Default::default() // TODO: Forward settings?
