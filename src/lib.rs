@@ -1,6 +1,7 @@
+pub mod client;
+
 mod broadcast;
 mod broker;
-mod client;
 mod crypto;
 mod system;
 
