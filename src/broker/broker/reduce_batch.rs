@@ -196,14 +196,10 @@ impl Broker {
         // Assemble and return `CompressedBatch`
 
         info!(
-            "Built compressed batch (root {:#?}, {} messages, {} stragglers: {:?}).",
+            "Built compressed batch (root {:#?}, {} messages, {} stragglers).",
             batch.entries.root(),
             messages.len(),
             stragglers.len(),
-            stragglers
-                .iter()
-                .map(|straggler| straggler.id)
-                .collect::<Vec<_>>()
         );
 
         CompressedBatch {
