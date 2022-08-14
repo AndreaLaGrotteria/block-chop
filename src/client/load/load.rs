@@ -1,7 +1,10 @@
 use crate::{
     broadcast::Entry,
     broker::{Request, Response},
-    crypto::statements::Broadcast as BroadcastStatement,
+    crypto::statements::{
+        Broadcast as BroadcastStatement, Reduction as ReductionStatement,
+        ReductionAuthentication as ReductionAuthenticationStatement,
+    },
     system::{Directory, Passepartout},
 };
 
@@ -36,14 +39,6 @@ pub async fn load<A>(
     let (sender, mut receiver) = dispatcher.split();
     let sender = Arc::new(sender);
 
-    let fuse = Fuse::new();
-
-    fuse.spawn(async move {
-        loop {
-            let _ = receiver.receive().await;
-        }
-    });
-
     info!("Loading keychains..");
 
     let keychains = (0..broadcasts)
@@ -55,6 +50,57 @@ pub async fn load<A>(
             keychain
         })
         .collect::<Vec<_>>();
+
+    let keychains = Arc::new(keychains);
+
+    info!("Spawning receiving task..");
+
+    let fuse = Fuse::new();
+
+    {
+        let keychains = keychains.clone();
+        let sender = sender.clone();
+
+        fuse.spawn(async move {
+            loop {
+                let (source, response) = receiver.receive().await;
+
+                let keychains = keychains.clone();
+                let sender = sender.clone();
+
+                tokio::spawn(async move {
+                    match response {
+                        Response::Inclusion { id, root, .. } => {
+                            let keychain = keychains.get(id as usize).unwrap();
+
+                            let reduction_statement = ReductionStatement { root: &root };
+
+                            let multisignature = keychain.multisign(&reduction_statement).unwrap();
+
+                            let reduction_authentication_statement =
+                                ReductionAuthenticationStatement {
+                                    root: &root,
+                                    multisignature: &multisignature,
+                                };
+
+                            let authentication =
+                                keychain.sign(&reduction_authentication_statement).unwrap();
+
+                            let request = Request::Reduction {
+                                root,
+                                id,
+                                multisignature,
+                                authentication,
+                            };
+
+                            sender.send(source, request).await;
+                        }
+                        Response::Delivery { .. } => {}
+                    }
+                });
+            }
+        });
+    }
 
     info!("Generating requests..");
 
