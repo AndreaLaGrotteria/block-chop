@@ -7,11 +7,14 @@ use crate::{
 
 use log::info;
 
-use std::{iter, sync::Arc};
+use std::{iter, sync::Arc, time::Duration};
 
-use talk::net::DatagramDispatcher;
+use talk::{net::DatagramDispatcher, sync::fuse::Fuse};
 
-use tokio::net::{self, ToSocketAddrs};
+use tokio::{
+    net::{self, ToSocketAddrs},
+    time,
+};
 
 pub async fn load<A>(
     directory: Directory,
@@ -30,8 +33,16 @@ pub async fn load<A>(
             .await
             .unwrap();
 
-    let (sender, _receiver) = dispatcher.split();
+    let (sender, mut receiver) = dispatcher.split();
     let sender = Arc::new(sender);
+
+    let fuse = Fuse::new();
+
+    fuse.spawn(async move {
+        loop {
+            let _ = receiver.receive().await;
+        }
+    });
 
     info!("Loading keychains..");
 
@@ -86,4 +97,8 @@ pub async fn load<A>(
     let datagrams = iter::repeat(broker_address).zip(broadcasts.into_iter());
 
     sender.pace(datagrams, rate).await;
+
+    loop {
+        time::sleep(Duration::from_secs(1)).await;
+    }
 }
