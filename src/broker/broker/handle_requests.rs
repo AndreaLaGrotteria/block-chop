@@ -112,7 +112,7 @@ impl Broker {
             if pool.len() >= 65536 // TODO: Add settings
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
-                info!("Flushing pool into a batch.");
+                info!("Flushing pool into a batch ({} entries).", pool.len());
 
                 next_flush = None;
 
