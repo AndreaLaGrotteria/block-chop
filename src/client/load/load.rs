@@ -10,14 +10,13 @@ use crate::{
 
 use log::info;
 
-use std::{iter, sync::Arc, time::Duration};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use talk::{net::DatagramDispatcher, sync::fuse::Fuse};
+use std::{iter, net::ToSocketAddrs, sync::Arc, time::Duration};
 
-use tokio::{
-    net::{self, ToSocketAddrs},
-    time,
-};
+use talk::{net::{DatagramDispatcher, DatagramDispatcherSettings}, sync::fuse::Fuse};
+
+use tokio::time;
 
 pub async fn load<A>(
     directory: Directory,
@@ -31,10 +30,14 @@ pub async fn load<A>(
 {
     info!("Setting up dispatcher..");
 
-    let dispatcher =
-        DatagramDispatcher::<Request, Response>::bind(bind_address, Default::default())
-            .await
-            .unwrap();
+    let dispatcher = DatagramDispatcher::<Request, Response>::bind(
+        bind_address,
+        DatagramDispatcherSettings {
+            maximum_packet_rate: 262144.,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let (sender, mut receiver) = dispatcher.split();
     let sender = Arc::new(sender);
@@ -105,7 +108,7 @@ pub async fn load<A>(
     info!("Generating requests..");
 
     let broadcasts = keychains
-        .iter()
+        .par_iter()
         .enumerate()
         .map(|(id, keychain)| {
             let id = id as u64;
@@ -134,11 +137,7 @@ pub async fn load<A>(
 
     info!("Pacing requests..");
 
-    let broker_address = net::lookup_host(broker_address)
-        .await
-        .unwrap()
-        .next()
-        .unwrap();
+    let broker_address = broker_address.to_socket_addrs().unwrap().next().unwrap();
 
     let datagrams = iter::repeat(broker_address).zip(broadcasts.into_iter());
 

@@ -55,25 +55,23 @@ impl Broker {
 
         info!("Disseminating proofs of inclusion.");
 
-        let inclusions = submissions
-            .iter()
-            .enumerate()
-            .map(|(index, submission)| {
-                let address = submission.address;
+        let inclusions = submissions.iter().enumerate().map(|(index, submission)| {
+            let address = submission.address;
 
-                let inclusion = Response::Inclusion {
-                    id: submission.entry.id,
-                    root: entries.root(),
-                    proof: entries.prove(index),
-                    raise,
-                    top_record: top_record.clone(),
-                };
+            let inclusion = Response::Inclusion {
+                id: submission.entry.id,
+                root: entries.root(),
+                proof: entries.prove(index),
+                raise,
+                top_record: top_record.clone(),
+            };
 
-                (address, inclusion)
-            })
-            .collect::<Vec<_>>();
+            (address, inclusion)
+        });
 
-        sender.pace(inclusions, 65536.).await; // TODO: Add settings
+        for (address, inclusion) in inclusions {
+            sender.send(address, inclusion).await;
+        }
 
         // Assemble and return `Batch`
 

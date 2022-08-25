@@ -18,21 +18,18 @@ use log::{debug, info};
 
 use std::{
     cmp,
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     ops::RangeInclusive,
     sync::{Arc, Mutex},
 };
 
 use talk::{
     crypto::KeyChain,
-    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender},
+    net::{DatagramDispatcher, DatagramSender},
     sync::fuse::Fuse,
 };
 
-use tokio::{
-    net::ToSocketAddrs,
-    sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender},
-};
+use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
 
 type BroadcastOutlet = MpscReceiver<(Message, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<DeliveryRecord>;
@@ -68,12 +65,8 @@ impl Client {
     {
         let dispatcher = DatagramDispatcher::bind(
             bind,
-            DatagramDispatcherSettings {
-                workers: 1,
-                ..Default::default() // TODO: Forward settings?
-            },
+            Default::default(), // TODO: Forward settings?
         )
-        .await
         .unwrap(); // TODO: Determine if this error should be handled
 
         let (sender, mut receiver) = dispatcher.split();

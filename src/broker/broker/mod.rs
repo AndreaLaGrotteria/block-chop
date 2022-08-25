@@ -2,14 +2,14 @@ use crate::{system::Membership, Directory};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
-use std::sync::Arc;
+use std::{net::ToSocketAddrs, sync::Arc};
 
 use talk::{
-    net::{DatagramDispatcher, SessionConnector},
+    net::{DatagramDispatcher, DatagramDispatcherSettings, SessionConnector},
     sync::fuse::Fuse,
 };
 
-use tokio::{net::ToSocketAddrs, sync::mpsc};
+use tokio::sync::mpsc;
 
 pub struct Broker {
     _fuse: Fuse,
@@ -39,9 +39,14 @@ impl Broker {
 
         // Bind `DatagramDispatcher`
 
-        let dispatcher = DatagramDispatcher::bind(bind, Default::default()) // TODO: Forward settings
-            .await
-            .pot(BrokerError::BindFailed, here!())?;
+        let dispatcher = DatagramDispatcher::bind(
+            bind,
+            DatagramDispatcherSettings {
+                maximum_packet_rate: 262144.,
+                ..Default::default()
+            },
+        ) // TODO: Forward settings
+        .pot(BrokerError::BindFailed, here!())?;
 
         let (sender, receiver) = dispatcher.split();
         let sender = Arc::new(sender);

@@ -3,7 +3,7 @@ use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Mem
 use doomstack::{here, Doom, ResultExt, Top};
 
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     sync::{Arc, Mutex},
 };
 
@@ -11,7 +11,6 @@ use talk::{crypto::KeyChain, sync::fuse::Fuse};
 
 use tokio::{
     io,
-    net::{self, ToSocketAddrs},
     sync::{
         mpsc::{self, Sender as MpscSender},
         oneshot::{self, Sender as OneshotSender},
@@ -69,8 +68,8 @@ impl Client {
     where
         A: ToSocketAddrs,
     {
-        let mut addresses = net::lookup_host(broker)
-            .await
+        let mut addresses = broker
+            .to_socket_addrs()
             .map_err(ClientError::resolve_failed)
             .map_err(ClientError::into_top)
             .spot(here!())?;
