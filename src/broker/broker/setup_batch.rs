@@ -7,7 +7,7 @@ use crate::{
 use log::info;
 
 use rayon::{
-    iter::{IntoParallelRefIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 
@@ -49,25 +49,33 @@ impl Broker {
 
         let entries = Vector::new(entries).unwrap();
 
-        info!("Batch built with root {:#?}.", entries.root());
+        info!(
+            "Batch built with root {:#?} ({} entries).",
+            entries.root(),
+            entries.len()
+        );
 
         // Disseminate proofs of inclusion
 
         info!("Disseminating proofs of inclusion.");
 
-        let inclusions = submissions.iter().enumerate().map(|(index, submission)| {
-            let address = submission.address;
+        let inclusions = submissions
+            .par_iter()
+            .enumerate()
+            .map(|(index, submission)| {
+                let address = submission.address;
 
-            let inclusion = Response::Inclusion {
-                id: submission.entry.id,
-                root: entries.root(),
-                proof: entries.prove(index),
-                raise,
-                top_record: top_record.clone(),
-            };
+                let inclusion = Response::Inclusion {
+                    id: submission.entry.id,
+                    root: entries.root(),
+                    proof: entries.prove(index),
+                    raise,
+                    top_record: top_record.clone(),
+                };
 
-            (address, inclusion)
-        });
+                (address, inclusion)
+            })
+            .collect::<Vec<_>>();
 
         for (address, inclusion) in inclusions {
             sender.send(address, inclusion).await;
