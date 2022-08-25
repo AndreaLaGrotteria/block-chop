@@ -1,17 +1,18 @@
-use crate::{system::Membership, Directory};
+use crate::{broker::Response, system::Membership, Directory};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
 use std::{net::ToSocketAddrs, sync::Arc};
 
 use talk::{
-    net::{DatagramDispatcher, DatagramDispatcherSettings, SessionConnector},
+    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
 
 use tokio::sync::mpsc;
 
 pub struct Broker {
+    sender: Arc<DatagramSender<Response>>,
     _fuse: Fuse,
 }
 
@@ -76,11 +77,46 @@ impl Broker {
             membership.clone(),
             directory.clone(),
             handle_outlet,
-            sender,
+            sender.clone(),
             connector,
         ));
 
-        Ok(Broker { _fuse: fuse })
+        Ok(Broker {
+            sender,
+            _fuse: fuse,
+        })
+    }
+
+    pub fn packets_sent(&self) -> usize {
+        self.sender.packets_sent()
+    }
+
+    pub fn packets_received(&self) -> usize {
+        self.sender.packets_received()
+    }
+
+    pub fn message_packets_processed(&self) -> usize {
+        self.sender.message_packets_processed()
+    }
+
+    pub fn acknowledgement_packets_processed(&self) -> usize {
+        self.sender.acknowledgement_packets_processed()
+    }
+
+    pub fn retransmissions(&self) -> usize {
+        self.sender.retransmissions()
+    }
+
+    pub fn pace_out_chokes(&self) -> usize {
+        self.sender.pace_out_chokes()
+    }
+
+    pub fn process_in_drops(&self) -> usize {
+        self.sender.process_in_drops()
+    }
+
+    pub fn route_out_drops(&self) -> usize {
+        self.sender.route_out_drops()
     }
 }
 
