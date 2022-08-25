@@ -8,7 +8,7 @@ use crate::{
     system::{Directory, Passepartout},
 };
 
-use log::info;
+use log::{debug, info};
 
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
@@ -33,7 +33,7 @@ pub async fn load<A>(
     let dispatcher = DatagramDispatcher::<Request, Response>::bind(
         bind_address,
         DatagramDispatcherSettings {
-            maximum_packet_rate: 262144.,
+            maximum_packet_rate: 393216.,
             ..Default::default()
         },
     )
@@ -141,9 +141,26 @@ pub async fn load<A>(
 
     let datagrams = iter::repeat(broker_address).zip(broadcasts.into_iter());
 
-    sender.pace(datagrams, rate).await;
+    {
+        let sender = sender.clone();
+
+        tokio::spawn(async move {
+            sender.pace(datagrams, rate).await;
+        });
+    }
 
     loop {
         time::sleep(Duration::from_secs(1)).await;
+
+        debug!("`DatagramDispatcher` statistics:\n  packets sent: {}\n  packets received: {} ({} msg, {} ack)\n  retransmissions: {}\n  pace_out chokes: {}\n  process_in drops: {}\n  route_out drops: {}\n",
+            sender.packets_sent(),
+            sender.packets_received(),
+            sender.message_packets_processed(),
+            sender.acknowledgement_packets_processed(),
+            sender.retransmissions(),
+            sender.pace_out_chokes(),
+            sender.process_in_drops(),
+            sender.route_out_drops()
+        );
     }
 }
