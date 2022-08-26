@@ -71,7 +71,7 @@ impl Broker {
             batch.entries.root(),
         );
 
-        let reduction_deadline = Instant::now() + Duration::from_secs(1); // TODO: Add settings
+        let reduction_deadline = Instant::now() + Duration::from_secs(2); // TODO: Add settings
 
         let mut pending_reducers = batch
             .submissions
@@ -81,16 +81,24 @@ impl Broker {
 
         let mut burst_buffer = Vec::with_capacity(512); // TODO: Add settings
 
-        loop {
+        while !pending_reducers.is_empty() && Instant::now() < reduction_deadline {
             if let Some(reduction) = tokio::select! {
                 reduction = reduction_outlet.recv() => {
                     match reduction {
                         Ok(reduction) => Some(reduction),
-                        Err(BroadcastRecvError::Lagged(_)) => None,
+                        Err(BroadcastRecvError::Lagged(_)) => {
+                            info!(
+                                "Broadcast channel lagged",
+                            );
+
+                            None
+                        },
                         Err(BroadcastRecvError::Closed) => {
                             // `Broker` has dropped. Idle waiting for task to be cancelled.
                             // (Note that `return`ing something meaningful is not possible)
-
+                            info!(
+                                "Broadcast channel closed",
+                            );
                             loop {
                                 time::sleep(Duration::from_secs(1)).await;
                             }
@@ -100,7 +108,6 @@ impl Broker {
                 _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
             } {
                 // Filter out reductions for other batches
-
                 if reduction.root != batch.entries.root() {
                     continue;
                 }
@@ -127,10 +134,6 @@ impl Broker {
                         let _ = command_inlet.send(StreamReductionCommand::Aggregate(burst));
                     }
                 }
-            };
-
-            if pending_reducers.is_empty() || Instant::now() >= reduction_deadline {
-                break;
             }
         }
 

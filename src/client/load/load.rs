@@ -14,7 +14,10 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelI
 
 use std::{iter, net::ToSocketAddrs, sync::Arc, time::Duration};
 
-use talk::{net::{DatagramDispatcher, DatagramDispatcherSettings}, sync::fuse::Fuse};
+use talk::{
+    net::{DatagramDispatcher, DatagramDispatcherSettings},
+    sync::fuse::Fuse,
+};
 
 use tokio::time;
 

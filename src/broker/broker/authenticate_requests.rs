@@ -64,7 +64,7 @@ impl Broker {
                 })
                 .collect::<Vec<_>>();
 
-            // Remove from `brust` all `Request`s that are incorrectly authenticated.
+            // Remove from `burst` all `Request`s that are incorrectly authenticated.
             // First, optimistically check if all `Request`s in `burst` are correctly
             // authenticated (this enables `Signature::batch_verify`). If not, loop
             // through each `Request` and filter out the incorrectly authenticated ones.
