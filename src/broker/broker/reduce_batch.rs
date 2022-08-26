@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{CompressedBatch, Straggler},
-    broker::{Batch, BatchStatus, Broker, Reduction},
+    broker::{Batch, BatchStatus, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     system::Directory,
 };
@@ -47,6 +47,7 @@ impl Broker {
         directory: Arc<Directory>,
         batch: &mut Batch,
         mut reduction_outlet: ReductionOutlet,
+        settings: &BrokerSettings,
     ) -> CompressedBatch {
         // Spawn the stream reduction task
 
@@ -71,7 +72,7 @@ impl Broker {
             batch.entries.root(),
         );
 
-        let reduction_deadline = Instant::now() + Duration::from_secs(2); // TODO: Add settings
+        let reduction_deadline = Instant::now() + settings.reduction_timeout;
 
         let mut pending_reducers = batch
             .submissions
@@ -79,7 +80,7 @@ impl Broker {
             .map(|submission| submission.entry.id)
             .collect::<HashSet<_>>();
 
-        let mut burst_buffer = Vec::with_capacity(512); // TODO: Add settings
+        let mut burst_buffer = Vec::with_capacity(settings.reduction_burst_size);
 
         while !pending_reducers.is_empty() && Instant::now() < reduction_deadline {
             if let Some(reduction) = tokio::select! {
@@ -105,7 +106,7 @@ impl Broker {
                         },
                     }
                 },
-                _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
+                _ = time::sleep(settings.reduction_interval) => None,
             } {
                 // Filter out reductions for other batches
                 if reduction.root != batch.entries.root() {
@@ -125,10 +126,8 @@ impl Broker {
 
                     // If `burst_buffer` is large enough, flush it to `Broker::stream_reduction`
 
-                    // TODO: Add settings
-                    if burst_buffer.len() >= 512 {
-                        // TODO: Add settings
-                        let mut burst = Vec::with_capacity(512); // Better performance than `mem:take`ing
+                    if burst_buffer.len() >= settings.reduction_burst_size {
+                        let mut burst = Vec::with_capacity(settings.reduction_burst_size); // Better performance than `mem:take`ing
                         mem::swap(&mut burst, &mut burst_buffer);
 
                         let _ = command_inlet.send(StreamReductionCommand::Aggregate(burst));

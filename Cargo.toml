@@ -36,3 +36,5 @@ sled = { version = "0.34.7" }
 lapp = { version = "0.4.0" }
 log = { version = "0.4.17" }
 env_logger = { version = "0.9.0" }
+
+num_cpus = { version = "1.13" }

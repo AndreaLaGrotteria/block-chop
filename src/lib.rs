@@ -6,7 +6,7 @@ mod crypto;
 mod system;
 
 pub use broadcast::{Entry, Message, MESSAGE_SIZE};
-pub use broker::Broker;
+pub use broker::{Broker, BrokerSettings};
 pub use client::Client;
 pub use crypto::{DeliveryRecord, DeliveryRecordError};
 pub use system::{Directory, Membership};

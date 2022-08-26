@@ -1,6 +1,6 @@
 use crate::{
     broadcast::Entry,
-    broker::{Broker, Reduction, Request, Response, Submission},
+    broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission},
     crypto::records::Height as HeightRecord,
     system::{Directory, Membership},
 };
@@ -9,13 +9,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 
 use log::{debug, info};
 
-use std::{
-    collections::HashMap,
-    mem,
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 
 use talk::{
     crypto::primitives::sign::Signature,
@@ -45,12 +39,13 @@ impl Broker {
         mut handle_outlet: RequestOutlet,
         sender: Arc<DatagramSender<Response>>,
         connector: Arc<SessionConnector>,
+        settings: BrokerSettings,
     ) {
         let mut top_record = None;
         let mut next_flush = None;
         let mut pool = HashMap::new();
 
-        let (reduction_inlet, _) = broadcast::channel(65536); // TODO: Add Settings
+        let (reduction_inlet, _) = broadcast::channel(settings.reduction_channel_capacity);
 
         let fuse = Fuse::new();
 
@@ -64,7 +59,7 @@ impl Broker {
                         return;
                     }
                 }
-                _ = time::sleep(Duration::from_millis(10)) => None, // TODO: Add settings
+                _ = time::sleep(settings.pool_interval) => None,
             } {
                 match request {
                     Request::Broadcast {
@@ -85,9 +80,8 @@ impl Broker {
                         ) {
                             pool.insert(submission.entry.id, submission);
 
-                            // TODO: Add settings
                             next_flush =
-                                next_flush.or(Some(Instant::now() + Duration::from_secs(1)));
+                                next_flush.or(Some(Instant::now() + settings.pool_timeout));
                         }
                     }
                     Request::Reduction {
@@ -109,7 +103,7 @@ impl Broker {
                 }
             }
 
-            if pool.len() >= 65536 // TODO: Add settings
+            if pool.len() >= settings.pool_capacity
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
                 info!("Flushing pool into a batch ({} entries).", pool.len());
@@ -124,6 +118,7 @@ impl Broker {
                     reduction_inlet.subscribe(),
                     sender.clone(),
                     connector.clone(),
+                    settings.clone(),
                 ));
             }
         }

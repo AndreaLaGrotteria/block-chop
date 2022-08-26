@@ -1,4 +1,8 @@
-use crate::{broker::Response, system::Membership, Directory};
+use crate::{
+    broker::{BrokerSettings, Response},
+    system::Membership,
+    Directory,
+};
 
 use doomstack::{here, Doom, ResultExt, Top};
 
@@ -28,6 +32,7 @@ impl Broker {
         directory: Directory,
         bind: A,
         connector: SessionConnector,
+        settings: BrokerSettings,
     ) -> Result<Self, Top<BrokerError>>
     where
         A: Clone + ToSocketAddrs,
@@ -43,10 +48,10 @@ impl Broker {
         let dispatcher = DatagramDispatcher::bind(
             bind,
             DatagramDispatcherSettings {
-                maximum_packet_rate: 262144.,
+                maximum_packet_rate: settings.maximum_packet_rate,
                 ..Default::default()
             },
-        ) // TODO: Forward settings
+        )
         .pot(BrokerError::BindFailed, here!())?;
 
         let (sender, receiver) = dispatcher.split();
@@ -57,21 +62,27 @@ impl Broker {
         let fuse = Fuse::new();
 
         let mut authenticate_inlets = Vec::new();
-        let (handle_inlet, handle_outlet) = mpsc::channel(1024); // TODO: Add settings
+        let (handle_inlet, handle_outlet) = mpsc::channel(settings.handle_channel_capacity);
 
-        // TODO: Add settings
-        for _ in 0..32 {
-            let (authenticate_inlet, authenticate_outlet) = mpsc::channel(1024); // TODO: Add settings
+        for _ in 0..settings.authenticate_tasks {
+            let (authenticate_inlet, authenticate_outlet) =
+                mpsc::channel(settings.authenticate_channel_capacity);
+
             authenticate_inlets.push(authenticate_inlet);
 
             fuse.spawn(Broker::authenticate_requests(
                 directory.clone(),
                 authenticate_outlet,
                 handle_inlet.clone(),
+                settings.clone(),
             ));
         }
 
-        fuse.spawn(Broker::dispatch_requests(receiver, authenticate_inlets));
+        fuse.spawn(Broker::dispatch_requests(
+            receiver,
+            authenticate_inlets,
+            settings.clone(),
+        ));
 
         fuse.spawn(Broker::handle_requests(
             membership.clone(),
@@ -79,6 +90,7 @@ impl Broker {
             handle_outlet,
             sender.clone(),
             connector,
+            settings.clone(),
         ));
 
         Ok(Broker {

@@ -1,5 +1,5 @@
 use crate::{
-    broker::{Broker, Reduction, Response, Submission},
+    broker::{Broker, BrokerSettings, Reduction, Response, Submission},
     crypto::records::Height as HeightRecord,
     system::{Directory, Membership},
 };
@@ -21,8 +21,11 @@ impl Broker {
         reduction_outlet: ReductionOutlet,
         sender: Arc<DatagramSender<Response>>,
         _connector: Arc<SessionConnector>,
+        settings: BrokerSettings,
     ) {
         let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
-        let _compressed_batch = Broker::reduce_batch(directory, &mut batch, reduction_outlet).await;
+
+        let _compressed_batch =
+            Broker::reduce_batch(directory, &mut batch, reduction_outlet, &settings).await;
     }
 }

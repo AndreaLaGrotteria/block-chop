@@ -1,5 +1,5 @@
 use crate::{
-    broker::{Broker, Request},
+    broker::{Broker, BrokerSettings, Request},
     crypto::statements::{
         Broadcast as BroadcastStatement,
         BroadcastAuthentication as BroadcastAuthenticationStatement,
@@ -42,6 +42,7 @@ impl Broker {
         directory: Arc<Directory>,
         mut authenticate_outlet: BurstOutlet,
         handle_inlet: RequestInlet,
+        settings: BrokerSettings,
     ) {
         loop {
             // Receive next burst of `Request`s (from `dispatch_requests`)
@@ -69,7 +70,7 @@ impl Broker {
             // authenticated (this enables `Signature::batch_verify`). If not, loop
             // through each `Request` and filter out the incorrectly authenticated ones.
 
-            let burst = if Broker::batch_authenticate(burst.iter()).is_ok() {
+            let burst = if Broker::batch_authenticate(burst.iter(), &settings).is_ok() {
                 burst
             } else {
                 burst
@@ -132,24 +133,33 @@ impl Broker {
         })
     }
 
-    fn batch_authenticate<'a, I>(burst: I) -> Result<(), Top<FilterError>>
+    fn batch_authenticate<'a, I>(
+        burst: I,
+        settings: &BrokerSettings,
+    ) -> Result<(), Top<FilterError>>
     where
         I: IntoIterator<Item = &'a BurstItem<'a>>,
     {
         // Initialize buffers to `Signature::batch_verify` `BroadcastStatement`s,
         // `BroadcastAuthenticationStatement`s and `ReductionAuthenticationStatement`s
 
-        let mut broadcast_keycards = Vec::with_capacity(2000); // TODO: Add settings
-        let mut broadcast_statements = Vec::with_capacity(2000); // TODO: Add settings
-        let mut broadcast_signatures = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_keycards = Vec::with_capacity(settings.authentication_burst_size);
+        let mut broadcast_statements = Vec::with_capacity(settings.authentication_burst_size);
+        let mut broadcast_signatures = Vec::with_capacity(settings.authentication_burst_size);
 
-        let mut broadcast_authentication_keycards = Vec::with_capacity(2000); // TODO: Add settings
-        let mut broadcast_authentication_statements = Vec::with_capacity(2000); // TODO: Add settings
-        let mut broadcast_authentication_signatures = Vec::with_capacity(2000); // TODO: Add settings
+        let mut broadcast_authentication_keycards =
+            Vec::with_capacity(settings.authentication_burst_size);
+        let mut broadcast_authentication_statements =
+            Vec::with_capacity(settings.authentication_burst_size);
+        let mut broadcast_authentication_signatures =
+            Vec::with_capacity(settings.authentication_burst_size);
 
-        let mut reduction_authentication_keycards = Vec::with_capacity(2000); // TODO: Add settings
-        let mut reduction_authentication_statements = Vec::with_capacity(2000); // TODO: Add settings
-        let mut reduction_authentication_signatures = Vec::with_capacity(2000); // TODO: Add settings
+        let mut reduction_authentication_keycards =
+            Vec::with_capacity(settings.authentication_burst_size);
+        let mut reduction_authentication_statements =
+            Vec::with_capacity(settings.authentication_burst_size);
+        let mut reduction_authentication_signatures =
+            Vec::with_capacity(settings.authentication_burst_size);
 
         // Fill `Signature::batch_verify` buffers
 

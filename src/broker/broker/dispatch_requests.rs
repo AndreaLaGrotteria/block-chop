@@ -1,4 +1,4 @@
-use crate::broker::{Broker, Request};
+use crate::broker::{Broker, BrokerSettings, Request};
 
 use std::{
     mem,
@@ -16,10 +16,11 @@ impl Broker {
     pub(in crate::broker::broker) async fn dispatch_requests(
         mut receiver: DatagramReceiver<Request>,
         authenticate_inlets: Vec<BurstInlet>,
+        settings: BrokerSettings,
     ) {
         let mut robin = 0;
 
-        let mut burst_buffer = Vec::with_capacity(2000); // TODO: Add settings
+        let mut burst_buffer = Vec::with_capacity(settings.authentication_burst_size);
         let mut last_flush = Instant::now();
 
         loop {
@@ -32,11 +33,12 @@ impl Broker {
                 burst_buffer.push(datagram);
             }
 
-            // TODO: Add settings
-            if burst_buffer.len() >= 2000 || last_flush.elapsed() >= Duration::from_millis(100) {
+            if burst_buffer.len() >= settings.authentication_burst_size
+                || last_flush.elapsed() >= settings.authentication_burst_timeout
+            {
                 // Flush `burst_buffer` into the next element of `authenticate_inlets`
 
-                let mut burst = Vec::with_capacity(2000); // Better performance than `mem::take`
+                let mut burst = Vec::with_capacity(settings.authentication_burst_size); // Better performance than `mem::take`
                 mem::swap(&mut burst, &mut burst_buffer);
 
                 // This fails only if the `Broker` is shutting down
