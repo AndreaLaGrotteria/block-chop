@@ -12,7 +12,7 @@ use log::{debug, info};
 
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use std::{iter, net::ToSocketAddrs, sync::Arc, time::Duration};
+use std::{iter, net::ToSocketAddrs, ops::Range, sync::Arc, time::Duration};
 
 use talk::{
     net::{DatagramDispatcher, DatagramDispatcherSettings},
@@ -26,7 +26,7 @@ pub async fn load<A>(
     passepartout: Passepartout,
     bind_address: A,
     broker_address: A,
-    broadcasts: u64,
+    range: Range<u64>,
     rate: f64,
 ) where
     A: Clone + ToSocketAddrs,
@@ -47,7 +47,8 @@ pub async fn load<A>(
 
     info!("Loading keychains..");
 
-    let keychains = (0..broadcasts)
+    let keychains = range
+        .clone()
         .map(|id| {
             let keycard = directory.get(id).unwrap();
             let identity = keycard.identity();
@@ -64,6 +65,7 @@ pub async fn load<A>(
     let fuse = Fuse::new();
 
     {
+        let range = range.clone();
         let keychains = keychains.clone();
         let sender = sender.clone();
 
@@ -77,10 +79,8 @@ pub async fn load<A>(
                 tokio::spawn(async move {
                     match response {
                         Response::Inclusion { id, root, .. } => {
-                            let keychain = keychains.get(id as usize).unwrap();
-
+                            let keychain = keychains.get((id - range.start) as usize).unwrap();
                             let reduction_statement = ReductionStatement { root: &root };
-
                             let multisignature = keychain.multisign(&reduction_statement).unwrap();
 
                             let reduction_authentication_statement =
@@ -113,8 +113,8 @@ pub async fn load<A>(
     let broadcasts = keychains
         .par_iter()
         .enumerate()
-        .map(|(id, keychain)| {
-            let id = id as u64;
+        .map(|(index, keychain)| {
+            let id = range.start + (index as u64);
 
             let entry = Entry {
                 id,
