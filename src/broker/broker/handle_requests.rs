@@ -160,7 +160,6 @@ impl Broker {
             address: source,
             entry,
             signature,
-            reduction: None,
         })
     }
 }
