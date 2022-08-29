@@ -18,10 +18,10 @@ impl Broker {
         authenticate_inlets: Vec<BurstInlet>,
         settings: BrokerSettings,
     ) {
-        let mut robin = 0;
-
         let mut burst_buffer = Vec::with_capacity(settings.authentication_burst_size);
         let mut last_flush = Instant::now();
+
+        let mut authenticate_inlets = authenticate_inlets.iter().cycle();
 
         loop {
             // Receive next `Request` (with a timeout to ensure timely flushing)
@@ -42,13 +42,8 @@ impl Broker {
                 mem::swap(&mut burst, &mut burst_buffer);
 
                 // This fails only if the `Broker` is shutting down
-                let _ = authenticate_inlets
-                    .get(robin % authenticate_inlets.len())
-                    .unwrap()
-                    .send(burst)
-                    .await;
+                let _ = authenticate_inlets.next().unwrap().send(burst).await;
 
-                robin += 1;
                 last_flush = Instant::now();
             }
         }
