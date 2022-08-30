@@ -3,6 +3,7 @@ pub mod client;
 mod broadcast;
 mod broker;
 mod crypto;
+mod server;
 mod system;
 
 pub use broadcast::{Entry, Message, MESSAGE_SIZE};
