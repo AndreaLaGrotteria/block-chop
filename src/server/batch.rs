@@ -172,7 +172,6 @@ impl Batch {
             .spot(here!())?;
 
         let messages = compressed_batch.messages;
-
         let raise = compressed_batch.raise;
 
         let mut stragglers = compressed_batch.stragglers.iter().peekable();
@@ -183,16 +182,19 @@ impl Batch {
             .into_iter()
             .zip(messages)
             .map(|(id, message)| {
-                let mut raise = raise;
-
-                if let Some(straggler) = stragglers.peek().filter(|straggler| straggler.id == id) {
-                    raise = straggler.sequence;
-                    stragglers.next();
-                }
+                let sequence = if stragglers
+                    .peek()
+                    .filter(|straggler| straggler.id == id)
+                    .is_some()
+                {
+                    stragglers.next().unwrap().sequence
+                } else {
+                    raise
+                };
 
                 Entry {
                     id,
-                    sequence: raise,
+                    sequence,
                     message,
                 }
             })
