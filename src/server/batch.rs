@@ -10,7 +10,7 @@ use talk::crypto::primitives::sign::Signature;
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {
-    entries: Vector<Entry>,
+    entries: Vector<Option<Entry>>,
 }
 
 #[derive(Doom)]
@@ -98,11 +98,11 @@ impl Batch {
 
                 straggler_entries.push((
                     index,
-                    Entry {
+                    Some(Entry {
                         id,
                         sequence: straggler.sequence,
                         message: message.clone(),
-                    },
+                    }),
                 ));
 
                 stragglers.next();
@@ -127,10 +127,12 @@ impl Batch {
         let entries = ids
             .into_iter()
             .zip(messages)
-            .map(|(id, message)| Entry {
-                id,
-                sequence: raise,
-                message,
+            .map(|(id, message)| {
+                Some(Entry {
+                    id,
+                    sequence: raise,
+                    message,
+                })
             })
             .collect::<Vec<_>>();
 
@@ -192,11 +194,11 @@ impl Batch {
                     raise
                 };
 
-                Entry {
+                Some(Entry {
                     id,
                     sequence,
                     message,
-                }
+                })
             })
             .collect::<Vec<_>>();
 
