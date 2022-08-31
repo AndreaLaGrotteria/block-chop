@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::Entry,
+    broadcast::{Entry, PACKING},
     broker::{Batch, BatchStatus, Broker, Response, Submission},
     crypto::records::Height as HeightRecord,
 };
@@ -47,7 +47,7 @@ impl Broker {
             })
             .collect::<Vec<_>>();
 
-        let entries = Vector::new(entries).unwrap();
+        let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         info!(
             "Batch built with root {:#?} ({} entries).",

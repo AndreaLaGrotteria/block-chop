@@ -13,6 +13,7 @@ path = "bin/generate_system.rs"
 required-features = [ "benchmark" ]
 
 [features]
+all = [ "benchmark" ]
 benchmark = []
 
 [dependencies]
@@ -38,3 +39,6 @@ log = { version = "0.4.17" }
 env_logger = { version = "0.9.0" }
 
 num_cpus = { version = "1.13" }
+
+#[cfg(feature = "benchmark")]
+rand = { version = "0.8.5" }
