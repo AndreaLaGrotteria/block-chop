@@ -17,7 +17,7 @@ benchmark = []
 
 [dependencies]
 doomstack = { git = "https://github.com/distributed-epfl/doomstack" }
-talk = { git = "https://github.com/distributed-epfl/talk" }
+talk = { git = "https://github.com/distributed-epfl/talk", features = ["test_utilities"] }
 zebra = { git = "https://github.com/distributed-epfl/zebra" }
 varcram = { git = "https://github.com/distributed-epfl/varcram" }
 
