@@ -14,6 +14,9 @@ use rand::seq::IteratorRandom;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[cfg(feature = "benchmark")]
+use serde::{Serialize, Deserialize};
+
+#[cfg(feature = "benchmark")]
 use std::iter;
 
 use talk::crypto::primitives::multi::Signature as MultiSignature;

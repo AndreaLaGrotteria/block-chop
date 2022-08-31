@@ -153,7 +153,7 @@ impl Server {
 mod tests {
     use super::*;
 
-    use crate::{Entry, crypto::statements::Reduction};
+    use crate::{Entry, crypto::statements::Reduction, broadcast::PACKING};
 
     use std::{collections::HashMap, iter, net::SocketAddr, time::Duration};
 
@@ -227,7 +227,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let entries = Vector::<_>::new(entries).unwrap();
+        let entries = Vector::<_, PACKING>::new(entries).unwrap();
         let root = entries.root();
 
         let multisignatures = clients.iter().take(batch_size as usize).map(|keychain| {
@@ -240,7 +240,7 @@ mod tests {
 
         CompressedBatch {
             ids: VarCram::cram(Vec::from_iter(0..batch_size).as_slice()),
-            messages: vec!([0; 8]),
+            messages: Vec::from_iter(iter::repeat([0u8; 8]).take(batch_size as usize)),
             raise: 0,
             multisignature,
             stragglers: vec!(),
