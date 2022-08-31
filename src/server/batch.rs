@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{CompressedBatch, Entry},
+    broadcast::{CompressedBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     system::Directory,
 };
@@ -11,7 +11,7 @@ use talk::crypto::primitives::{hash::Hash, sign::Signature};
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {
-    entries: Vector<Entry>,
+    entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
@@ -99,11 +99,11 @@ impl Batch {
 
                 straggler_entries.push((
                     index,
-                    Entry {
+                    Some(Entry {
                         id,
                         sequence: straggler.sequence,
                         message: message.clone(),
-                    },
+                    }),
                 ));
 
                 stragglers.next();
@@ -128,14 +128,16 @@ impl Batch {
         let entries = ids
             .into_iter()
             .zip(messages)
-            .map(|(id, message)| Entry {
-                id,
-                sequence: raise,
-                message,
+            .map(|(id, message)| {
+                Some(Entry {
+                    id,
+                    sequence: raise,
+                    message,
+                })
             })
             .collect::<Vec<_>>();
 
-        let mut entries = Vector::<_>::new(entries).unwrap();
+        let mut entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         // Verify reducers' `MultiSignature`
 
@@ -193,15 +195,15 @@ impl Batch {
                     raise
                 };
 
-                Entry {
+                Some(Entry {
                     id,
                     sequence,
                     message,
-                }
+                })
             })
             .collect::<Vec<_>>();
 
-        let entries = Vector::<_>::new(entries).unwrap();
+        let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         Ok(Batch { entries })
     }
