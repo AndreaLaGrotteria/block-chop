@@ -13,6 +13,7 @@ path = "bin/generate_system.rs"
 required-features = [ "benchmark" ]
 
 [features]
+all = [ "benchmark" ]
 benchmark = []
 
 [dependencies]
