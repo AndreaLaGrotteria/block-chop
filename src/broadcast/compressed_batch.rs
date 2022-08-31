@@ -11,6 +11,9 @@ use crate::{
 use rand::seq::IteratorRandom;
 
 #[cfg(feature = "benchmark")]
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+#[cfg(feature = "benchmark")]
 use std::iter;
 
 use talk::crypto::primitives::multi::Signature as MultiSignature;
@@ -66,13 +69,17 @@ impl CompressedBatch {
             root: &entries.root(),
         };
 
-        let multisignatures = ids.iter().copied().map(|id| {
-            let keycard = directory.get(id).unwrap();
-            let identity = keycard.identity();
-            let keychain = passepartout.get(identity).unwrap();
+        let multisignatures = ids
+            .par_iter()
+            .copied()
+            .map(|id| {
+                let keycard = directory.get(id).unwrap();
+                let identity = keycard.identity();
+                let keychain = passepartout.get(identity).unwrap();
 
-            keychain.multisign(&statement).unwrap()
-        });
+                keychain.multisign(&statement).unwrap()
+            })
+            .collect::<Vec<_>>();
 
         let multisignature = Some(MultiSignature::aggregate(multisignatures).unwrap());
 
