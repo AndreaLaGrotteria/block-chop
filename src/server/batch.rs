@@ -6,7 +6,8 @@ use crate::{
 
 use doomstack::{here, Doom, ResultExt, Top};
 
-use talk::crypto::primitives::sign::Signature;
+use talk::crypto::primitives::{hash::Hash, sign::Signature};
+
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {
@@ -203,5 +204,9 @@ impl Batch {
         let entries = Vector::<_>::new(entries).unwrap();
 
         Ok(Batch { entries })
+    }
+
+    pub fn root(&self) -> Hash {
+        self.entries.root()
     }
 }
