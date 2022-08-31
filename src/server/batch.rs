@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{CompressedBatch, Entry},
+    broadcast::{CompressedBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     system::Directory,
 };
@@ -7,10 +7,11 @@ use crate::{
 use doomstack::{here, Doom, ResultExt, Top};
 
 use talk::crypto::primitives::sign::Signature;
+
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {
-    entries: Vector<Option<Entry>>,
+    entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
@@ -136,7 +137,7 @@ impl Batch {
             })
             .collect::<Vec<_>>();
 
-        let mut entries = Vector::<_>::new(entries).unwrap();
+        let mut entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         // Verify reducers' `MultiSignature`
 
@@ -202,7 +203,7 @@ impl Batch {
             })
             .collect::<Vec<_>>();
 
-        let entries = Vector::<_>::new(entries).unwrap();
+        let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         Ok(Batch { entries })
     }

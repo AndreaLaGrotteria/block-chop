@@ -2,7 +2,7 @@ use crate::broadcast::{Message, Straggler};
 
 #[cfg(feature = "benchmark")]
 use crate::{
-    broadcast::Entry,
+    broadcast::{Entry, PACKING},
     crypto::statements::Reduction as ReductionStatement,
     system::{Directory, Passepartout},
 };
@@ -63,7 +63,7 @@ impl CompressedBatch {
             })
             .collect::<Vec<_>>();
 
-        let entries = Vector::<_>::new(entries).unwrap();
+        let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
         let statement = ReductionStatement {
             root: &entries.root(),

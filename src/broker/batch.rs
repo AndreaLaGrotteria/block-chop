@@ -1,6 +1,9 @@
-use zebra::vector::Vector;
+use crate::{
+    broadcast::{Entry, PACKING},
+    broker::Submission,
+};
 
-use crate::{broadcast::Entry, broker::Submission};
+use zebra::vector::Vector;
 
 pub(in crate::broker) enum BatchStatus {
     Reducing,
@@ -12,5 +15,5 @@ pub(in crate::broker) struct Batch {
     pub status: BatchStatus,
     pub submissions: Vec<Submission>,
     pub raise: u64,
-    pub entries: Vector<Option<Entry>>,
+    pub entries: Vector<Option<Entry>, PACKING>,
 }
