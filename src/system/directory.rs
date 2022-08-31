@@ -1,5 +1,7 @@
 use doomstack::{here, Doom, ResultExt, Top};
 
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
 use std::path::Path;
 
 use talk::crypto::KeyCard;
@@ -68,25 +70,40 @@ impl Directory {
 
         let mut keycards = vec![None; capacity];
 
-        for entry in database.iter() {
-            let (key, value) = entry
-                .map_err(DirectoryError::load_failed)
-                .map_err(DirectoryError::into_top)
-                .spot(here!())?;
+        let entries = database
+            .iter()
+            .map(|entry| -> Result<_, Top<_>> {
+                let (key, value) = entry
+                    .map_err(DirectoryError::load_failed)
+                    .map_err(DirectoryError::into_top)
+                    .spot(here!())?;
 
-            let id = if key.len() == 8 {
-                let mut buffer = [0u8; 8];
-                buffer.clone_from_slice(key.as_ref());
-                u64::from_be_bytes(buffer)
-            } else {
-                return DirectoryError::DeserializeIdFailed.fail().spot(here!());
-            };
+                Ok((key, value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-            let keycard = bincode::deserialize::<KeyCard>(value.as_ref())
-                .map_err(DirectoryError::deserialize_keycard_failed)
-                .map_err(DirectoryError::into_top)
-                .spot(here!())?;
+        let entries = entries
+            .into_par_iter()
+            .map(|(key, value)| -> Result<_, Top<_>> {
+                let id = if key.len() == 8 {
+                    let mut buffer = [0u8; 8];
+                    buffer.clone_from_slice(key.as_ref());
+                    u64::from_be_bytes(buffer)
+                } else {
+                    return DirectoryError::DeserializeIdFailed.fail().spot(here!());
+                };
 
+                let keycard = bincode::deserialize::<KeyCard>(value.as_ref())
+                    .map_err(DirectoryError::deserialize_keycard_failed)
+                    .map_err(DirectoryError::into_top)
+                    .spot(here!())?;
+
+                Ok((id, keycard))
+            })
+            .collect::<Vec<_>>();
+
+        for entry in entries {
+            let (id, keycard) = entry?;
             *keycards.get_mut(id as usize).unwrap() = Some(keycard);
         }
 
