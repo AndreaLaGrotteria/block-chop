@@ -14,7 +14,7 @@ use rand::seq::IteratorRandom;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[cfg(feature = "benchmark")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "benchmark")]
 use std::iter;

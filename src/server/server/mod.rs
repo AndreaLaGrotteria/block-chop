@@ -3,6 +3,7 @@ use crate::{
     crypto::{statements::BatchWitness, Certificate},
     server::{Batch, BatchError, ServerSettings},
     system::{Directory, Membership},
+    total_order::Broadcast,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -34,17 +35,25 @@ enum ServeError {
 }
 
 impl Server {
-    pub fn new(
+    pub fn new<B>(
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
+        broadcast: B,
         listener: SessionListener,
         settings: ServerSettings,
-    ) -> Self {
+    ) -> Self
+    where
+        B: Broadcast,
+    {
+        let broadcast = Arc::new(broadcast);
         let fuse = Fuse::new();
 
         fuse.spawn(async move {
-            Server::listen(keychain, membership, directory, listener, settings).await;
+            Server::listen(
+                keychain, membership, directory, broadcast, listener, settings,
+            )
+            .await;
         });
 
         Server { _fuse: fuse }
@@ -54,6 +63,7 @@ impl Server {
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
+        broadcast: Arc<dyn Broadcast>,
         mut listener: SessionListener,
         settings: ServerSettings,
     ) {
@@ -71,11 +81,14 @@ impl Server {
             let keychain = keychain.clone();
             let membership = membership.clone();
             let directory = directory.clone();
+            let broadcast = broadcast.clone();
             let semaphore = semaphore.clone();
 
             fuse.spawn(async move {
-                if let Err(error) =
-                    Server::serve(keychain, membership, directory, semaphore, session).await
+                if let Err(error) = Server::serve(
+                    keychain, membership, directory, broadcast, semaphore, session,
+                )
+                .await
                 {
                     println!("{:?}", error);
                 }
@@ -87,6 +100,7 @@ impl Server {
         keychain: KeyChain,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
+        broadcast: Arc<dyn Broadcast>,
         semaphore: Arc<Semaphore>,
         mut session: Session,
     ) -> Result<(), Top<ServeError>> {
@@ -143,25 +157,33 @@ impl Server {
             .pot(ServeError::WitnessInvalid, here!())?;
 
         println!("Certificate valid!");
-        // TODO: Interact with Total Order Broadcast
+
+        // TODO: Send batch to TOB ordering task
+
+        let submission = bincode::serialize(&(root, witness)).unwrap();
+        broadcast.order(submission.as_slice()).await;
+
+        // TODO: Receive batch ordered command and reply to Broker
 
         session.end();
         Ok(())
     }
 }
 
+mod deliver;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::{Entry, crypto::statements::Reduction, broadcast::PACKING};
+    use crate::{broadcast::PACKING, crypto::statements::Reduction, total_order::LoopBack, Entry};
 
     use std::{collections::HashMap, iter, net::SocketAddr, time::Duration};
 
     use futures::stream::{FuturesUnordered, StreamExt};
 
     use talk::{
-        crypto::{Identity},
+        crypto::Identity,
         net::{
             test::{TestConnector, TestListener},
             SessionConnector,
@@ -191,7 +213,9 @@ mod tests {
             directory.insert(index as u64, keychain.keycard());
         }
 
-        let server_keychains = iter::repeat_with(KeyChain::random).take(servers).collect::<Vec<_>>();
+        let server_keychains = iter::repeat_with(KeyChain::random)
+            .take(servers)
+            .collect::<Vec<_>>();
 
         let membership =
             Membership::new(server_keychains.iter().map(|keychain| keychain.keycard()));
@@ -200,12 +224,16 @@ mod tests {
 
         let mut servers = Vec::with_capacity(servers);
         for keychain in server_keychains {
+            let broadcast = LoopBack::new();
+
             let (listener, address) = TestListener::new(keychain.clone()).await;
             let listener = SessionListener::new(listener);
+
             let server = Server::new(
                 keychain.clone(),
                 membership.clone(),
                 directory.clone(),
+                broadcast,
                 listener,
                 Default::default(),
             );
@@ -231,11 +259,15 @@ mod tests {
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
         let root = entries.root();
 
-        let multisignatures = clients.iter().take(batch_size as usize).map(|keychain| {
-            let reduction_statement = Reduction { root: &root };
+        let multisignatures = clients
+            .iter()
+            .take(batch_size as usize)
+            .map(|keychain| {
+                let reduction_statement = Reduction { root: &root };
 
-            keychain.multisign(&reduction_statement).unwrap()
-        }).collect::<Vec<_>>();
+                keychain.multisign(&reduction_statement).unwrap()
+            })
+            .collect::<Vec<_>>();
 
         let multisignature = Some(MultiSignature::aggregate(multisignatures).unwrap());
 
@@ -244,14 +276,13 @@ mod tests {
             messages: Vec::from_iter(iter::repeat([0u8; 8]).take(batch_size as usize)),
             raise: 0,
             multisignature,
-            stragglers: vec!(),
+            stragglers: vec![],
         }
     }
 
     #[tokio::test]
     async fn server_interact() {
-        let (clients, _servers, membership, _, connector_map) =
-            generate_system(1000, 4).await;
+        let (clients, _servers, membership, _, connector_map) = generate_system(1000, 4).await;
 
         let broker = KeyChain::random();
 
@@ -265,7 +296,12 @@ mod tests {
         let mut sessions = membership
             .servers()
             .keys()
-            .map(|server| async { (server.clone(), connector.connect(server.clone()).await.unwrap()) })
+            .map(|server| async {
+                (
+                    server.clone(),
+                    connector.connect(server.clone()).await.unwrap(),
+                )
+            })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
@@ -273,7 +309,7 @@ mod tests {
         let mut responses = Vec::new();
         for (identity, session) in sessions[0..2].iter_mut() {
             session.send_raw(&compressed_batch).await.unwrap();
-            session.send_raw(&true).await.unwrap(); 
+            session.send_raw(&true).await.unwrap();
 
             let response: MultiSignature = session.receive_raw().await.unwrap();
             responses.push((*identity, response));
@@ -281,11 +317,11 @@ mod tests {
 
         for (_, session) in sessions[2..].iter_mut() {
             session.send_raw(&compressed_batch).await.unwrap();
-            session.send_raw(&false).await.unwrap(); 
+            session.send_raw(&false).await.unwrap();
         }
 
         let certificate = Certificate::aggregate_plurality(&membership, responses);
-        
+
         for (_, session) in sessions.iter_mut() {
             session.send_raw(&certificate).await.unwrap();
         }
