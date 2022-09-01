@@ -142,6 +142,7 @@ impl Server {
             .verify_plurality(membership.as_ref(), &BatchWitness::new(root))
             .pot(ServeError::WitnessInvalid, here!())?;
 
+        println!("Certificate valid!");
         // TODO: Interact with Total Order Broadcast
 
         session.end();
@@ -264,16 +265,31 @@ mod tests {
         let mut sessions = membership
             .servers()
             .keys()
-            .map(|server| async { connector.connect(server.clone()).await.unwrap() })
+            .map(|server| async { (server.clone(), connector.connect(server.clone()).await.unwrap()) })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
 
-        sessions[0].send_raw(&compressed_batch).await.unwrap();
-        sessions[0].send_raw(&true).await.unwrap();
+        let mut responses = Vec::new();
+        for (identity, session) in sessions[0..2].iter_mut() {
+            session.send_raw(&compressed_batch).await.unwrap();
+            session.send_raw(&true).await.unwrap(); 
 
-        let response: MultiSignature = sessions[0].receive_raw().await.unwrap();
+            let response: MultiSignature = session.receive_raw().await.unwrap();
+            responses.push((*identity, response));
+        }
 
-        println!("Received response: {:?}", response);
+        for (_, session) in sessions[2..].iter_mut() {
+            session.send_raw(&compressed_batch).await.unwrap();
+            session.send_raw(&false).await.unwrap(); 
+        }
+
+        let certificate = Certificate::aggregate_plurality(&membership, responses);
+        
+        for (_, session) in sessions.iter_mut() {
+            session.send_raw(&certificate).await.unwrap();
+        }
+
+        time::sleep(Duration::from_secs(1)).await;
     }
 }
