@@ -343,7 +343,10 @@ mod tests {
                 directory.clone(),
                 broadcast,
                 listener,
-                Default::default(),
+                ServerSettings {
+                    serve_tasks: num_cpus::get() - 3,
+                    ..Default::default()
+                },
             );
 
             connector_map.insert(keychain.keycard().identity(), address);
