@@ -216,7 +216,7 @@ impl Server {
             let order_shard = keychain.multisign(&statement).unwrap();
 
             session
-                .send_raw(&order_shard)
+                .send_raw::<(u64, MultiSignature)>(&(height, order_shard))
                 .await
                 .pot(ServeError::ConnectionError, here!())?;
         }
@@ -236,7 +236,7 @@ mod tests {
 
     use crate::{broadcast::PACKING, crypto::statements::Reduction, total_order::LoopBack, Entry};
 
-    use std::{collections::HashMap, iter, net::SocketAddr, time::Duration};
+    use std::{collections::HashMap, iter, net::SocketAddr};
 
     use futures::stream::{FuturesUnordered, StreamExt};
 
@@ -248,7 +248,6 @@ mod tests {
         },
     };
 
-    use tokio::time;
     use varcram::VarCram;
     use zebra::vector::Vector;
 
@@ -349,8 +348,6 @@ mod tests {
 
         let compressed_batch = fake_batch(&clients, 1);
 
-        time::sleep(Duration::from_secs(1)).await;
-
         let mut sessions = membership
             .servers()
             .keys()
@@ -378,12 +375,41 @@ mod tests {
             session.send_raw(&false).await.unwrap();
         }
 
+        let batch_root = Batch::expand_unverified(compressed_batch).unwrap().root();
+
+        for (identity, multisignature) in responses.iter() {
+            let statement = BatchWitness::new(batch_root);
+            let keycard = membership.servers().get(identity).unwrap();
+
+            multisignature.verify([keycard], &statement).unwrap();
+        }
+
         let certificate = Certificate::aggregate_plurality(&membership, responses);
 
         for (_, session) in sessions.iter_mut() {
             session.send_raw(&certificate).await.unwrap();
         }
 
-        time::sleep(Duration::from_secs(1)).await;
+        let mut responses = Vec::new();
+        for (identity, session) in sessions.iter_mut() {
+            let (height, multisignature) = session
+                .receive_raw::<(u64, MultiSignature)>()
+                .await
+                .unwrap();
+
+            let statement = BatchDelivery {
+                root: &batch_root,
+                height: &height,
+            };
+            let keycard = membership.servers().get(&identity).unwrap();
+
+            multisignature.verify([keycard], &statement).unwrap();
+
+            responses.push((*identity, multisignature));
+        }
+
+        let _certificate = Certificate::aggregate_quorum(&membership, responses);
+
+        println!("Obtained delivery certificate!");
     }
 }
