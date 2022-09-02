@@ -256,6 +256,40 @@ impl Deduplicator {
         dispatch_outlet
     }
 
+    fn amend(log: &mut Option<Log>, entry: &Entry) -> Option<Amendment> {
+        match log {
+            Some(log) => {
+                if entry.message == log.last_message {
+                    if entry.sequence != log.last_sequence {
+                        Some(Amendment::Nudge {
+                            id: entry.id,
+                            sequence: log.last_sequence,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    if entry.sequence > log.last_sequence {
+                        log.last_sequence = entry.sequence;
+                        log.last_message = entry.message;
+
+                        None
+                    } else {
+                        Some(Amendment::Drop { id: entry.id })
+                    }
+                }
+            }
+            log => {
+                *log = Some(Log {
+                    last_sequence: entry.sequence,
+                    last_message: entry.message,
+                });
+
+                None
+            }
+        }
+    }
+
     fn process_snap(
         mut snap: Snap<Option<Log>>,
         range: Range<u64>,
@@ -303,51 +337,108 @@ impl Deduplicator {
 
     fn process_tail(
         offset: u64,
-        process_tail_outlet: BatchBurstOutlet,
+        mut process_tail_outlet: BatchBurstOutlet,
         join_amendments_burst_inlet: AmendmentsBurstInlet,
     ) -> Vec<Option<Log>> {
-        Vec::new()
-    }
+        let mut tail = Vec::new();
 
-    fn amend(log: &mut Option<Log>, entry: &Entry) -> Option<Amendment> {
-        match log {
-            Some(log) => {
-                if entry.message == log.last_message {
-                    if entry.sequence != log.last_sequence {
-                        Some(Amendment::Nudge {
-                            id: entry.id,
-                            sequence: log.last_sequence,
+        loop {
+            let batch_burst = if let Some(burst) = process_tail_outlet.blocking_recv() {
+                burst
+            } else {
+                break;
+            };
+
+            let amendments_burst = batch_burst
+                .iter()
+                .map(|batch| {
+                    let entries = batch.entries.items();
+                    let reach = (entries.last().unwrap().as_ref().unwrap().id - offset) as usize;
+
+                    if reach > tail.len() {
+                        tail.resize(reach, None);
+                    }
+
+                    let locate = |id| match entries
+                        .binary_search_by_key(&id, |entry| entry.as_ref().unwrap().id)
+                    {
+                        Ok(index) => index,
+                        Err(index) => index,
+                    };
+
+                    let chunk = &entries[locate(offset)..];
+
+                    chunk
+                        .iter()
+                        .filter_map(|entry| {
+                            let entry = entry.as_ref().unwrap();
+                            let log = tail.get_mut((entry.id - offset) as usize).unwrap();
+
+                            Deduplicator::amend(log, entry)
                         })
-                    } else {
-                        None
-                    }
-                } else {
-                    if entry.sequence > log.last_sequence {
-                        log.last_sequence = entry.sequence;
-                        log.last_message = entry.message;
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
 
-                        None
-                    } else {
-                        Some(Amendment::Drop { id: entry.id })
-                    }
-                }
-            }
-            log => {
-                *log = Some(Log {
-                    last_sequence: entry.sequence,
-                    last_message: entry.message,
-                });
-
-                None
-            }
+            let _ = join_amendments_burst_inlet.blocking_send(amendments_burst);
         }
+
+        tail
     }
 
     async fn join(
-        join_batch_burst_outlet: BatchBurstOutlet,
-        join_amendments_burst_outlets: Vec<AmendmentsBurstOutlet>,
+        mut join_batch_burst_outlet: BatchBurstOutlet,
+        mut join_amendments_burst_outlets: Vec<AmendmentsBurstOutlet>,
         pop_inlet: AmendedBatchInlet,
     ) -> AmendedBatchInlet {
+        loop {
+            let batch_burst = if let Some(burst) = join_batch_burst_outlet.recv().await {
+                burst
+            } else {
+                break;
+            };
+
+            let mut amendments_bursts = Vec::with_capacity(TASKS + 1);
+
+            for join_amendments_burst_outlet in join_amendments_burst_outlets.iter_mut() {
+                let amendments_burst =
+                    if let Some(burst) = join_amendments_burst_outlet.recv().await {
+                        burst
+                    } else {
+                        loop {
+                            // `Deduplicator` has dropped. Idle waiting for task to be cancelled.
+                            // (Note that `return`ing something meaningful is not possible)
+                            loop {
+                                time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+                    };
+
+                amendments_bursts.push(amendments_burst);
+            }
+
+            let batch_burst = match Arc::try_unwrap(batch_burst) {
+                Ok(batch_burst) => batch_burst,
+                Err(_) => unreachable!(),
+            };
+
+            let mut batch_burst = batch_burst.into_iter();
+
+            let mut amendments_bursts = amendments_bursts
+                .into_iter()
+                .map(IntoIterator::into_iter)
+                .collect::<Vec<_>>();
+
+            for batch in batch_burst {
+                let mut amendments = Vec::new();
+
+                for amendments_burst in amendments_bursts.iter_mut() {
+                    amendments.extend(amendments_burst.next().unwrap());
+                }
+
+                let _ = pop_inlet.send((batch, amendments)).await;
+            }
+        }
         pop_inlet
     }
 }
