@@ -1,4 +1,5 @@
 use crate::{
+    broadcast::Amendment,
     crypto::{statements::BatchWitness, Certificate},
     server::{batch::Batch, Server},
     system::Membership,
@@ -16,8 +17,14 @@ use talk::crypto::primitives::hash::Hash;
 
 use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
 
+pub(in crate::server::server) struct AmendedDelivery {
+    pub height: u64,
+    pub amended_root: Hash,
+    pub amendments: Vec<Amendment>,
+}
+
 type BatchOutlet = MpscReceiver<(Batch, DeliveryInlet)>;
-type DeliveryInlet = OneshotSender<u64>;
+type DeliveryInlet = OneshotSender<AmendedDelivery>;
 
 #[derive(Doom)]
 enum ProcessError {
@@ -102,15 +109,21 @@ impl Server {
         pending_deliveries: &mut Vec<(u64, Hash)>,
     ) {
         while !pending_deliveries.is_empty() {
-            let (_, batch_root) = pending_deliveries.last().unwrap();
+            let (height, batch_root) = *pending_deliveries.last().unwrap();
 
-            match Self::remove_pending_batch(pending_batches, batch_root) {
+            match Self::remove_pending_batch(pending_batches, &batch_root) {
                 Some((batch, delivery_inlet)) => {
-                    let (height, _) = pending_deliveries.pop().unwrap();
+                    pending_deliveries.pop().unwrap();
 
-                    Self::process(height, batch);
+                    let (amended_root, amendments) = Self::process(batch);
 
-                    let _ = delivery_inlet.send(height);
+                    let amended_delivery = AmendedDelivery {
+                        height,
+                        amended_root,
+                        amendments,
+                    };
+
+                    let _ = delivery_inlet.send(amended_delivery);
                 }
                 None => break,
             }
@@ -130,7 +143,9 @@ impl Server {
         Ok(root)
     }
 
-    fn process(_height: u64, _batch: Batch) {
+    fn process(_batch: Batch) -> (Hash, Vec<Amendment>) {
         // TODO: Deduplication and applying the batch
+        
+        (_batch.root(), Vec::new())
     }
 }

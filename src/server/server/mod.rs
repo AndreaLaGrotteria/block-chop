@@ -1,10 +1,10 @@
 use crate::{
-    broadcast::CompressedBatch,
+    broadcast::{CompressedBatch, DeliveryShard},
     crypto::{
         statements::{BatchDelivery, BatchWitness},
         Certificate,
     },
-    server::{Batch, BatchError, ServerSettings},
+    server::{server::deliver::AmendedDelivery, Batch, BatchError, ServerSettings},
     system::{Directory, Membership},
     total_order::Broadcast,
 };
@@ -27,7 +27,7 @@ use tokio::{
 };
 
 type BatchInlet = MpscSender<(Batch, DeliveryInlet)>;
-type DeliveryInlet = OneshotSender<u64>;
+type DeliveryInlet = OneshotSender<AmendedDelivery>;
 
 pub struct Server {
     _fuse: Fuse,
@@ -206,17 +206,28 @@ impl Server {
         let submission = bincode::serialize(&(root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
-        if let Ok(height) = delivery_outlet.await {
-            // Always Ok unless `Server` is shutting down
+        // Always Ok unless `Server` is shutting down
+        if let Ok(AmendedDelivery {
+            height,
+            amended_root,
+            amendments,
+        }) = delivery_outlet.await
+        {
             let statement = BatchDelivery {
                 height: &height,
-                root: &root,
+                root: &amended_root,
             };
 
-            let order_shard = keychain.multisign(&statement).unwrap();
+            let multisignature = keychain.multisign(&statement).unwrap();
+
+            let amended_delivery = DeliveryShard {
+                height,
+                amendments,
+                multisignature,
+            };
 
             session
-                .send_raw::<(u64, MultiSignature)>(&(height, order_shard))
+                .send_raw::<DeliveryShard>(&amended_delivery)
                 .await
                 .pot(ServeError::ConnectionError, here!())?;
         }
@@ -234,9 +245,13 @@ mod deliver;
 mod tests {
     use super::*;
 
-    use crate::{broadcast::PACKING, crypto::statements::Reduction, total_order::LoopBack, Entry};
+    use crate::{broadcast::{PACKING, Amendment}, crypto::statements::Reduction, total_order::LoopBack, Entry};
 
-    use std::{collections::HashMap, iter, net::SocketAddr};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        iter,
+        net::SocketAddr,
+    };
 
     use futures::stream::{FuturesUnordered, StreamExt};
 
@@ -347,6 +362,7 @@ mod tests {
         let connector = SessionConnector::new(connector);
 
         let compressed_batch = fake_batch(&clients, 1);
+        let ids = compressed_batch.ids.uncram().unwrap();
 
         let mut sessions = membership
             .servers()
@@ -375,7 +391,8 @@ mod tests {
             session.send_raw(&false).await.unwrap();
         }
 
-        let batch_root = Batch::expand_unverified(compressed_batch).unwrap().root();
+        let mut batch = Batch::expand_unverified(compressed_batch).unwrap();
+        let batch_root = batch.root();
 
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitness::new(batch_root);
@@ -392,23 +409,51 @@ mod tests {
 
         let mut responses = Vec::new();
         for (identity, session) in sessions.iter_mut() {
-            let (height, multisignature) = session
-                .receive_raw::<(u64, MultiSignature)>()
-                .await
-                .unwrap();
+            let mut delivery_shard = session.receive_raw::<DeliveryShard>().await.unwrap();
 
-            let statement = BatchDelivery {
-                root: &batch_root,
-                height: &height,
-            };
-            let keycard = membership.servers().get(&identity).unwrap();
+            delivery_shard.amendments.sort();
 
-            multisignature.verify([keycard], &statement).unwrap();
-
-            responses.push((*identity, multisignature));
+            responses.push((*identity, delivery_shard));
         }
 
-        let _certificate = Certificate::aggregate_quorum(&membership, responses);
+        let mut counts = BTreeMap::new();
+        for core_response in responses.iter_mut().map(|x| (&x.1.amendments, &x.1.height)) {
+            *counts
+                .entry((core_response.0, core_response.1))
+                .or_insert(0) += 1;
+        }
+
+        let ((amendments, height), _) = counts.into_iter().max_by_key(|&(_, count)| count).unwrap();
+        let amendments = amendments.clone();
+        let height = *height;
+
+        for amendment in amendments.iter() {
+            match amendment {
+                Amendment::Nudge { id, sequence } => {
+                    let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
+                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    entry.sequence = *sequence;
+                    batch.entries.set(index, Some(entry)).unwrap();
+                },
+                Amendment::Drop { id } => {
+                    let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
+                    batch.entries.set(index, None).unwrap();
+                },
+        }}
+
+        let good_responses = responses.iter().filter_map(|(identity, delivery_shard)| {
+            if (&delivery_shard.amendments, delivery_shard.height) == (&amendments, height) {
+                Some((*identity, delivery_shard.multisignature))
+            } else {
+                None
+            }
+        });
+
+        let statement = BatchDelivery { height: &height, root: &batch.root() };
+
+        let certificate = Certificate::aggregate_quorum(&membership, good_responses);
+
+        certificate.verify_quorum(&membership, &statement).unwrap();
 
         println!("Obtained delivery certificate!");
     }
