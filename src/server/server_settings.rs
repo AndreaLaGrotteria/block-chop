@@ -2,6 +2,7 @@
 pub struct ServerSettings {
     pub serve_tasks: usize,
     pub batch_channel_capacity: usize,
+    pub apply_channel_capacity: usize,
 }
 
 impl Default for ServerSettings {
@@ -9,6 +10,7 @@ impl Default for ServerSettings {
         ServerSettings {
             serve_tasks: 27,
             batch_channel_capacity: 10_000,
+            apply_channel_capacity: 10_000,
         }
     }
 }

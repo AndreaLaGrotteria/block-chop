@@ -10,6 +10,7 @@ use crate::{
     },
     system::{Directory, Membership},
     total_order::Broadcast,
+    Entry,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -24,15 +25,21 @@ use talk::{
 
 use tokio::{
     sync::{
-        mpsc, mpsc::Sender as MpscSender, oneshot, oneshot::Sender as OneshotSender, Semaphore,
+        mpsc,
+        mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
+        oneshot,
+        oneshot::Sender as OneshotSender,
+        Semaphore,
     },
     task,
 };
 
 type BatchInlet = MpscSender<(Batch, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<AmendedDelivery>;
+type ApplyOutlet = MpscReceiver<Batch>;
 
 pub struct Server {
+    apply_outlet: ApplyOutlet,
     _fuse: Fuse,
 }
 
@@ -66,6 +73,7 @@ impl Server {
         {
             let membership = membership.clone();
             let broadcast = broadcast.clone();
+            let settings = settings.clone();
 
             fuse.spawn(async move {
                 Server::listen(
@@ -82,12 +90,30 @@ impl Server {
         }
 
         let deduplicator = Deduplicator::new();
+        let (apply_inlet, apply_outlet) = mpsc::channel(settings.apply_channel_capacity);
 
         fuse.spawn(async move {
-            Server::deliver(membership, broadcast, batch_outlet, deduplicator).await;
+            Server::deliver(
+                membership,
+                broadcast,
+                batch_outlet,
+                deduplicator,
+                apply_inlet,
+            )
+            .await;
         });
 
-        Server { _fuse: fuse }
+        Server {
+            apply_outlet,
+            _fuse: fuse,
+        }
+    }
+
+    pub async fn next_batch(&mut self) -> Vec<Entry> {
+        Vec::from(self.apply_outlet.recv().await.unwrap().entries)
+            .into_iter()
+            .flat_map(|entry| entry)
+            .collect()
     }
 
     async fn listen(

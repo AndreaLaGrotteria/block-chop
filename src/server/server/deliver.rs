@@ -15,7 +15,10 @@ use std::{
 
 use talk::crypto::primitives::hash::Hash;
 
-use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
+use tokio::sync::{
+    mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
+    oneshot::Sender as OneshotSender,
+};
 
 pub(in crate::server::server) struct AmendedDelivery {
     pub height: u64,
@@ -25,6 +28,7 @@ pub(in crate::server::server) struct AmendedDelivery {
 
 type BatchOutlet = MpscReceiver<(Batch, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<AmendedDelivery>;
+type ApplyInlet = MpscSender<Batch>;
 
 #[derive(Doom)]
 enum ProcessError {
@@ -41,6 +45,7 @@ impl Server {
         broadcast: Arc<dyn Broadcast>,
         mut batches_outlet: BatchOutlet,
         mut deduplicator: Deduplicator,
+        mut apply_inlet: ApplyInlet,
     ) {
         let mut height: u64 = 0;
 
@@ -53,7 +58,7 @@ impl Server {
                     match out {
                         Some((batch, delivery_inlet)) => {
                             Self::add_pending_batch(&mut pending_batches, batch, delivery_inlet);
-                            Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator).await;
+                            Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
                         }
                         None => return, // `Server` has dropped, shutdown
                     }
@@ -61,7 +66,7 @@ impl Server {
                 submission = broadcast.deliver() => {
                     if let Ok(delivery) = Self::validate(&membership, &submission) {
                         pending_deliveries.push((height, delivery));
-                        Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator).await;
+                        Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
                     }
 
                     height += 1;
@@ -109,6 +114,7 @@ impl Server {
         pending_batches: &mut HashMap<Hash, Vec<(Batch, DeliveryInlet)>>,
         pending_deliveries: &mut Vec<(u64, Hash)>,
         deduplicator: &mut Deduplicator,
+        apply_inlet: &mut ApplyInlet,
     ) {
         while !pending_deliveries.is_empty() {
             let (height, batch_root) = *pending_deliveries.last().unwrap();
@@ -117,7 +123,8 @@ impl Server {
                 Some((batch, delivery_inlet)) => {
                     pending_deliveries.pop().unwrap();
 
-                    let (amended_root, amendments) = Self::process(batch, deduplicator);
+                    let (amended_root, amendments) =
+                        Self::process(batch, deduplicator, apply_inlet).await;
 
                     let amended_delivery = AmendedDelivery {
                         height,
@@ -145,9 +152,17 @@ impl Server {
         Ok(root)
     }
 
-    fn process(_batch: Batch, _deduplicator: &mut Deduplicator) -> (Hash, Vec<Amendment>) {
-        // TODO: Deduplication and applying the batch
+    async fn process(
+        _batch: Batch,
+        _deduplicator: &mut Deduplicator,
+        apply_inlet: &mut ApplyInlet,
+    ) -> (Hash, Vec<Amendment>) {
+        let deduplicated_batch = _batch; // TODO: Deduplication
 
-        (_batch.root(), Vec::new())
+        let amended_root = deduplicated_batch.root();
+
+        let _ = apply_inlet.send(deduplicated_batch).await;
+
+        (amended_root, Vec::new())
     }
 }
