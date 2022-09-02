@@ -36,6 +36,7 @@ pub(crate) struct CompressedBatch {
 }
 
 impl CompressedBatch {
+    #[allow(dead_code)]
     #[cfg(feature = "benchmark")]
     pub fn random_fully_reduced(
         directory: &Directory,
