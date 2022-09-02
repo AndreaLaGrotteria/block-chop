@@ -84,8 +84,7 @@ impl Batch {
         for (index, (id, message)) in ids.iter().copied().zip(messages.iter()).enumerate() {
             let keycard = directory
                 .get(id)
-                .ok_or(BatchError::IdUnknown.into_top())
-                .spot(here!())?;
+                .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
 
             if let Some(straggler) = stragglers.peek().filter(|straggler| straggler.id == id) {
                 let statement = BroadcastStatement {
