@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{Amendment, Message},
+    broadcast::{Amendment, Entry, Message},
     server::Batch,
 };
 
@@ -287,38 +287,9 @@ impl Deduplicator {
                         .iter()
                         .filter_map(|entry| {
                             let entry = entry.as_ref().unwrap();
+                            let log = snap.get_mut((entry.id - range.start) as usize).unwrap();
 
-                            match snap.get_mut((entry.id - range.start) as usize).unwrap() {
-                                Some(log) => {
-                                    if entry.message == log.last_message {
-                                        if entry.sequence != log.last_sequence {
-                                            Some(Amendment::Nudge {
-                                                id: entry.id,
-                                                sequence: log.last_sequence,
-                                            })
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        if entry.sequence > log.last_sequence {
-                                            log.last_sequence = entry.sequence;
-                                            log.last_message = entry.message;
-
-                                            None
-                                        } else {
-                                            Some(Amendment::Drop { id: entry.id })
-                                        }
-                                    }
-                                }
-                                log => {
-                                    *log = Some(Log {
-                                        last_sequence: entry.sequence,
-                                        last_message: entry.message,
-                                    });
-
-                                    None
-                                }
-                            }
+                            Deduplicator::amend(log, entry)
                         })
                         .collect::<Vec<_>>()
                 })
@@ -336,6 +307,40 @@ impl Deduplicator {
         join_amendments_burst_inlet: AmendmentsBurstInlet,
     ) -> Vec<Option<Log>> {
         Vec::new()
+    }
+
+    fn amend(log: &mut Option<Log>, entry: &Entry) -> Option<Amendment> {
+        match log {
+            Some(log) => {
+                if entry.message == log.last_message {
+                    if entry.sequence != log.last_sequence {
+                        Some(Amendment::Nudge {
+                            id: entry.id,
+                            sequence: log.last_sequence,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    if entry.sequence > log.last_sequence {
+                        log.last_sequence = entry.sequence;
+                        log.last_message = entry.message;
+
+                        None
+                    } else {
+                        Some(Amendment::Drop { id: entry.id })
+                    }
+                }
+            }
+            log => {
+                *log = Some(Log {
+                    last_sequence: entry.sequence,
+                    last_message: entry.message,
+                });
+
+                None
+            }
+        }
     }
 
     async fn join(
