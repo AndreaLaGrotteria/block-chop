@@ -1,24 +1,33 @@
 use crate::{
     broadcast::CompressedBatch,
-    crypto::{statements::BatchWitness, Certificate},
+    crypto::{
+        statements::{BatchDelivery, BatchWitness},
+        Certificate,
+    },
     server::{Batch, BatchError, ServerSettings},
     system::{Directory, Membership},
     total_order::Broadcast,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
-use tokio::{sync::Semaphore, task};
 
 use std::sync::Arc;
 
 use talk::{
-    crypto::{
-        primitives::{hash::Hash, multi::Signature as MultiSignature},
-        KeyChain,
-    },
+    crypto::{primitives::multi::Signature as MultiSignature, KeyChain},
     net::{Session, SessionListener},
     sync::fuse::Fuse,
 };
+
+use tokio::{
+    sync::{
+        mpsc, mpsc::Sender as MpscSender, oneshot, oneshot::Sender as OneshotSender, Semaphore,
+    },
+    task,
+};
+
+type BatchInlet = MpscSender<(Batch, DeliveryInlet)>;
+type DeliveryInlet = OneshotSender<u64>;
 
 pub struct Server {
     _fuse: Fuse,
@@ -49,11 +58,28 @@ impl Server {
         let broadcast = Arc::new(broadcast);
         let fuse = Fuse::new();
 
+        let (batch_inlet, batch_outlet) = mpsc::channel(settings.batch_channel_capacity);
+
+        {
+            let membership = membership.clone();
+            let broadcast = broadcast.clone();
+
+            fuse.spawn(async move {
+                Server::listen(
+                    keychain,
+                    membership,
+                    directory,
+                    broadcast,
+                    batch_inlet,
+                    listener,
+                    settings,
+                )
+                .await;
+            });
+        }
+
         fuse.spawn(async move {
-            Server::listen(
-                keychain, membership, directory, broadcast, listener, settings,
-            )
-            .await;
+            Server::deliver(membership, broadcast, batch_outlet).await;
         });
 
         Server { _fuse: fuse }
@@ -64,11 +90,13 @@ impl Server {
         membership: Membership,
         directory: Directory,
         broadcast: Arc<dyn Broadcast>,
+        batch_inlet: BatchInlet,
         mut listener: SessionListener,
         settings: ServerSettings,
     ) {
         let membership = Arc::new(membership);
         let directory = Arc::new(directory);
+        let batch_inlet = Arc::new(batch_inlet);
 
         let semaphore = Semaphore::new(settings.serve_tasks);
         let semaphore = Arc::new(semaphore);
@@ -82,11 +110,18 @@ impl Server {
             let membership = membership.clone();
             let directory = directory.clone();
             let broadcast = broadcast.clone();
+            let batch_inlet = batch_inlet.clone();
             let semaphore = semaphore.clone();
 
             fuse.spawn(async move {
                 if let Err(error) = Server::serve(
-                    keychain, membership, directory, broadcast, semaphore, session,
+                    keychain,
+                    membership,
+                    directory,
+                    broadcast,
+                    batch_inlet,
+                    semaphore,
+                    session,
                 )
                 .await
                 {
@@ -101,6 +136,7 @@ impl Server {
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         broadcast: Arc<dyn Broadcast>,
+        batch_inlet: Arc<BatchInlet>,
         semaphore: Arc<Semaphore>,
         mut session: Session,
     ) -> Result<(), Top<ServeError>> {
@@ -114,12 +150,12 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        let (root, witness_shard) = {
+        let (batch, witness_shard) = {
             let keychain = keychain.clone();
             let _permit = semaphore.acquire().await.unwrap();
 
             task::spawn_blocking(
-                move || -> Result<(Hash, Option<MultiSignature>), Top<BatchError>> {
+                move || -> Result<(Batch, Option<MultiSignature>), Top<BatchError>> {
                     if verify {
                         let batch = Batch::expand_verified(&directory, compressed_batch)?;
 
@@ -127,11 +163,11 @@ impl Server {
                             .multisign(&BatchWitness::new(batch.root()))
                             .unwrap();
 
-                        Ok((batch.root(), Some(witness_shard)))
+                        Ok((batch, Some(witness_shard)))
                     } else {
                         let batch = Batch::expand_unverified(compressed_batch)?;
 
-                        Ok((batch.root(), None))
+                        Ok((batch, None))
                     }
                 },
             )
@@ -139,6 +175,8 @@ impl Server {
             .unwrap()
             .pot(ServeError::BatchInvalid, here!())?
         };
+
+        let root = batch.root();
 
         if let Some(witness_shard) = witness_shard {
             session
@@ -158,18 +196,38 @@ impl Server {
 
         println!("Certificate valid!");
 
-        // TODO: Send batch to TOB ordering task
+        // Sending batch to be processed upon TOB delivery
+
+        let (delivery_inlet, delivery_outlet) = oneshot::channel();
+        let _ = batch_inlet.send((batch, delivery_inlet)).await;
+
+        // Sending batch to be ordered by TOB
 
         let submission = bincode::serialize(&(root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
-        // TODO: Receive batch ordered command and reply to Broker
+        if let Ok(height) = delivery_outlet.await {
+            // Always Ok unless `Server` is shutting down
+            let statement = BatchDelivery {
+                height: &height,
+                root: &root,
+            };
+
+            let order_shard = keychain.multisign(&statement).unwrap();
+
+            session
+                .send_raw(&order_shard)
+                .await
+                .pot(ServeError::ConnectionError, here!())?;
+        }
 
         session.end();
+
         Ok(())
     }
 }
 
+#[allow(dead_code)]
 mod deliver;
 
 #[cfg(test)]
