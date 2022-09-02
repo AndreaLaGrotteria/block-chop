@@ -257,11 +257,76 @@ impl Deduplicator {
     }
 
     fn process_snap(
-        snap: Snap<Option<Log>>,
+        mut snap: Snap<Option<Log>>,
         range: Range<u64>,
-        process_snap_outlet: BatchBurstOutlet,
+        mut process_snap_outlet: BatchBurstOutlet,
         join_amendments_burst_inlet: AmendmentsBurstInlet,
     ) -> Snap<Option<Log>> {
+        loop {
+            let batch_burst = if let Some(burst) = process_snap_outlet.blocking_recv() {
+                burst
+            } else {
+                break;
+            };
+
+            let amendments_burst = batch_burst
+                .iter()
+                .map(|batch| {
+                    let entries = batch.entries.items();
+
+                    let locate = |id| match entries
+                        .binary_search_by_key(&id, |entry| entry.as_ref().unwrap().id)
+                    {
+                        Ok(index) => index,
+                        Err(index) => index,
+                    };
+
+                    let chunk = &entries[locate(range.start)..locate(range.end)];
+
+                    chunk
+                        .iter()
+                        .filter_map(|entry| {
+                            let entry = entry.as_ref().unwrap();
+
+                            match snap.get_mut((entry.id - range.start) as usize).unwrap() {
+                                Some(log) => {
+                                    if entry.message == log.last_message {
+                                        if entry.sequence != log.last_sequence {
+                                            Some(Amendment::Nudge {
+                                                id: entry.id,
+                                                sequence: log.last_sequence,
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        if entry.sequence > log.last_sequence {
+                                            log.last_sequence = entry.sequence;
+                                            log.last_message = entry.message;
+
+                                            None
+                                        } else {
+                                            Some(Amendment::Drop { id: entry.id })
+                                        }
+                                    }
+                                }
+                                log => {
+                                    *log = Some(Log {
+                                        last_sequence: entry.sequence,
+                                        last_message: entry.message,
+                                    });
+
+                                    None
+                                }
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+
+            let _ = join_amendments_burst_inlet.blocking_send(amendments_burst);
+        }
+
         snap
     }
 

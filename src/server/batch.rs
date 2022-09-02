@@ -11,7 +11,7 @@ use talk::crypto::primitives::sign::Signature;
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {
-    entries: Vector<Option<Entry>, PACKING>,
+    pub entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
