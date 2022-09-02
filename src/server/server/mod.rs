@@ -4,7 +4,10 @@ use crate::{
         statements::{BatchDelivery, BatchWitness},
         Certificate,
     },
-    server::{server::deliver::AmendedDelivery, Batch, BatchError, ServerSettings},
+    server::{
+        deduplicator::Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
+        ServerSettings,
+    },
     system::{Directory, Membership},
     total_order::Broadcast,
 };
@@ -78,8 +81,10 @@ impl Server {
             });
         }
 
+        let deduplicator = Deduplicator::new();
+
         fuse.spawn(async move {
-            Server::deliver(membership, broadcast, batch_outlet).await;
+            Server::deliver(membership, broadcast, batch_outlet, deduplicator).await;
         });
 
         Server { _fuse: fuse }
@@ -245,7 +250,12 @@ mod deliver;
 mod tests {
     use super::*;
 
-    use crate::{broadcast::{PACKING, Amendment}, crypto::statements::Reduction, total_order::LoopBack, Entry};
+    use crate::{
+        broadcast::{Amendment, PACKING},
+        crypto::statements::Reduction,
+        total_order::LoopBack,
+        Entry,
+    };
 
     use std::{
         collections::{BTreeMap, HashMap},
@@ -434,12 +444,13 @@ mod tests {
                     let mut entry = batch.entries.items()[index].clone().unwrap();
                     entry.sequence = *sequence;
                     batch.entries.set(index, Some(entry)).unwrap();
-                },
+                }
                 Amendment::Drop { id } => {
                     let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
                     batch.entries.set(index, None).unwrap();
-                },
-        }}
+                }
+            }
+        }
 
         let good_responses = responses.iter().filter_map(|(identity, delivery_shard)| {
             if (&delivery_shard.amendments, delivery_shard.height) == (&amendments, height) {
@@ -449,7 +460,10 @@ mod tests {
             }
         });
 
-        let statement = BatchDelivery { height: &height, root: &batch.root() };
+        let statement = BatchDelivery {
+            height: &height,
+            root: &batch.root(),
+        };
 
         let certificate = Certificate::aggregate_quorum(&membership, good_responses);
 
