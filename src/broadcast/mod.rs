@@ -1,8 +1,6 @@
 mod amendment;
-
-#[allow(dead_code)]
 mod compressed_batch;
-
+mod delivery_shard;
 mod entry;
 mod message;
 
@@ -14,6 +12,7 @@ pub use message::{Message, MESSAGE_SIZE};
 
 pub(crate) use amendment::Amendment;
 pub(crate) use compressed_batch::CompressedBatch;
+pub(crate) use delivery_shard::DeliveryShard;
 pub(crate) use straggler::Straggler;
 
 pub(crate) const PACKING: usize = 16;
