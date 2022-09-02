@@ -5,13 +5,18 @@ use crate::{
 
 use oh_snap::Snap;
 
-use std::{iter, ops::Range};
+use std::{
+    iter,
+    ops::Range,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use talk::sync::fuse::Fuse;
 
 use tokio::{
     sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender},
-    task,
+    task, time,
 };
 
 type BatchInlet = MpscSender<Batch>;
@@ -20,8 +25,8 @@ type BatchOutlet = MpscReceiver<Batch>;
 type AmendedBatchInlet = MpscSender<(Batch, Vec<Amendment>)>;
 type AmendedBatchOutlet = MpscReceiver<(Batch, Vec<Amendment>)>;
 
-type BatchBurstInlet = MpscSender<Vec<Batch>>;
-type BatchBurstOutlet = MpscReceiver<Vec<Batch>>;
+type BatchBurstInlet = MpscSender<Arc<Vec<Batch>>>;
+type BatchBurstOutlet = MpscReceiver<Arc<Vec<Batch>>>;
 
 type AmendmentsBurstInlet = MpscSender<Vec<Vec<Amendment>>>;
 type AmendmentsBurstOutlet = MpscReceiver<Vec<Vec<Amendment>>>;
@@ -30,6 +35,11 @@ type AmendmentsBurstOutlet = MpscReceiver<Vec<Vec<Amendment>>>;
 
 const TASKS: usize = 4;
 const PIPELINE: usize = 1024;
+const RUN_DURATION: Duration = Duration::from_secs(3600);
+
+const BURST_SIZE: usize = 16;
+const BURST_TIMEOUT: Duration = Duration::from_millis(100);
+const BURST_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(in crate::server) struct Deduplicator {
     dispatch_inlet: BatchInlet,
@@ -204,10 +214,45 @@ impl Deduplicator {
     }
 
     async fn dispatch(
-        dispatch_outlet: BatchOutlet,
+        mut dispatch_outlet: BatchOutlet,
         process_inlets: Vec<BatchBurstInlet>,
         join_batch_burst_inlet: BatchBurstInlet,
     ) -> BatchOutlet {
+        let task_start = Instant::now();
+
+        while task_start.elapsed() < RUN_DURATION {
+            let mut burst = Vec::with_capacity(BURST_SIZE);
+
+            let burst_start = Instant::now();
+
+            while burst.len() < BURST_SIZE && burst_start.elapsed() < BURST_INTERVAL {
+                tokio::select! {
+                    batch = dispatch_outlet.recv() => {
+                        if let Some(batch) = batch {
+                            burst.push(batch);
+                        } else {
+                            // `Deduplicator` has dropped. Idle waiting for task to be cancelled.
+                            // (Note that `return`ing something meaningful is not possible)
+                            loop {
+                                time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+                    },
+                    _ = time::sleep(BURST_INTERVAL) => {}
+                }
+            }
+
+            if !burst.is_empty() {
+                let burst = Arc::new(burst);
+
+                let _ = join_batch_burst_inlet.send(burst.clone()).await;
+
+                for process_inlet in process_inlets.iter() {
+                    let _ = process_inlet.send(burst.clone()).await;
+                }
+            }
+        }
+
         dispatch_outlet
     }
 
