@@ -11,6 +11,7 @@ pub struct BrokerSettings {
 
     pub authentication_burst_size: usize,
     pub authentication_burst_timeout: Duration,
+    pub authentication_burst_interval: Duration,
     pub pool_interval: Duration,
     pub reduction_burst_size: usize,
     pub reduction_interval: Duration,
@@ -30,6 +31,7 @@ impl Default for BrokerSettings {
             authenticate_tasks: num_cpus::get(),
             authentication_burst_size: 2048,
             authentication_burst_timeout: Duration::from_millis(100),
+            authentication_burst_interval: Duration::from_millis(10),
             pool_interval: Duration::from_millis(10),
             reduction_burst_size: 512,
             reduction_interval: Duration::from_millis(10),
