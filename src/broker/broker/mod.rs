@@ -138,3 +138,4 @@ mod handle_requests;
 mod manage_batch;
 mod reduce_batch;
 mod setup_batch;
+mod submit_batch;

@@ -1,6 +1,4 @@
-#[allow(dead_code)]
 mod batch;
-
 mod broker;
 mod broker_settings;
 mod reduction;

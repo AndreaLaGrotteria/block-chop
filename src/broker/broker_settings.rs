@@ -1,4 +1,6 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
+use talk::time::{sleep_schedules::CappedExponential, SleepSchedule};
 
 #[derive(Debug, Clone)]
 pub struct BrokerSettings {
@@ -18,6 +20,9 @@ pub struct BrokerSettings {
     pub authenticate_channel_capacity: usize,
     pub handle_channel_capacity: usize,
     pub reduction_channel_capacity: usize,
+
+    pub submission_schedule: Arc<dyn SleepSchedule>,
+    pub witnessing_timeout: Duration,
 }
 
 impl Default for BrokerSettings {
@@ -36,6 +41,12 @@ impl Default for BrokerSettings {
             authenticate_channel_capacity: 1024,
             handle_channel_capacity: 1024,
             reduction_channel_capacity: 65536,
+            submission_schedule: Arc::new(CappedExponential::new(
+                Duration::from_secs(1),
+                2.,
+                Duration::from_secs(60),
+            )),
+            witnessing_timeout: Duration::from_secs(1),
         }
     }
 }
