@@ -258,7 +258,7 @@ impl Server {
             };
 
             session
-                .send_raw::<DeliveryShard>(&amended_delivery)
+                .send_plain::<DeliveryShard>(&amended_delivery)
                 .await
                 .pot(ServeError::ConnectionError, here!())?;
         }
@@ -448,7 +448,7 @@ mod tests {
 
         let mut responses = Vec::new();
         for (identity, session) in sessions.iter_mut() {
-            let mut delivery_shard = session.receive_raw::<DeliveryShard>().await.unwrap();
+            let mut delivery_shard = session.receive_plain::<DeliveryShard>().await.unwrap();
 
             delivery_shard.amendments.sort();
 
