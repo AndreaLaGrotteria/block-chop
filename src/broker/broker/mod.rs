@@ -134,6 +134,7 @@ impl Broker {
 
 mod authenticate_requests;
 mod broadcast_batch;
+mod deliver;
 mod dispatch_requests;
 mod handle_requests;
 mod manage_batch;
