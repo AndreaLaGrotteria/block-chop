@@ -47,7 +47,7 @@ impl Server {
         mut deduplicator: Deduplicator,
         mut apply_inlet: ApplyInlet,
     ) {
-        let mut height: u64 = 0;
+        let mut height: u64 = 1;
 
         let mut pending_batches: HashMap<Hash, Vec<(Batch, DeliveryInlet)>> = HashMap::new();
         let mut pending_deliveries: Vec<(u64, Hash)> = Vec::new();
