@@ -1,10 +1,6 @@
 use crate::broker::{Broker, BrokerSettings, Request};
 
-use std::{
-    mem,
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{mem, net::SocketAddr, time::Instant};
 
 use talk::net::DatagramReceiver;
 
