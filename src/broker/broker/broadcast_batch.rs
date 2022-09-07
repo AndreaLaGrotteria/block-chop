@@ -419,10 +419,10 @@ mod tests {
 
         let membership = Arc::new(membership);
 
-        let (height, _certificate) = Broker::broadcast(
+        let (height, certificate) = Broker::broadcast(
             &mut batch,
             compressed_batch,
-            membership,
+            membership.clone(),
             session_connector,
             BrokerSettings {
                 totality_timeout: Duration::from_secs(2),
@@ -430,6 +430,12 @@ mod tests {
             },
         )
         .await;
+
+        let statement = BatchDelivery {
+            height: &height,
+            root: &batch.entries.root(),
+        };
+        certificate.verify_quorum(&membership, &statement).unwrap();
 
         println!("Got height ({}) and certificate!!!", height);
         println!("Checking for hanging submissions...");
@@ -481,10 +487,10 @@ mod tests {
 
         let membership = Arc::new(membership);
 
-        let (height, _certificate) = Broker::broadcast(
+        let (height, certificate) = Broker::broadcast(
             &mut batch,
             compressed_batch,
-            membership,
+            membership.clone(),
             session_connector,
             BrokerSettings {
                 totality_timeout: Duration::from_secs(1),
@@ -492,6 +498,12 @@ mod tests {
             },
         )
         .await;
+
+        let statement = BatchDelivery {
+            height: &height,
+            root: &batch.entries.root(),
+        };
+        certificate.verify_quorum(&membership, &statement).unwrap();
 
         println!("Got height ({}) and certificate!!!", height);
         println!("Checking for hanging submissions...");
