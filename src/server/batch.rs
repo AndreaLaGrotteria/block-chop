@@ -211,3 +211,12 @@ impl Batch {
         self.entries.root()
     }
 }
+
+#[cfg(test)]
+pub(crate) fn expanded_batch_entries(
+    compressed_batch: CompressedBatch,
+) -> Vector<Option<Entry>, PACKING> {
+    let Batch { entries } = Batch::expand_unverified(compressed_batch).unwrap();
+
+    entries
+}

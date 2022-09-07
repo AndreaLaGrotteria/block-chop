@@ -4,6 +4,9 @@ mod membership;
 #[cfg(feature = "benchmark")]
 mod passepartout;
 
+#[cfg(test)]
+pub(crate) mod test;
+
 pub use directory::Directory;
 pub use membership::Membership;
 
