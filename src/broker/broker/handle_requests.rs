@@ -2,12 +2,11 @@ use crate::{
     broadcast::Entry,
     broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission},
     crypto::records::Height as HeightRecord,
+    debug, info,
     system::{Directory, Membership},
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
-
-use log::{debug, info};
 
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 

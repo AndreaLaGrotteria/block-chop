@@ -2,10 +2,9 @@ use crate::{
     broadcast::{CompressedBatch, Straggler},
     broker::{Batch, BatchStatus, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
+    debug, info,
     system::Directory,
 };
-
-use log::{debug, info};
 
 use rayon::slice::ParallelSliceMut;
 

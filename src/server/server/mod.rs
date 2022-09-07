@@ -4,6 +4,7 @@ use crate::{
         statements::{BatchDelivery, BatchWitness},
         Certificate,
     },
+    debug,
     server::{
         deduplicator::Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
         ServerSettings,
@@ -225,7 +226,7 @@ impl Server {
             .verify_plurality(membership.as_ref(), &BatchWitness::new(root))
             .pot(ServeError::WitnessInvalid, here!())?;
 
-        println!("Certificate valid!");
+        debug!("Certificate valid!");
 
         // Sending batch to be processed upon TOB delivery
 
@@ -261,6 +262,8 @@ impl Server {
                 .send_plain::<DeliveryShard>(&amended_delivery)
                 .await
                 .pot(ServeError::ConnectionError, here!())?;
+
+            debug!("Sent delivery shard!");
         }
 
         session.end();

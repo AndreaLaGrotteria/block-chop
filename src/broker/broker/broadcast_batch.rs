@@ -5,15 +5,10 @@ use crate::{
         Broker,
     },
     crypto::{statements::BatchDelivery, Certificate},
-    BrokerSettings, Membership,
+    warn, BrokerSettings, Membership,
 };
 
 use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
-
-#[cfg(not(test))]
-use log::warn;
-#[cfg(test)]
-use std::println as warn;
 
 use rand::{seq::SliceRandom, thread_rng};
 

@@ -9,12 +9,10 @@ use crate::{
             ReductionAuthentication as ReductionAuthenticationStatement,
         },
     },
-    Membership,
+    debug, info, Membership,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
-
-use log::{debug, info};
 
 use std::{
     cmp,

@@ -5,10 +5,9 @@ use crate::{
         Broadcast as BroadcastStatement, Reduction as ReductionStatement,
         ReductionAuthentication as ReductionAuthenticationStatement,
     },
+    debug, info,
     system::{Directory, Passepartout},
 };
-
-use log::{debug, info};
 
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
