@@ -3,11 +3,13 @@ use crate::{
     server::Batch,
 };
 
+use futures::{stream::FuturesOrdered, StreamExt};
+
 use oh_snap::Snap;
 
 use std::{
     iter,
-    ops::Range,
+    ops::{Bound, Range, RangeBounds},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -82,39 +84,21 @@ impl Deduplicator {
 
         loop {
             (logs, dispatch_outlet, pop_inlet) = {
-                // Partition `logs` indices in `TASKS` chunks
+                // Partition `logs` in `TASKS` chunks
 
-                let cuts = (0..TASKS)
-                    .map(|task| task * (logs.len() / TASKS))
-                    .chain([logs.len()])
-                    .map(|cut| cut as u64)
-                    .collect::<Vec<_>>();
+                let capacity = logs.len();
 
-                let mut ranges = cuts.windows(2).map(|window| window[0]..window[1]);
+                // Each chunk has `ceil(capacity / TASKS)` elements
+                // (TODO: replace with `div_ceil` when `int_roundings` is stabilized)
+                let chunk_size = (capacity + TASKS - 1) / TASKS;
 
-                // Partition `logs` in `TASKS` `Snap`s
+                let mut snaps = logs.chunks(chunk_size).into_iter();
 
-                let mut snaps = Vec::new();
-
-                for task in 0..(TASKS - 1) {
-                    let cut = (task + 1) * (logs.len() / TASKS);
-
-                    logs = {
-                        let (snap, tail) = logs.snap(cut);
-                        snaps.push(snap);
-                        tail
-                    };
-                }
-
-                snaps.push(logs);
-
-                let mut snaps = snaps.into_iter();
-
-                // Initialize channels and `Fuse`
+                // Initialize channels
 
                 let (process_inlets, process_outlets): (Vec<_>, Vec<_>) =
                     iter::repeat_with(|| mpsc::channel(PIPELINE))
-                        .take(TASKS + 1)
+                        .take(TASKS + 1) // `TASKS` channels for `process_snap`, one channel for `process_tail`
                         .unzip();
 
                 let (join_batch_burst_inlet, join_batch_burst_outlet) = mpsc::channel(PIPELINE);
@@ -123,20 +107,18 @@ impl Deduplicator {
                     Vec<_>,
                     Vec<_>,
                 ) = iter::repeat_with(|| mpsc::channel(PIPELINE))
-                    .take(TASKS + 1)
+                    .take(TASKS + 1) // `TASKS` channels for `process_snap`, one channel for `process_tail`
                     .unzip();
-
-                let fuse = Fuse::new();
 
                 // Start tasks
 
                 let dispatch_task = fuse.spawn(Deduplicator::dispatch(
                     dispatch_outlet,
-                    process_inlets,
                     join_batch_burst_inlet,
+                    process_inlets,
                 ));
 
-                let mut process_snap_tasks = Vec::new();
+                let mut process_snap_tasks = FuturesOrdered::new();
                 let mut process_tail_task = None; // This will hold the handle to the `process_tail` task..
 
                 for (index, (process_outlet, join_amendments_burst_inlet)) in process_outlets
@@ -146,23 +128,19 @@ impl Deduplicator {
                 {
                     if index < TASKS {
                         let snap = snaps.next().unwrap();
-                        let range = ranges.next().unwrap();
 
-                        process_snap_tasks.push(task::spawn_blocking(move || {
+                        process_snap_tasks.push_back(task::spawn_blocking(move || {
                             Deduplicator::process_snap(
                                 snap,
-                                range,
                                 process_outlet,
                                 join_amendments_burst_inlet,
                             )
                         }));
                     } else {
-                        let offset = *cuts.last().unwrap();
-
                         // .. which is always set here (although the compiler cannot tell)..
                         process_tail_task = Some(task::spawn_blocking(move || {
                             Deduplicator::process_tail(
-                                offset,
+                                capacity as u64,
                                 process_outlet,
                                 join_amendments_burst_inlet,
                             )
@@ -181,16 +159,15 @@ impl Deduplicator {
 
                 // Wait for tasks to complete, retrieve channels and `Snap`s
 
-                // The `join()` task owns the `Fuse` on which all tasks are `spawn()`ed,
+                // The `run` task owns the `Fuse` on which all tasks are `spawn()`ed,
                 // hence all tasks can be joined safely
 
                 let dispatch_outlet = dispatch_task.await.unwrap().unwrap();
 
-                let mut snaps = Vec::new();
-
-                for process_snap_task in process_snap_tasks {
-                    snaps.push(process_snap_task.await.unwrap());
-                }
+                let snaps = process_snap_tasks
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>()
+                    .await;
 
                 let mut tail = process_tail_task.await.unwrap();
                 let pop_inlet = join_task.await.unwrap().unwrap();
@@ -215,12 +192,16 @@ impl Deduplicator {
 
     async fn dispatch(
         mut dispatch_outlet: BatchOutlet,
-        process_inlets: Vec<BatchBurstInlet>,
         join_batch_burst_inlet: BatchBurstInlet,
+        process_inlets: Vec<BatchBurstInlet>,
     ) -> BatchOutlet {
         let task_start = Instant::now();
 
+        // Run task for `RUN_DURATION`
+
         while task_start.elapsed() < RUN_DURATION {
+            // Collect burst of `Batch`es
+
             let mut burst = Vec::with_capacity(BURST_SIZE);
 
             let burst_start = Instant::now();
@@ -242,57 +223,24 @@ impl Deduplicator {
                 }
             }
 
+            // Send `burst` to `join` and `process_*` tasks
+
             if !burst.is_empty() {
                 let burst = Arc::new(burst);
-
-                let _ = join_batch_burst_inlet.send(burst.clone()).await;
 
                 for process_inlet in process_inlets.iter() {
                     let _ = process_inlet.send(burst.clone()).await;
                 }
+
+                let _ = join_batch_burst_inlet.send(burst).await;
             }
         }
 
         dispatch_outlet
     }
 
-    fn amend(log: &mut Option<Log>, entry: &Entry) -> Option<Amendment> {
-        match log {
-            Some(log) => {
-                if entry.message == log.last_message {
-                    if entry.sequence != log.last_sequence {
-                        Some(Amendment::Nudge {
-                            id: entry.id,
-                            sequence: log.last_sequence,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    if entry.sequence > log.last_sequence {
-                        log.last_sequence = entry.sequence;
-                        log.last_message = entry.message;
-
-                        None
-                    } else {
-                        Some(Amendment::Drop { id: entry.id })
-                    }
-                }
-            }
-            log => {
-                *log = Some(Log {
-                    last_sequence: entry.sequence,
-                    last_message: entry.message,
-                });
-
-                None
-            }
-        }
-    }
-
     fn process_snap(
         mut snap: Snap<Option<Log>>,
-        range: Range<u64>,
         mut process_snap_outlet: BatchBurstOutlet,
         join_amendments_burst_inlet: AmendmentsBurstInlet,
     ) -> Snap<Option<Log>> {
@@ -300,25 +248,24 @@ impl Deduplicator {
             let batch_burst = if let Some(burst) = process_snap_outlet.blocking_recv() {
                 burst
             } else {
+                // Either the current iteration of `run` concluded, or
+                // `Deduplicator` has dropped: shutdown in both cases.
                 break;
             };
 
             let amendments_burst = batch_burst
                 .iter()
                 .map(|batch| {
-                    let entries = batch.entries.items();
+                    let range: &Range<_> = snap.range(); // Enforce `Range` type to prevent silent changes in `Snap`'s interface
 
-                    let locate = |id| match entries
-                        .binary_search_by_key(&id, |entry| entry.as_ref().unwrap().id)
-                    {
-                        Ok(index) => index,
-                        Err(index) => index,
+                    let range = Range {
+                        start: range.start as u64,
+                        end: range.end as u64,
                     };
 
-                    let chunk = &entries[locate(range.start)..locate(range.end)];
+                    let crop = Deduplicator::crop(batch.entries.items(), range.clone());
 
-                    chunk
-                        .iter()
+                    crop.iter()
                         .filter_map(|entry| {
                             let entry = entry.as_ref().unwrap();
                             let log = snap.get_mut((entry.id - range.start) as usize).unwrap();
@@ -346,30 +293,24 @@ impl Deduplicator {
             let batch_burst = if let Some(burst) = process_tail_outlet.blocking_recv() {
                 burst
             } else {
+                // Either the current iteration of `run` concluded, or
+                // `Deduplicator` has dropped: shutdown in both cases.
                 break;
             };
 
             let amendments_burst = batch_burst
                 .iter()
                 .map(|batch| {
-                    let entries = batch.entries.items();
-                    let reach = (entries.last().unwrap().as_ref().unwrap().id - offset) as usize;
+                    let top_id = batch.entries.items().last().unwrap().as_ref().unwrap().id;
+                    let capacity_required = ((top_id - offset) as usize) + 1; // `tail.get_mut(top_id - offset)` is invoked later
 
-                    if reach > tail.len() {
-                        tail.resize(reach, None);
+                    if capacity_required > tail.len() {
+                        tail.resize(capacity_required, None);
                     }
 
-                    let locate = |id| match entries
-                        .binary_search_by_key(&id, |entry| entry.as_ref().unwrap().id)
-                    {
-                        Ok(index) => index,
-                        Err(index) => index,
-                    };
+                    let crop = Deduplicator::crop(batch.entries.items(), offset..);
 
-                    let chunk = &entries[locate(offset)..];
-
-                    chunk
-                        .iter()
+                    crop.iter()
                         .filter_map(|entry| {
                             let entry = entry.as_ref().unwrap();
                             let log = tail.get_mut((entry.id - offset) as usize).unwrap();
@@ -392,11 +333,17 @@ impl Deduplicator {
         pop_inlet: AmendedBatchInlet,
     ) -> AmendedBatchInlet {
         loop {
-            let batch_burst = if let Some(burst) = join_batch_burst_outlet.recv().await {
+            // Receive next burst of `Batch`es from `dispatch`
+
+            let mut batch_burst = if let Some(burst) = join_batch_burst_outlet.recv().await {
+                // Either the current iteration of `run` concluded, or
+                // `Deduplicator` has dropped: shutdown in both cases.
                 burst
             } else {
                 break;
             };
+
+            // Receive one burst of `Vec<Amendment>`s from each `process_*`
 
             let mut amendments_bursts = Vec::with_capacity(TASKS + 1);
 
@@ -414,20 +361,31 @@ impl Deduplicator {
                         }
                     };
 
-                amendments_bursts.push(amendments_burst);
+                amendments_bursts.push(amendments_burst.into_iter());
             }
 
-            let batch_burst = match Arc::try_unwrap(batch_burst) {
-                Ok(batch_burst) => batch_burst,
-                Err(_) => unreachable!(),
+            // Extract inner `Vec<Batch>` from `batch_burst`
+
+            // Note that:
+            // - `batch_burst` was received from `dispatch`, so `dispatch` owns
+            //   no copy of `batch_burst`'s `Arc`.
+            // - An `amendments_burst` was received from every `process_snap` and
+            //   `process_tail`, and both drop their copy of `batch_burst`'s `Arc`
+            //   after sending their `amendments_burst`.
+            // Therefore, `batch_burst` is eventually owned only by `join`.
+            let batch_burst = loop {
+                // This loop will (nearly) always exit on its first iteration.
+                // Further iterations happen only in the off-chance `batch_burst`
+                // is not decreffed in a timely fashion by `process_*`.
+                batch_burst = match Arc::try_unwrap(batch_burst) {
+                    Ok(batch_burst) => break batch_burst,
+                    Err(batch_burst) => batch_burst,
+                };
             };
 
-            let mut batch_burst = batch_burst.into_iter();
-
-            let mut amendments_bursts = amendments_bursts
-                .into_iter()
-                .map(IntoIterator::into_iter)
-                .collect::<Vec<_>>();
+            // For each `Batch` in `batch_burst`, concatenate the corresponding
+            // `Vec<Amendment>`s from each element of `amendments_burst`. Send
+            // each resulting amended batch to `pop`
 
             for batch in batch_burst {
                 let mut amendments = Vec::new();
@@ -439,6 +397,230 @@ impl Deduplicator {
                 let _ = pop_inlet.send((batch, amendments)).await;
             }
         }
+
         pop_inlet
+    }
+
+    fn crop<R>(entries: &[Option<Entry>], range: R) -> &[Option<Entry>]
+    where
+        R: RangeBounds<u64>,
+    {
+        // Provided with an `id`, returns the index at which `id` appears
+        // in `entries` (if such an entry exists), or the index at which
+        // an entry with id `id` could be inserted (otherwise)
+
+        let fit = |id| match entries.binary_search_by_key(&id, |entry| entry.as_ref().unwrap().id) {
+            Ok(index) => index,
+            Err(index) => index,
+        };
+
+        // Map `range` (on ids) onto the bounds of a `Range` (on indices) (start included, end excluded)
+
+        let start = match range.start_bound() {
+            Bound::Included(start) => fit(*start), // Include `fit(start)`
+            Bound::Excluded(start) => fit(*start + 1), // Include `fit(start) + 1`
+            Bound::Unbounded => 0,                 // Include everything
+        };
+
+        let end = match range.end_bound() {
+            Bound::Included(end) => fit(*end + 1), // Exclude `fit(end)`
+            Bound::Excluded(end) => fit(*end),     // Exclude `fit(end)`
+            Bound::Unbounded => entries.len(),     // Include everything
+        };
+
+        &entries[start..end]
+    }
+
+    fn amend(log: &mut Option<Log>, entry: &Entry) -> Option<Amendment> {
+        match log {
+            Some(log) => {
+                if entry.message == log.last_message {
+                    if entry.sequence != log.last_sequence {
+                        // The same message was previously delivered with a different
+                        // sequence number: acknowledge with old sequence number to
+                        // avoid duplicated delivery certificates, do not deliver.
+
+                        Some(Amendment::Nudge {
+                            id: entry.id,
+                            sequence: log.last_sequence,
+                        })
+                    } else {
+                        // The same message was previously delivered with the same sequence
+                        // number: acknowledge again, but do not deliver.
+
+                        Some(Amendment::Ignore { id: entry.id })
+                    }
+                } else {
+                    if entry.sequence > log.last_sequence {
+                        // The message is new and its sequence number is the highest observed
+                        // at delivery time: acknowledge and deliver.
+                        log.last_sequence = entry.sequence;
+                        log.last_message = entry.message;
+
+                        None
+                    } else {
+                        // The message is different from the last observer but its sequence
+                        // number is low: the message cannot be delivered or acknowledged.
+                        Some(Amendment::Drop { id: entry.id })
+                    }
+                }
+            }
+            log => {
+                // No message was previously delivered from `log`: initialize `log`,
+                // deliver, and acknowledge the message.
+
+                *log = Some(Log {
+                    last_sequence: entry.sequence,
+                    last_message: entry.message,
+                });
+
+                None
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crop_manual() {
+        let entries = [3, 6, 9, 10, 13, 14, 18, 200]
+            .into_iter()
+            .map(|id| {
+                Some(Entry {
+                    id,
+                    sequence: Default::default(),
+                    message: Default::default(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let ids = |slice: &[Option<Entry>]| {
+            slice
+                .into_iter()
+                .map(|entry| entry.as_ref().unwrap().id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 10..13)),
+            vec![10]
+        );
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 10..14)),
+            vec![10, 13]
+        );
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 10..=13)),
+            vec![10, 13]
+        );
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 10..=15)),
+            vec![10, 13, 14]
+        );
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 10..)),
+            vec![10, 13, 14, 18, 200]
+        );
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), 6..10)),
+            vec![6, 9]
+        );
+
+        assert_eq!(ids(Deduplicator::crop(entries.as_slice(), 7..10)), vec![9]);
+
+        assert_eq!(
+            ids(Deduplicator::crop(entries.as_slice(), ..10)),
+            vec![3, 6, 9]
+        );
+    }
+
+    #[test]
+    fn crop_exhaustive() {
+        let entry_ids = vec![3, 6, 9, 10, 13, 14, 18];
+
+        let entries = entry_ids
+            .iter()
+            .copied()
+            .map(|id| {
+                Some(Entry {
+                    id,
+                    sequence: Default::default(),
+                    message: Default::default(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let ids = |slice: &[Option<Entry>]| {
+            slice
+                .into_iter()
+                .map(|entry| entry.as_ref().unwrap().id)
+                .collect::<Vec<_>>()
+        };
+
+        for start in 0u64..20 {
+            for end in start..20 {
+                let inclusive_exclusive = ids(Deduplicator::crop(entries.as_slice(), start..end));
+
+                for id in entry_ids.iter().copied() {
+                    let should = id >= start && id < end;
+                    let is = inclusive_exclusive.contains(&id);
+
+                    assert_eq!(should, is);
+                }
+
+                let inclusive_inclusive = ids(Deduplicator::crop(entries.as_slice(), start..=end));
+
+                for id in entry_ids.iter().copied() {
+                    let should = id >= start && id <= end;
+                    let is = inclusive_inclusive.contains(&id);
+
+                    assert_eq!(should, is);
+                }
+
+                let inclusive_open = ids(Deduplicator::crop(entries.as_slice(), start..));
+
+                for id in entry_ids.iter().copied() {
+                    let should = id >= start;
+                    let is = inclusive_open.contains(&id);
+
+                    assert_eq!(should, is);
+                }
+
+                let open_exclusive = ids(Deduplicator::crop(entries.as_slice(), ..end));
+
+                for id in entry_ids.iter().copied() {
+                    let should = id < end;
+                    let is = open_exclusive.contains(&id);
+
+                    assert_eq!(should, is);
+                }
+
+                let open_inclusive = ids(Deduplicator::crop(entries.as_slice(), ..=end));
+
+                for id in entry_ids.iter().copied() {
+                    let should = id <= end;
+                    let is = open_inclusive.contains(&id);
+
+                    assert_eq!(should, is);
+                }
+            }
+        }
+
+        let open_open = ids(Deduplicator::crop(entries.as_slice(), ..));
+
+        for id in entry_ids.iter().copied() {
+            let should = true;
+            let is = open_open.contains(&id);
+
+            assert_eq!(should, is);
+        }
     }
 }
