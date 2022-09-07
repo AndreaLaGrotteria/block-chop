@@ -10,10 +10,14 @@ use crate::{
 
 use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
 
+#[cfg(not(test))]
 use log::warn;
+#[cfg(test)]
+use std::println as warn;
+
 use rand::{seq::SliceRandom, thread_rng};
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
@@ -166,8 +170,10 @@ impl Broker {
         batch.status = BatchStatus::Delivered;
 
         task::spawn(async move {
+            let _fuse = fuse;
+
             let submissions = join_all(handles.into_iter());
-            match timeout(Duration::from_secs(10), submissions).await {
+            match timeout(settings.totality_timeout, submissions).await {
                 Ok(_) => (),
                 Err(_) => warn!("Timeout! Could not finish submitting batch to all servers!"),
             }
@@ -335,5 +341,168 @@ impl<'a> DeliveryCollector<'a> {
                     .map(|(identity, shard)| (identity, shard.multisignature)),
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    use crate::{
+        broadcast::Straggler,
+        broker::submission::Submission,
+        crypto::statements::BatchWitness,
+        server::expanded_batch_entries,
+        system::test::{fake_batch, generate_system},
+    };
+
+    use talk::{
+        crypto::{primitives::hash::hash, KeyChain},
+        net::{test::TestConnector, SessionConnector},
+    };
+    use varcram::VarCram;
+
+    impl Clone for Straggler {
+        fn clone(&self) -> Self {
+            Self {
+                id: self.id.clone(),
+                sequence: self.sequence.clone(),
+                signature: self.signature.clone(),
+            }
+        }
+    }
+
+    impl Clone for CompressedBatch {
+        fn clone(&self) -> Self {
+            let ids = VarCram::cram(self.ids.uncram().unwrap().clone().as_ref());
+            Self {
+                ids,
+                messages: self.messages.clone(),
+                raise: self.raise.clone(),
+                multisignature: self.multisignature.clone(),
+                stragglers: self.stragglers.clone(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_broadcast_0_faulty() {
+        let (clients, _servers, membership, _, connector_map) = generate_system(1000, 4).await;
+
+        let broker = KeyChain::random();
+
+        let connector = TestConnector::new(broker.clone(), connector_map.clone());
+        let session_connector = Arc::new(SessionConnector::new(connector));
+
+        let batch_size = 1;
+        let compressed_batch = fake_batch(&clients, batch_size);
+
+        let entries = expanded_batch_entries(fake_batch(&clients, batch_size));
+        let fake_signature = clients[0]
+            .sign(&BatchWitness::new(hash(&0).unwrap()))
+            .unwrap();
+        let submissions = entries
+            .items()
+            .iter()
+            .map(|item| {
+                let address = "127.0.0.1:8000".parse().unwrap();
+                Submission {
+                    address,
+                    entry: item.as_ref().unwrap().clone(),
+                    signature: fake_signature.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut batch = Batch {
+            status: BatchStatus::Submitting,
+            submissions,
+            raise: 0,
+            entries,
+        };
+
+        let membership = Arc::new(membership);
+
+        let (height, _certificate) = Broker::broadcast(
+            &mut batch,
+            compressed_batch,
+            membership,
+            session_connector,
+            BrokerSettings {
+                totality_timeout: Duration::from_secs(2),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        println!("Got height ({}) and certificate!!!", height);
+        println!("Checking for hanging submissions...");
+
+        time::sleep(Duration::from_secs(3)).await;
+
+        println!("Done!");
+    }
+
+    #[tokio::test]
+    async fn broker_broadcast_1_faulty_server() {
+        let (clients, mut servers, membership, _, connector_map) = generate_system(1000, 4).await;
+
+        let server = servers.pop().unwrap();
+        drop(server);
+
+        time::sleep(Duration::from_millis(100)).await;
+
+        let broker = KeyChain::random();
+
+        let connector = TestConnector::new(broker.clone(), connector_map.clone());
+        let session_connector = Arc::new(SessionConnector::new(connector));
+
+        let batch_size = 1;
+        let compressed_batch = fake_batch(&clients, batch_size);
+
+        let entries = expanded_batch_entries(fake_batch(&clients, batch_size));
+        let fake_signature = clients[0]
+            .sign(&BatchWitness::new(hash(&0).unwrap()))
+            .unwrap();
+        let submissions = entries
+            .items()
+            .iter()
+            .map(|item| {
+                let address = "127.0.0.1:8000".parse().unwrap();
+                Submission {
+                    address,
+                    entry: item.as_ref().unwrap().clone(),
+                    signature: fake_signature.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut batch = Batch {
+            status: BatchStatus::Submitting,
+            submissions,
+            raise: 0,
+            entries,
+        };
+
+        let membership = Arc::new(membership);
+
+        let (height, _certificate) = Broker::broadcast(
+            &mut batch,
+            compressed_batch,
+            membership,
+            session_connector,
+            BrokerSettings {
+                totality_timeout: Duration::from_secs(1),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        println!("Got height ({}) and certificate!!!", height);
+        println!("Checking for hanging submissions...");
+
+        time::sleep(Duration::from_secs(2)).await;
+
+        println!("Done!");
     }
 }
