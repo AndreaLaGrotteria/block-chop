@@ -75,7 +75,7 @@ mod tests {
             session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
-                totality_timeout: Duration::from_millis(250),
+                totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
         )
@@ -88,7 +88,7 @@ mod tests {
 
         println!("GOT RECORD!");
 
-        time::sleep(Duration::from_millis(500)).await;
+        time::sleep(Duration::from_millis(200)).await;
     }
 
     #[tokio::test]
@@ -107,7 +107,7 @@ mod tests {
             session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
-                totality_timeout: Duration::from_millis(250),
+                totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
         )
@@ -122,7 +122,7 @@ mod tests {
 
         println!("GOT RECORD!");
 
-        time::sleep(Duration::from_millis(500)).await;
+        time::sleep(Duration::from_millis(200)).await;
     }
 
     #[tokio::test]
@@ -141,7 +141,7 @@ mod tests {
             session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
-                totality_timeout: Duration::from_millis(250),
+                totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
         )
@@ -156,6 +156,6 @@ mod tests {
 
         println!("GOT RECORD!");
 
-        time::sleep(Duration::from_millis(500)).await;
+        time::sleep(Duration::from_millis(200)).await;
     }
 }

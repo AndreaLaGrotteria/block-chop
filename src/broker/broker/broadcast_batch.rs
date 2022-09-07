@@ -425,7 +425,7 @@ mod tests {
             membership.clone(),
             session_connector,
             BrokerSettings {
-                totality_timeout: Duration::from_secs(2),
+                totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
         )
@@ -440,7 +440,7 @@ mod tests {
         println!("Got height ({}) and certificate!!!", height);
         println!("Checking for hanging submissions...");
 
-        time::sleep(Duration::from_secs(3)).await;
+        time::sleep(Duration::from_millis(200)).await;
 
         println!("Done!");
     }
@@ -493,7 +493,7 @@ mod tests {
             membership.clone(),
             session_connector,
             BrokerSettings {
-                totality_timeout: Duration::from_secs(1),
+                totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
         )
@@ -508,7 +508,7 @@ mod tests {
         println!("Got height ({}) and certificate!!!", height);
         println!("Checking for hanging submissions...");
 
-        time::sleep(Duration::from_secs(2)).await;
+        time::sleep(Duration::from_millis(200)).await;
 
         println!("Done!");
     }
