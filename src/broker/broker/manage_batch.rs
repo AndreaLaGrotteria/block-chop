@@ -46,16 +46,17 @@ impl Broker {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     use crate::{system::test::generate_system, Client, MESSAGE_SIZE};
+
+    use std::time::Duration;
 
     use talk::{
         crypto::KeyChain,
         net::{test::TestConnector, SessionConnector},
     };
+
     use tokio::time;
 
     #[tokio::test]
