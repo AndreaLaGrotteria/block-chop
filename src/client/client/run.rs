@@ -9,7 +9,7 @@ use crate::{
             ReductionAuthentication as ReductionAuthenticationStatement,
         },
     },
-    debug, info, Membership,
+    debug, info, warn, Membership,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -238,11 +238,12 @@ impl Client {
                 sequence,
                 proof,
             } => {
-                info!("Handling delivery.");
+                info!("Handling delivery. Sequence: {}", sequence);
 
                 // Verify that the delivered sequence is within the current sequence range
 
                 if !sequence_range.contains(&sequence) {
+                    warn!("Sequence outside of sequence range!");
                     return HandleError::ReplayedDelivery.fail().spot(here!());
                 }
 
@@ -257,6 +258,10 @@ impl Client {
                 let record = DeliveryRecord::new(height, root, certificate, entry, proof);
 
                 if record.verify(&membership).is_err() {
+                    warn!(
+                        "Invalid record! {:?}",
+                        record.verify(&membership).unwrap_err()
+                    );
                     return HandleError::InvalidDeliveryRecord.fail().spot(here!());
                 }
 

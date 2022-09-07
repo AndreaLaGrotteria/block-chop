@@ -17,7 +17,7 @@ pub struct Delivery {
     height: u64,
     root: Hash,
     certificate: Certificate,
-    entry: Entry,
+    entry: Option<Entry>,
     proof: Proof,
 }
 
@@ -41,13 +41,13 @@ impl Delivery {
             height,
             root,
             certificate,
-            entry,
+            entry: Some(entry),
             proof,
         }
     }
 
     pub fn entry(&self) -> &Entry {
-        &self.entry
+        &self.entry.as_ref().unwrap()
     }
 
     pub(crate) fn height(&self) -> Height {
