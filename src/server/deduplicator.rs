@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Amendment, Entry, Message},
-    server::Batch,
+    server::{Batch, DeduplicatorSettings},
 };
 
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -33,16 +33,6 @@ type BatchBurstOutlet = MpscReceiver<Arc<Vec<Batch>>>;
 type AmendmentsBurstInlet = MpscSender<Vec<Vec<Amendment>>>;
 type AmendmentsBurstOutlet = MpscReceiver<Vec<Vec<Amendment>>>;
 
-// TODO: Turn the following constants into settings
-
-const TASKS: usize = 4;
-const PIPELINE: usize = 1024;
-const RUN_DURATION: Duration = Duration::from_secs(3600);
-
-const BURST_SIZE: usize = 16;
-const BURST_TIMEOUT: Duration = Duration::from_millis(100);
-const BURST_INTERVAL: Duration = Duration::from_millis(10);
-
 pub(in crate::server) struct Deduplicator {
     dispatch_inlet: BatchInlet,
     pop_outlet: AmendedBatchOutlet,
@@ -56,16 +46,21 @@ struct Log {
 }
 
 impl Deduplicator {
-    pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = cmp::max(capacity, TASKS);
+    pub fn with_capacity(capacity: usize, settings: DeduplicatorSettings) -> Self {
+        let capacity = cmp::max(capacity, settings.tasks);
         let logs = vec![None; capacity];
 
-        let (dispatch_inlet, dispatch_outlet) = mpsc::channel(PIPELINE);
-        let (pop_inlet, pop_outlet) = mpsc::channel(PIPELINE);
+        let (dispatch_inlet, dispatch_outlet) = mpsc::channel(settings.pipeline);
+        let (pop_inlet, pop_outlet) = mpsc::channel(settings.pipeline);
 
         let fuse = Fuse::new();
 
-        fuse.spawn(Deduplicator::run(logs, dispatch_outlet, pop_inlet));
+        fuse.spawn(Deduplicator::run(
+            logs,
+            dispatch_outlet,
+            pop_inlet,
+            settings,
+        ));
 
         Deduplicator {
             dispatch_inlet,
@@ -90,6 +85,7 @@ impl Deduplicator {
         logs: Vec<Option<Log>>,
         mut dispatch_outlet: BatchOutlet,
         mut pop_inlet: AmendedBatchInlet,
+        settings: DeduplicatorSettings,
     ) {
         let mut logs = Snap::new(logs);
 
@@ -97,30 +93,31 @@ impl Deduplicator {
 
         loop {
             (logs, dispatch_outlet, pop_inlet) = {
-                // Partition `logs` in `TASKS` chunks
+                // Partition `logs` in `settings.tasks` chunks
 
                 let capacity = logs.len();
 
-                // Each chunk has `ceil(capacity / TASKS)` elements
+                // Each chunk has `ceil(capacity / settings.tasks)` elements
                 // (TODO: replace with `div_ceil` when `int_roundings` is stabilized)
-                let chunk_size = (capacity + TASKS - 1) / TASKS;
+                let chunk_size = (capacity + settings.tasks - 1) / settings.tasks;
 
                 let mut snaps = logs.chunks(chunk_size).into_iter();
 
                 // Initialize channels
 
                 let (process_inlets, process_outlets): (Vec<_>, Vec<_>) =
-                    iter::repeat_with(|| mpsc::channel(PIPELINE))
-                        .take(TASKS + 1) // `TASKS` channels for `process_snap`, one channel for `process_tail`
+                    iter::repeat_with(|| mpsc::channel(settings.pipeline))
+                        .take(settings.tasks + 1) // `settings.tasks` channels for `process_snap`, one channel for `process_tail`
                         .unzip();
 
-                let (join_batch_burst_inlet, join_batch_burst_outlet) = mpsc::channel(PIPELINE);
+                let (join_batch_burst_inlet, join_batch_burst_outlet) =
+                    mpsc::channel(settings.pipeline);
 
                 let (join_amendments_burst_inlets, join_amendments_burst_outlets): (
                     Vec<_>,
                     Vec<_>,
-                ) = iter::repeat_with(|| mpsc::channel(PIPELINE))
-                    .take(TASKS + 1) // `TASKS` channels for `process_snap`, one channel for `process_tail`
+                ) = iter::repeat_with(|| mpsc::channel(settings.pipeline))
+                    .take(settings.tasks + 1) // `settings.tasks` channels for `process_snap`, one channel for `process_tail`
                     .unzip();
 
                 // Start tasks
@@ -129,6 +126,7 @@ impl Deduplicator {
                     dispatch_outlet,
                     join_batch_burst_inlet,
                     process_inlets,
+                    settings.clone(),
                 ));
 
                 let mut process_snap_tasks = FuturesOrdered::new();
@@ -139,7 +137,7 @@ impl Deduplicator {
                     .zip(join_amendments_burst_inlets)
                     .enumerate()
                 {
-                    if index < TASKS {
+                    if index < settings.tasks {
                         let snap = snaps.next().unwrap();
 
                         process_snap_tasks.push_back(task::spawn_blocking(move || {
@@ -168,6 +166,7 @@ impl Deduplicator {
                     join_batch_burst_outlet,
                     join_amendments_burst_outlets,
                     pop_inlet,
+                    settings.clone(),
                 ));
 
                 // Wait for tasks to complete, retrieve channels and `Snap`s
@@ -207,19 +206,22 @@ impl Deduplicator {
         mut dispatch_outlet: BatchOutlet,
         join_batch_burst_inlet: BatchBurstInlet,
         process_inlets: Vec<BatchBurstInlet>,
+        settings: DeduplicatorSettings,
     ) -> BatchOutlet {
         let task_start = Instant::now();
 
-        // Run task for `RUN_DURATION`
+        // Run task for `settings.run_duration`
 
-        while task_start.elapsed() < RUN_DURATION {
+        while task_start.elapsed() < settings.run_duration {
             // Collect burst of `Batch`es
 
-            let mut burst = Vec::with_capacity(BURST_SIZE);
+            let mut burst = Vec::with_capacity(settings.burst_size);
 
             let burst_start = Instant::now();
 
-            while burst.len() < BURST_SIZE && burst_start.elapsed() < BURST_INTERVAL {
+            while burst.len() < settings.burst_size
+                && burst_start.elapsed() < settings.burst_timeout
+            {
                 tokio::select! {
                     batch = dispatch_outlet.recv() => {
                         if let Some(batch) = batch {
@@ -232,7 +234,7 @@ impl Deduplicator {
                             }
                         }
                     },
-                    _ = time::sleep(BURST_INTERVAL) => {}
+                    _ = time::sleep(settings.burst_interval) => {}
                 }
             }
 
@@ -349,6 +351,7 @@ impl Deduplicator {
         mut join_batch_burst_outlet: BatchBurstOutlet,
         mut join_amendments_burst_outlets: Vec<AmendmentsBurstOutlet>,
         pop_inlet: AmendedBatchInlet,
+        settings: DeduplicatorSettings,
     ) -> AmendedBatchInlet {
         loop {
             // Receive next burst of `Batch`es from `dispatch`
@@ -363,7 +366,7 @@ impl Deduplicator {
 
             // Receive one burst of `Vec<Amendment>`s from each `process_*`
 
-            let mut amendments_bursts = Vec::with_capacity(TASKS + 1);
+            let mut amendments_bursts = Vec::with_capacity(settings.tasks + 1);
 
             for join_amendments_burst_outlet in join_amendments_burst_outlets.iter_mut() {
                 let amendments_burst =
@@ -676,7 +679,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_single_log_no_burst_single_entry_batches() {
-        let mut deduplicator = Deduplicator::with_capacity(1);
+        let mut deduplicator = Deduplicator::with_capacity(1, Default::default());
 
         {
             let entries = [(0, 0, 0)];
@@ -751,7 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_single_log_burst_single_entry_batches() {
-        let mut deduplicator = Deduplicator::with_capacity(1);
+        let mut deduplicator = Deduplicator::with_capacity(1, Default::default());
 
         let entries_0 = [(0, 0, 0)];
         deduplicator.push(build_batch(entries_0)).await;
@@ -805,7 +808,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_multiple_log_no_burst_full_uniform_entry_batches() {
-        let mut deduplicator = Deduplicator::with_capacity(128);
+        let mut deduplicator = Deduplicator::with_capacity(128, Default::default());
 
         {
             let entries = (0..128)
@@ -921,7 +924,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_multiple_log_burst_full_uniform_entry_batches() {
-        let mut deduplicator = Deduplicator::with_capacity(128);
+        let mut deduplicator = Deduplicator::with_capacity(128, Default::default());
 
         let entries_0 = (0..128)
             .map(|id| (id, 1024 * id, 1024 * id))
@@ -1023,7 +1026,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_multiple_log_burst_full_uniform_entry_batches_stress_tail() {
-        let mut deduplicator = Deduplicator::with_capacity(0);
+        let mut deduplicator = Deduplicator::with_capacity(0, Default::default());
 
         let entries_0 = (0..64)
             .map(|id| (id, 1024 * id, 1024 * id))
@@ -1122,5 +1125,4 @@ mod tests {
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(amendments.is_empty());
     }
-
 }
