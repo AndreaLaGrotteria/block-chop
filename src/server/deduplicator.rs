@@ -678,7 +678,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_single_log_no_burst_single_entry_batches() {
+    async fn single_log() {
         let mut deduplicator = Deduplicator::with_capacity(1, Default::default());
 
         {
@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_single_log_burst_single_entry_batches() {
+    async fn single_log_burst() {
         let mut deduplicator = Deduplicator::with_capacity(1, Default::default());
 
         let entries_0 = [(0, 0, 0)];
@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_multiple_log_no_burst_full_uniform_entry_batches() {
+    async fn multiple_logs() {
         let mut deduplicator = Deduplicator::with_capacity(128, Default::default());
 
         {
@@ -923,7 +923,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_multiple_log_burst_full_uniform_entry_batches() {
+    async fn multiple_logs_burst() {
         let mut deduplicator = Deduplicator::with_capacity(128, Default::default());
 
         let entries_0 = (0..128)
@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_multiple_log_burst_full_uniform_entry_batches_stress_tail() {
+    async fn stress_tail() {
         let mut deduplicator = Deduplicator::with_capacity(0, Default::default());
 
         let entries_0 = (0..64)
