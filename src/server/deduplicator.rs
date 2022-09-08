@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stress_tail() {
+    async fn tail() {
         let mut deduplicator = Deduplicator::with_capacity(0, Default::default());
 
         let entries_0 = (0..64)
@@ -1063,6 +1063,126 @@ mod tests {
             .collect::<Vec<_>>();
 
         deduplicator.push(build_batch(entries_5.clone())).await;
+
+        let entries_6 = (0..256)
+            .map(|id| (id, 1024 * id + 3, 1024 * id + 3))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_6.clone())).await;
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_0));
+        assert!(amendments.is_empty());
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_1));
+        assert!(amendments.is_empty());
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_2));
+
+        assert_eq!(
+            amendments,
+            (0..128)
+                .map(|id| Amendment::Ignore { id })
+                .collect::<Vec<_>>()
+        );
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_3));
+
+        assert_eq!(
+            amendments,
+            (0..128)
+                .map(|id| Amendment::Nudge {
+                    id,
+                    sequence: 1024 * id + 1
+                })
+                .collect::<Vec<_>>()
+        );
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_4));
+
+        assert_eq!(
+            amendments,
+            (0..128)
+                .map(|id| Amendment::Drop { id })
+                .collect::<Vec<_>>()
+        );
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_5));
+
+        assert_eq!(
+            amendments,
+            (0..128)
+                .map(|id| Amendment::Drop { id })
+                .collect::<Vec<_>>()
+        );
+
+        let (batch, amendments) = deduplicator.pop().await;
+        assert_eq!(batch.entries.items(), &build_entries(entries_6));
+        assert!(amendments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn merge_tail() {
+        let mut deduplicator = Deduplicator::with_capacity(
+            0,
+            DeduplicatorSettings {
+                run_duration: Duration::from_millis(100),
+                ..Default::default()
+            },
+        );
+
+        let entries_0 = (0..64)
+            .map(|id| (id, 1024 * id, 1024 * id))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_0.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
+
+        let entries_1 = (0..128)
+            .map(|id| (id, 1024 * id + 1, 1024 * id + 1))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_1.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
+
+        let entries_2 = (0..128)
+            .map(|id| (id, 1024 * id + 1, 1024 * id + 1))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_2.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
+
+        let entries_3 = (0..128)
+            .map(|id| (id, 1024 * id + 2, 1024 * id + 1))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_3.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
+
+        let entries_4 = (0..128)
+            .map(|id| (id, 1024 * id + 1, 1024 * id + 2))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_4.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
+
+        let entries_5 = (0..128)
+            .map(|id| (id, 1024 * id + 0, 1024 * id + 0))
+            .collect::<Vec<_>>();
+
+        deduplicator.push(build_batch(entries_5.clone())).await;
+
+        time::sleep(Duration::from_millis(200)).await;
 
         let entries_6 = (0..256)
             .map(|id| (id, 1024 * id + 3, 1024 * id + 3))
