@@ -27,6 +27,7 @@ rayon = { version = "1.5.1" }
 futures = { version = "0.3" }
 async-trait = { version = "0.1.56" }
 oh-snap = { version = "0.0.5" }
+sha-1 = { version = "0.10.0" }
 
 serde = { version = "~1.0", features = [ "derive", "rc" ] }
 bincode = { version = "~1.3" }
