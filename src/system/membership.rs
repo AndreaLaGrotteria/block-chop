@@ -29,6 +29,8 @@ pub enum MembershipError {
     #[doom(description("Failed to flush database: {:?}", source))]
     #[doom(wrap(flush_failed))]
     FlushFailed { source: sled::Error },
+    #[doom(description("Insufficient number of servers in database: {:?}"))]
+    LoadExactFailed,
 }
 
 impl Membership {
@@ -76,6 +78,19 @@ impl Membership {
             .collect::<Result<BTreeMap<_, _>, Top<MembershipError>>>()?;
 
         Ok(Membership { servers })
+    }
+
+    pub fn load_exact<P>(path: P, size: usize) -> Result<Self, Top<MembershipError>>
+    where
+        P: AsRef<Path>,
+    {
+        let full_membership = Self::load(path)?;
+
+        if full_membership.servers().len() < size {
+            return MembershipError::LoadExactFailed.fail();
+        }
+
+        Ok(full_membership.truncate(size))
     }
 
     pub fn servers(&self) -> &BTreeMap<Identity, KeyCard> {
