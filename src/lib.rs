@@ -18,7 +18,7 @@ pub use client::Client;
 pub use crypto::{DeliveryRecord, DeliveryRecordError};
 pub use server::Server;
 pub use system::{Directory, Membership};
-pub use total_order::{Broadcast, LoopBack};
+pub use total_order::{BftSmart, Broadcast, HotStuff, LoopBack};
 
 #[cfg(feature = "benchmark")]
 pub use system::Passepartout;
