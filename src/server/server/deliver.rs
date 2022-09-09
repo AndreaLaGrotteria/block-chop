@@ -146,7 +146,7 @@ impl Server {
             .spot(here!())?;
 
         witness
-            .verify_plurality(&membership, &BatchWitness::new(root))
+            .verify_plurality(&membership, &BatchWitness { root: &root })
             .pot(ProcessError::WitnessInvalid, here!())?;
 
         Ok(root)

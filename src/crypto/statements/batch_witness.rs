@@ -5,17 +5,11 @@ use serde::Serialize;
 use talk::crypto::{primitives::hash::Hash, Statement};
 
 #[derive(Serialize)]
-pub(crate) struct BatchWitness {
-    root: Hash,
+pub(crate) struct BatchWitness<'a> {
+    pub root: &'a Hash,
 }
 
-impl BatchWitness {
-    pub fn new(root: Hash) -> Self {
-        BatchWitness { root }
-    }
-}
-
-impl Statement for BatchWitness {
+impl<'a> Statement for BatchWitness<'a> {
     type Header = Header;
     const HEADER: Header = Header::BatchWitness;
 }

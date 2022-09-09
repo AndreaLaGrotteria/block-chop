@@ -397,7 +397,9 @@ mod tests {
 
         let entries = expanded_batch_entries(null_batch(&clients_keychains, batch_size));
         let fake_signature = clients_keychains[0]
-            .sign(&BatchWitness::new(hash(&0).unwrap()))
+            .sign(&BatchWitness {
+                root: &hash(&0).unwrap(),
+            })
             .unwrap();
         let submissions = entries
             .items()
@@ -465,7 +467,9 @@ mod tests {
 
         let entries = expanded_batch_entries(null_batch(&clients, batch_size));
         let fake_signature = clients[0]
-            .sign(&BatchWitness::new(hash(&0).unwrap()))
+            .sign(&BatchWitness {
+                root: &hash(&0).unwrap(),
+            })
             .unwrap();
         let submissions = entries
             .items()

@@ -102,7 +102,12 @@ impl Broker {
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
             witness_shard
-                .verify([server], &BatchWitness::new(expected_root))
+                .verify(
+                    [server],
+                    &BatchWitness {
+                        root: &expected_root,
+                    },
+                )
                 .pot(TrySubmitError::WitnessError, here!())?;
 
             let _ = witness_shard_sender

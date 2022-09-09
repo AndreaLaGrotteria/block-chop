@@ -192,7 +192,9 @@ impl Server {
                         let batch = Batch::expand_verified(&directory, compressed_batch)?;
 
                         let witness_shard = keychain
-                            .multisign(&BatchWitness::new(batch.root()))
+                            .multisign(&BatchWitness {
+                                root: &batch.root(),
+                            })
                             .unwrap();
 
                         Ok((batch, Some(witness_shard)))
@@ -223,7 +225,7 @@ impl Server {
             .pot(ServeError::ConnectionError, here!())?;
 
         witness
-            .verify_plurality(membership.as_ref(), &BatchWitness::new(root))
+            .verify_plurality(membership.as_ref(), &BatchWitness { root: &root })
             .pot(ServeError::WitnessInvalid, here!())?;
 
         debug!("Certificate valid!");
@@ -333,7 +335,7 @@ mod tests {
         let batch_root = batch.root();
 
         for (identity, multisignature) in responses.iter() {
-            let statement = BatchWitness::new(batch_root);
+            let statement = BatchWitness { root: &batch_root };
             let keycard = membership.servers().get(identity).unwrap();
 
             multisignature.verify([keycard], &statement).unwrap();
