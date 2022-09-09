@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::total_order::Broadcast;
+use crate::order::Order;
 
 use rand::Rng;
 
@@ -73,7 +73,7 @@ impl BftSmart {
 }
 
 #[async_trait]
-impl Broadcast for BftSmart {
+impl Order for BftSmart {
     async fn order(&self, payload: &[u8]) {
         let mut state = self.state.lock().await;
 

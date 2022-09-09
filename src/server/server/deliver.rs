@@ -1,9 +1,9 @@
 use crate::{
     broadcast::Amendment,
     crypto::{statements::BatchWitness, Certificate},
+    order::Order,
     server::{batch::Batch, deduplicator::Deduplicator, Server},
     system::Membership,
-    total_order::Broadcast,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -42,7 +42,7 @@ enum ProcessError {
 impl Server {
     pub(in crate::server::server) async fn deliver(
         membership: Membership,
-        broadcast: Arc<dyn Broadcast>,
+        broadcast: Arc<dyn Order>,
         mut batches_outlet: BatchOutlet,
         mut deduplicator: Deduplicator,
         mut apply_inlet: ApplyInlet,

@@ -346,11 +346,11 @@ mod tests {
     use super::*;
 
     use crate::{
-        broadcast::Straggler,
+        broadcast::{test::null_batch, Straggler},
         broker::submission::Submission,
         crypto::statements::BatchWitness,
         server::expanded_batch_entries,
-        system::test::{fake_batch, generate_system},
+        system::test::generate_system,
     };
 
     use talk::{
@@ -384,7 +384,8 @@ mod tests {
 
     #[tokio::test]
     async fn broker_broadcast_0_faulty() {
-        let (clients, _servers, membership, _, connector_map) = generate_system(1000, 4).await;
+        let (_servers, membership, _, connector_map, clients_keychains) =
+            generate_system(1000, 4).await;
 
         let broker = KeyChain::random();
 
@@ -392,10 +393,10 @@ mod tests {
         let session_connector = Arc::new(SessionConnector::new(connector));
 
         let batch_size = 1;
-        let compressed_batch = fake_batch(&clients, batch_size);
+        let compressed_batch = null_batch(&clients_keychains, batch_size);
 
-        let entries = expanded_batch_entries(fake_batch(&clients, batch_size));
-        let fake_signature = clients[0]
+        let entries = expanded_batch_entries(null_batch(&clients_keychains, batch_size));
+        let fake_signature = clients_keychains[0]
             .sign(&BatchWitness::new(hash(&0).unwrap()))
             .unwrap();
         let submissions = entries
@@ -447,7 +448,7 @@ mod tests {
 
     #[tokio::test]
     async fn broker_broadcast_1_faulty_server() {
-        let (clients, mut servers, membership, _, connector_map) = generate_system(1000, 4).await;
+        let (mut servers, membership, _, connector_map, clients) = generate_system(1000, 4).await;
 
         let server = servers.pop().unwrap();
         drop(server);
@@ -460,9 +461,9 @@ mod tests {
         let session_connector = Arc::new(SessionConnector::new(connector));
 
         let batch_size = 1;
-        let compressed_batch = fake_batch(&clients, batch_size);
+        let compressed_batch = null_batch(&clients, batch_size);
 
-        let entries = expanded_batch_entries(fake_batch(&clients, batch_size));
+        let entries = expanded_batch_entries(null_batch(&clients, batch_size));
         let fake_signature = clients[0]
             .sign(&BatchWitness::new(hash(&0).unwrap()))
             .unwrap();

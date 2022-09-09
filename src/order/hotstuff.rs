@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::total_order::Broadcast;
+use crate::order::Order;
 
 use sha1::{Digest, Sha1};
 
@@ -33,7 +33,7 @@ impl HotStuff {
 }
 
 #[async_trait]
-impl Broadcast for HotStuff {
+impl Order for HotStuff {
     async fn order(&self, payload: &[u8]) {
         let mut write = self.write.lock().await;
 

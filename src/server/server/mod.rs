@@ -5,12 +5,12 @@ use crate::{
         Certificate,
     },
     debug,
+    order::Order,
     server::{
         deduplicator::Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
         ServerSettings,
     },
     system::{Directory, Membership},
-    total_order::Broadcast,
     Entry,
 };
 
@@ -64,7 +64,7 @@ impl Server {
         settings: ServerSettings,
     ) -> Self
     where
-        B: Broadcast,
+        B: Order,
     {
         let broadcast = Arc::new(broadcast);
         let fuse = Fuse::new();
@@ -121,7 +121,7 @@ impl Server {
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
-        broadcast: Arc<dyn Broadcast>,
+        broadcast: Arc<dyn Order>,
         batch_inlet: BatchInlet,
         mut listener: SessionListener,
         settings: ServerSettings,
@@ -167,7 +167,7 @@ impl Server {
         keychain: KeyChain,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
-        broadcast: Arc<dyn Broadcast>,
+        broadcast: Arc<dyn Order>,
         batch_inlet: Arc<BatchInlet>,
         semaphore: Arc<Semaphore>,
         mut session: Session,
@@ -279,8 +279,8 @@ mod tests {
     use super::*;
 
     use crate::{
-        broadcast::Amendment,
-        system::test::{fake_batch, generate_system},
+        broadcast::{test::null_batch, Amendment},
+        system::test::generate_system,
     };
 
     use std::collections::BTreeMap;
@@ -291,14 +291,15 @@ mod tests {
 
     #[tokio::test]
     async fn server_interact() {
-        let (clients, _servers, membership, _, connector_map) = generate_system(1000, 4).await;
+        let (_servers, membership, _, connector_map, client_keychains) =
+            generate_system(1000, 4).await;
 
         let broker = KeyChain::random();
 
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let connector = SessionConnector::new(connector);
 
-        let compressed_batch = fake_batch(&clients, 1);
+        let compressed_batch = null_batch(&client_keychains, 1);
         let ids = compressed_batch.ids.uncram().unwrap();
 
         let mut sessions = membership

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::total_order::Broadcast;
+use crate::order::Order;
 
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -22,7 +22,7 @@ impl LoopBack {
 }
 
 #[async_trait]
-impl Broadcast for LoopBack {
+impl Order for LoopBack {
     async fn order(&self, payload: &[u8]) {
         let _ = self.sender.send(payload.to_vec());
     }

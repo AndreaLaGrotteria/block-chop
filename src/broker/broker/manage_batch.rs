@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn broker_manage_single_client_single_message() {
-        let (clients, _servers, membership, directory, connector_map) =
+        let (_servers, membership, directory, connector_map, client_keychains) =
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
@@ -81,7 +81,7 @@ mod tests {
         )
         .await;
 
-        let client = clients[0].clone();
+        let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
@@ -93,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn broker_manage_single_client_multi_messages() {
-        let (clients, _servers, membership, directory, connector_map) =
+        let (_servers, membership, directory, connector_map, client_keychains) =
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
@@ -113,7 +113,7 @@ mod tests {
         )
         .await;
 
-        let client = clients[0].clone();
+        let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn broker_manage_single_client_multi_equal_messages() {
-        let (clients, _servers, membership, directory, connector_map) =
+        let (_servers, membership, directory, connector_map, client_keychains) =
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
@@ -147,7 +147,7 @@ mod tests {
         )
         .await;
 
-        let client = clients[0].clone();
+        let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
