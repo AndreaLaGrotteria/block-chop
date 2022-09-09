@@ -505,6 +505,8 @@ impl Deduplicator {
 mod tests {
     use super::*;
 
+    use rand::seq::index;
+
     use zebra::vector::Vector;
 
     #[test]
@@ -1244,5 +1246,88 @@ mod tests {
         let (batch, amendments) = deduplicator.pop().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(amendments.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn stress() {
+        let mut ticks = vec![0; 1048576];
+
+        let amended_batches = (0..128)
+            .map(|step| {
+                let mut logs =
+                    index::sample(&mut rand::thread_rng(), 131072 + step, 65536).into_vec();
+
+                logs.sort_unstable();
+
+                let (entries, amendments): (Vec<_>, Vec<_>) = logs
+                    .into_iter()
+                    .map(|log| {
+                        let tick = ticks.get_mut(log).unwrap();
+                        let id = log as u64;
+
+                        let action = if *tick > 0 {
+                            rand::random::<u8>() % 4
+                        } else {
+                            0
+                        };
+
+                        match action {
+                            0 => {
+                                // (Ok): next tick, correct message and sequence
+                                *tick += 1;
+                                ((id, 1024 * *tick, *tick), None)
+                            }
+                            1 => {
+                                // (Ignore): same tick, correct message and sequence
+                                ((id, 1024 * *tick, *tick), Some(Amendment::Ignore { id }))
+                            }
+                            2 => {
+                                // (Nudge): same tick, correct message, increase sequence by random % 1024
+                                (
+                                    (id, 1024 * *tick + (1 + rand::random::<u64>() % 1023), *tick),
+                                    Some(Amendment::Nudge {
+                                        id,
+                                        sequence: 1024 * *tick,
+                                    }),
+                                )
+                            }
+                            3 => {
+                                // (Drop): same tick, correct sequence, incorrect message
+                                (
+                                    (id, 1024 * *tick, u64::MAX - *tick),
+                                    Some(Amendment::Drop { id }),
+                                )
+                            }
+                            4.. => unreachable!(),
+                        }
+                    })
+                    .unzip();
+
+                let batch = build_batch(entries);
+
+                let amendments = amendments
+                    .into_iter()
+                    .filter_map(|amendment| amendment)
+                    .collect::<Vec<_>>();
+
+                (batch, amendments)
+            })
+            .collect::<Vec<_>>();
+
+        let mut deduplicator = Deduplicator::with_capacity(
+            0,
+            DeduplicatorSettings {
+                burst_size: 1,
+                run_duration: Duration::from_millis(100),
+                ..Default::default()
+            },
+        );
+
+        for (batch, expected_amendments) in amended_batches {
+            deduplicator.push(batch).await;
+            let (_, amendments) = deduplicator.pop().await;
+            assert_eq!(amendments, expected_amendments);
+        }
     }
 }
