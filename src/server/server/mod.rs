@@ -285,9 +285,9 @@ mod tests {
         system::test::generate_system,
     };
 
-    use std::collections::BTreeMap;
-
     use futures::stream::{FuturesUnordered, StreamExt};
+    
+    use std::collections::HashMap;
 
     use talk::net::{test::TestConnector, SessionConnector};
 
@@ -349,14 +349,12 @@ mod tests {
 
         let mut responses = Vec::new();
         for (identity, session) in sessions.iter_mut() {
-            let mut delivery_shard = session.receive_plain::<DeliveryShard>().await.unwrap();
-
-            delivery_shard.amendments.sort();
+            let delivery_shard = session.receive_plain::<DeliveryShard>().await.unwrap();
 
             responses.push((*identity, delivery_shard));
         }
 
-        let mut counts = BTreeMap::new();
+        let mut counts = HashMap::new();
         for core_response in responses.iter_mut().map(|x| (&x.1.amendments, &x.1.height)) {
             *counts
                 .entry((core_response.0, core_response.1))

@@ -12,7 +12,7 @@ use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
 
 use rand::{seq::SliceRandom, thread_rng};
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
@@ -23,7 +23,7 @@ use talk::{
 use tokio::{
     sync::{
         oneshot::{self, Receiver as OneshotReceiver},
-        watch::{self},
+        watch,
     },
     task,
     time::{self, timeout},
@@ -225,7 +225,7 @@ struct DeliveryCollector<'a> {
     new_shards: Vec<(Identity, DeliveryShard)>,
     good_shards: Vec<(Identity, DeliveryShard)>,
     bad_shards: Vec<(Identity, DeliveryShard)>,
-    counts: BTreeMap<(Vec<Amendment>, u64), usize>,
+    counts: HashMap<(Vec<Amendment>, u64), usize>,
     stream: FuturesUnordered<OneshotReceiver<(Identity, DeliveryShard)>>,
 }
 
@@ -244,7 +244,7 @@ impl<'a> DeliveryCollector<'a> {
             new_shards: Vec::new(),
             good_shards: Vec::new(),
             bad_shards: Vec::new(),
-            counts: BTreeMap::new(),
+            counts: HashMap::new(),
             stream,
         }
     }
