@@ -17,7 +17,7 @@ pub struct Delivery {
     height: u64,
     root: Hash,
     certificate: Certificate,
-    entry: Option<Entry>,
+    entry: Entry,
     proof: Proof,
 }
 
@@ -41,13 +41,13 @@ impl Delivery {
             height,
             root,
             certificate,
-            entry: Some(entry),
+            entry,
             proof,
         }
     }
 
     pub fn entry(&self) -> &Entry {
-        &self.entry.as_ref().unwrap()
+        &self.entry
     }
 
     pub(crate) fn height(&self) -> Height {
@@ -65,7 +65,7 @@ impl Delivery {
             .pot(DeliveryError::CertificateInvalid, here!())?;
 
         self.proof
-            .verify(self.root, &self.entry)
+            .verify(self.root, &Some(self.entry.clone()))
             .pot(DeliveryError::ProofInvalid, here!())?;
 
         Ok(())
