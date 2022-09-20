@@ -1,8 +1,15 @@
 use doomstack::{here, Doom, ResultExt, Top};
 
-use std::{collections::BTreeMap, path::Path};
+use rand::{seq::SliceRandom, SeedableRng};
 
-use talk::crypto::{Identity, KeyCard};
+use rand_chacha::ChaCha12Rng;
+
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
+
+use talk::crypto::{primitives::hash::Hash, Identity, KeyCard};
 
 #[derive(Clone)]
 pub struct Membership {
@@ -103,6 +110,20 @@ impl Membership {
 
     pub fn quorum(&self) -> usize {
         self.servers.len() - self.plurality() + 1
+    }
+
+    pub fn random_subset(&self, seed: Hash, size: usize) -> HashSet<Identity> {
+        let mut servers = self.servers().keys().copied().collect::<Vec<_>>();
+        servers.shuffle(&mut ChaCha12Rng::from_seed(seed.to_bytes()));
+        servers.into_iter().take(size).collect()
+    }
+
+    pub fn random_plurality(&self, seed: Hash) -> HashSet<Identity> {
+        self.random_subset(seed, self.plurality())
+    }
+
+    pub fn random_quorum(&self, seed: Hash) -> HashSet<Identity> {
+        self.random_subset(seed, self.quorum())
     }
 
     pub fn save<P>(&self, path: P) -> Result<(), Top<MembershipError>>
