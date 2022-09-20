@@ -11,7 +11,7 @@ use crate::{
         ServerSettings,
     },
     system::{Directory, Membership},
-    Entry,
+    warn, Entry,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -37,7 +37,7 @@ use tokio::{
 
 type BatchInlet = MpscSender<(Batch, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<AmendedDelivery>;
-type ApplyOutlet = MpscReceiver<Batch>;
+type ApplyOutlet = MpscReceiver<Vec<Option<Entry>>>;
 
 pub struct Server {
     apply_outlet: ApplyOutlet,
@@ -110,11 +110,13 @@ impl Server {
         }
     }
 
-    pub async fn next_batch(&mut self) -> Vec<Entry> {
-        Vec::from(self.apply_outlet.recv().await.unwrap().entries)
+    pub async fn next_batch(&mut self) -> impl Iterator<Item = Entry> {
+        self.apply_outlet
+            .recv()
+            .await
+            .unwrap()
             .into_iter()
-            .flat_map(|entry| entry)
-            .collect()
+            .flatten()
     }
 
     async fn listen(
@@ -157,7 +159,7 @@ impl Server {
                 )
                 .await
                 {
-                    println!("{:?}", error);
+                    warn!("{:?}", error);
                 }
             });
         }
@@ -210,8 +212,6 @@ impl Server {
             .pot(ServeError::BatchInvalid, here!())?
         };
 
-        let root = batch.root();
-
         if let Some(witness_shard) = witness_shard {
             session
                 .send_raw::<MultiSignature>(&witness_shard)
@@ -223,6 +223,8 @@ impl Server {
             .receive_raw::<Certificate>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
+
+        let root = batch.root();
 
         witness
             .verify_plurality(membership.as_ref(), &BatchWitness { root: &root })
@@ -254,14 +256,14 @@ impl Server {
 
             let multisignature = keychain.multisign(&statement).unwrap();
 
-            let amended_delivery = DeliveryShard {
+            let delivery_shard = DeliveryShard {
                 height,
                 amendments,
                 multisignature,
             };
 
             session
-                .send_plain::<DeliveryShard>(&amended_delivery)
+                .send_plain::<DeliveryShard>(&delivery_shard)
                 .await
                 .pot(ServeError::ConnectionError, here!())?;
 
@@ -286,7 +288,7 @@ mod tests {
     };
 
     use futures::stream::{FuturesUnordered, StreamExt};
-    
+
     use std::collections::HashMap;
 
     use talk::net::{test::TestConnector, SessionConnector};

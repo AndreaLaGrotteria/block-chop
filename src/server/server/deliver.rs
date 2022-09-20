@@ -4,12 +4,13 @@ use crate::{
     order::Order,
     server::{batch::Batch, deduplicator::Deduplicator, Server},
     system::Membership,
+    Entry,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry as HashMapEntry, HashMap, VecDeque},
     sync::Arc,
 };
 
@@ -28,7 +29,7 @@ pub(in crate::server::server) struct AmendedDelivery {
 
 type BatchOutlet = MpscReceiver<(Batch, DeliveryInlet)>;
 type DeliveryInlet = OneshotSender<AmendedDelivery>;
-type ApplyInlet = MpscSender<Batch>;
+type ApplyInlet = MpscSender<Vec<Option<Entry>>>;
 
 #[derive(Doom)]
 enum ProcessError {
@@ -49,7 +50,7 @@ impl Server {
     ) {
         let mut height: u64 = 1;
 
-        let mut pending_batches: HashMap<Hash, Vec<(Batch, DeliveryInlet)>> = HashMap::new();
+        let mut pending_batches: HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>> = HashMap::new();
         let mut pending_deliveries: Vec<(u64, Hash)> = Vec::new();
 
         loop {
@@ -76,30 +77,30 @@ impl Server {
     }
 
     fn add_pending_batch(
-        pending_batches: &mut HashMap<Hash, Vec<(Batch, DeliveryInlet)>>,
+        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
         batch: Batch,
         delivery_inlet: DeliveryInlet,
     ) {
         match pending_batches.entry(batch.entries.root()) {
-            Entry::Vacant(entry) => {
-                entry.insert(vec![(batch, delivery_inlet)]);
+            HashMapEntry::Vacant(entry) => {
+                entry.insert(vec![(batch, delivery_inlet)].into());
             }
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().push((batch, delivery_inlet));
+            HashMapEntry::Occupied(mut entry) => {
+                entry.get_mut().push_front((batch, delivery_inlet));
             }
         }
     }
 
     fn remove_pending_batch(
-        pending_batches: &mut HashMap<Hash, Vec<(Batch, DeliveryInlet)>>,
+        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
         batch_root: &Hash,
     ) -> Option<(Batch, DeliveryInlet)> {
         match pending_batches.entry(batch_root.clone()) {
-            Entry::Vacant(_) => None,
-            Entry::Occupied(mut entry) => {
+            HashMapEntry::Vacant(_) => None,
+            HashMapEntry::Occupied(mut entry) => {
                 let pending = entry.get_mut();
 
-                let result = pending.pop();
+                let result = pending.pop_back();
 
                 if pending.is_empty() {
                     entry.remove();
@@ -111,7 +112,7 @@ impl Server {
     }
 
     async fn flush_deliveries(
-        pending_batches: &mut HashMap<Hash, Vec<(Batch, DeliveryInlet)>>,
+        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
         pending_deliveries: &mut Vec<(u64, Hash)>,
         deduplicator: &mut Deduplicator,
         apply_inlet: &mut ApplyInlet,
@@ -161,7 +162,9 @@ impl Server {
 
         let amended_root = deduplicated_batch.root();
 
-        let _ = apply_inlet.send(deduplicated_batch).await;
+        let _ = apply_inlet
+            .send(Vec::from(deduplicated_batch.entries))
+            .await;
 
         (amended_root, Vec::new())
     }
