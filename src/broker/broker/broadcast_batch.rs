@@ -357,6 +357,7 @@ mod tests {
         crypto::{primitives::hash::hash, KeyChain},
         net::{test::TestConnector, SessionConnector},
     };
+
     use varcram::VarCram;
 
     impl Clone for Straggler {
@@ -438,14 +439,10 @@ mod tests {
             height: &height,
             root: &batch.entries.root(),
         };
+
         certificate.verify_quorum(&membership, &statement).unwrap();
 
-        println!("Got height ({}) and certificate!!!", height);
-        println!("Checking for hanging submissions...");
-
         time::sleep(Duration::from_millis(200)).await;
-
-        println!("Done!");
     }
 
     #[tokio::test]
@@ -508,13 +505,9 @@ mod tests {
             height: &height,
             root: &batch.entries.root(),
         };
+
         certificate.verify_quorum(&membership, &statement).unwrap();
 
-        println!("Got height ({}) and certificate!!!", height);
-        println!("Checking for hanging submissions...");
-
         time::sleep(Duration::from_millis(200)).await;
-
-        println!("Done!");
     }
 }

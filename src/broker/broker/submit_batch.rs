@@ -3,6 +3,7 @@ use crate::{
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
     BrokerSettings,
+    warn
 };
 
 use doomstack::{here, Doom, ResultExt, Top};
@@ -57,7 +58,7 @@ impl Broker {
             .await
             {
                 Err(error) => {
-                    println!("{:?}", error);
+                    warn!("{:?}", error);
                 }
                 Ok(_) => break,
             }
@@ -121,12 +122,12 @@ impl Broker {
                 .pot(TrySubmitError::ConnectionError, here!())?;
         }
 
-        // // If `changed()` returns an `Err`, this means that `witness_sender` was
-        // // dropped. However, before being dropped, `witness_sender` always sends
-        // // the witness, which means that `witness` will be available both if
-        // // `witness_sender` returns `Ok` (the witness was sent and the sender
-        // // is still alive) or `Err` (the witness was sent and the sender was
-        // // dropped).
+        // If `changed()` returns an `Err`, this means that `witness_sender` was
+        // dropped. However, before being dropped, `witness_sender` always sends
+        // the witness, which means that `witness` will be available both if
+        // `witness_sender` returns `Ok` (the witness was sent and the sender
+        // is still alive) or `Err` (the witness was sent and the sender was
+        // dropped).
         let _ = witness_receiver.changed().await;
 
         let witness = witness_receiver.borrow().clone().unwrap();
@@ -142,7 +143,7 @@ impl Broker {
         // amendments might be wrong (injected message). It's easier to just authenticate
         // and let the aggregation method (Broker::broadcast) figure out the correct set
         // of amendments by looking for a plurality of equal elements (one of which must
-        // come from a correct)
+        // come from a correct server)
         let delivery_shard = session
             .receive_plain::<DeliveryShard>()
             .await

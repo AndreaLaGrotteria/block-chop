@@ -86,8 +86,6 @@ mod tests {
         client.add_broker(broker_address).await.unwrap();
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
 
-        println!("GOT RECORD!");
-
         time::sleep(Duration::from_millis(200)).await;
     }
 
@@ -119,8 +117,6 @@ mod tests {
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
         let _delivery_record = client.broadcast([2u8; MESSAGE_SIZE]).await;
         let _delivery_record = client.broadcast([3u8; MESSAGE_SIZE]).await;
-
-        println!("GOT RECORD!");
 
         time::sleep(Duration::from_millis(200)).await;
     }

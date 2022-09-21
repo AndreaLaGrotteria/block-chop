@@ -400,7 +400,5 @@ mod tests {
         let certificate = Certificate::aggregate_quorum(&membership, good_responses);
 
         certificate.verify_quorum(&membership, &statement).unwrap();
-
-        println!("Obtained delivery certificate!");
     }
 }
