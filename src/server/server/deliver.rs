@@ -2,7 +2,7 @@ use crate::{
     broadcast::Amendment,
     crypto::{statements::BatchWitness, Certificate},
     order::Order,
-    server::{batch::Batch, deduplicator::Deduplicator, Server},
+    server::{Batch, Deduplicator, Duplicate, Server},
     system::Membership,
     Entry,
 };
@@ -154,18 +154,51 @@ impl Server {
     }
 
     async fn process(
-        _batch: Batch,
-        _deduplicator: &mut Deduplicator,
+        batch: Batch,
+        deduplicator: &mut Deduplicator,
         apply_inlet: &mut ApplyInlet,
     ) -> (Hash, Vec<Amendment>) {
-        let deduplicated_batch = _batch; // TODO: Deduplication
+        deduplicator.push(batch).await;
 
-        let amended_root = deduplicated_batch.root();
+        let (mut batch, duplicates) = deduplicator.pop().await; // TODO: Deduplication
 
-        let _ = apply_inlet
-            .send(Vec::from(deduplicated_batch.entries))
-            .await;
+        let mut to_ignore = Vec::new();
 
-        (amended_root, Vec::new())
+        for duplicate in duplicates.iter() {
+            let index = batch
+                .entries
+                .items()
+                .binary_search_by(|entry| match entry {
+                    None => std::cmp::Ordering::Less,
+                    Some(entry) => entry.id.cmp(&duplicate.id()),
+                })
+                .unwrap();
+
+            match duplicate {
+                Duplicate::Ignore { .. } => {
+                    to_ignore.push(index);
+                }
+                Duplicate::Nudge { sequence, .. } => {
+                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    entry.sequence = *sequence;
+                    batch.entries.set(index, Some(entry)).unwrap();
+                }
+                Duplicate::Drop { .. } => {
+                    batch.entries.set(index, None).unwrap();
+                }
+            }
+        }
+
+        let amended_root = batch.root();
+
+        let mut entries = Vec::from(batch.entries);
+
+        for ignore in to_ignore {
+            entries[ignore] = None;
+        }
+
+        let _ = apply_inlet.send(entries).await;
+
+        (amended_root, duplicates.iter().flat_map(Duplicate::amendment).collect::<Vec<_>>())
     }
 }

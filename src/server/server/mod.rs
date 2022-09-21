@@ -7,7 +7,7 @@ use crate::{
     debug,
     order::Order,
     server::{
-        deduplicator::Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
+        Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
         ServerSettings,
     },
     system::{Directory, Membership},
@@ -66,6 +66,8 @@ impl Server {
     where
         B: Order,
     {
+        let directory_capacity = directory.capacity();
+
         let broadcast = Arc::new(broadcast);
         let fuse = Fuse::new();
 
@@ -90,7 +92,7 @@ impl Server {
             });
         }
 
-        let deduplicator = Deduplicator::new();
+        let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
         let (apply_inlet, apply_outlet) = mpsc::channel(settings.apply_channel_capacity);
 
         fuse.spawn(async move {

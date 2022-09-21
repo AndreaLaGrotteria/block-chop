@@ -1,10 +1,6 @@
 use crate::broker::{Broker, BrokerSettings, Request};
 
-use std::{
-    mem,
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{mem, net::SocketAddr, time::Instant};
 
 use talk::net::DatagramReceiver;
 
@@ -28,7 +24,7 @@ impl Broker {
 
             if let Some(datagram) = tokio::select! {
                 datagram = receiver.receive() => Some(datagram),
-                _ = time::sleep(Duration::from_millis(10)) => None
+                _ = time::sleep(settings.authentication_burst_interval) => None
             } {
                 burst_buffer.push(datagram);
             }

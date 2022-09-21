@@ -26,13 +26,14 @@ tokio = { version = "1.12.0", features = [ "macros", "net", "rt-multi-thread", "
 rayon = { version = "1.5.1" }
 futures = { version = "0.3" }
 async-trait = { version = "0.1.56" }
-oh-snap = { version = "0.0.5" }
-sha-1 = { version = "0.10.0" }
 
 serde = { version = "~1.0", features = [ "derive", "rc" ] }
 bincode = { version = "~1.3" }
 
 bit-vec = { version = "0.6", features = ["serde"] }
+oh-snap = { version = "0.0.5" }
+
+sha-1 = { version = "0.10.0" }
 
 sled = { version = "0.34.7" }
 
@@ -40,10 +41,7 @@ lapp = { version = "0.4.0" }
 log = { version = "0.4.17" }
 env_logger = { version = "0.9.0" }
 
-num_cpus = { version = "1.13" }
+num_cpus = { version = "1.13.1" }
 
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1" }
-
-[dev-dependencies]
-num_cpus = { version = "1.13.1" }

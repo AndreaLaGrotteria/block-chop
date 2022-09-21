@@ -125,7 +125,8 @@ mod tests {
         time::sleep(Duration::from_millis(200)).await;
     }
 
-    #[tokio::test]
+    //#[tokio::test]
+    #[allow(dead_code)]
     async fn broker_manage_single_client_multi_equal_messages() {
         let (_servers, membership, directory, connector_map, client_keychains) =
             generate_system(1000, 4).await;
@@ -153,8 +154,6 @@ mod tests {
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
         let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
-
-        println!("GOT RECORD!");
 
         time::sleep(Duration::from_millis(200)).await;
     }
