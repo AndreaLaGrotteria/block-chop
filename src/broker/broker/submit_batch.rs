@@ -2,8 +2,7 @@ use crate::{
     broadcast::{CompressedBatch, DeliveryShard},
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
-    BrokerSettings,
-    warn
+    warn, BrokerSettings,
 };
 
 use doomstack::{here, Doom, ResultExt, Top};

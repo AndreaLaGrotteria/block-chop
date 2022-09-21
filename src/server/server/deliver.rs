@@ -199,6 +199,12 @@ impl Server {
 
         let _ = apply_inlet.send(entries).await;
 
-        (amended_root, duplicates.iter().flat_map(Duplicate::amendment).collect::<Vec<_>>())
+        (
+            amended_root,
+            duplicates
+                .iter()
+                .flat_map(Duplicate::amendment)
+                .collect::<Vec<_>>(),
+        )
     }
 }

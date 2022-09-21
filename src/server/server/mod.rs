@@ -6,10 +6,7 @@ use crate::{
     },
     debug,
     order::Order,
-    server::{
-        Deduplicator, server::deliver::AmendedDelivery, Batch, BatchError,
-        ServerSettings,
-    },
+    server::{server::deliver::AmendedDelivery, Batch, BatchError, Deduplicator, ServerSettings},
     system::{Directory, Membership},
     warn, Entry,
 };
