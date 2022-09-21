@@ -1,9 +1,6 @@
 use doomstack::{here, Doom, ResultExt, Top};
-
 use sled::Db;
-
 use std::path::Path;
-
 use talk::crypto::{Identity, KeyChain};
 
 #[derive(Clone)]

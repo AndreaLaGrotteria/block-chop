@@ -5,16 +5,13 @@ use crate::{
     debug, info,
     system::Directory,
 };
-
 use rayon::slice::ParallelSliceMut;
-
 use std::{
     collections::HashSet,
     mem,
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -22,7 +19,6 @@ use talk::{
     },
     sync::fuse::Fuse,
 };
-
 use tokio::{
     sync::{
         broadcast::{error::RecvError as BroadcastRecvError, Receiver as BroadcastReceiver},
@@ -30,7 +26,6 @@ use tokio::{
     },
     time,
 };
-
 use varcram::VarCram;
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;

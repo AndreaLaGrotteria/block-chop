@@ -1,7 +1,5 @@
 use crate::crypto::{records::Height as HeightRecord, Header};
-
 use serde::Serialize;
-
 use talk::crypto::Statement;
 
 #[derive(Serialize)]

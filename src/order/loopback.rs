@@ -1,7 +1,5 @@
-use async_trait::async_trait;
-
 use crate::order::Order;
-
+use async_trait::async_trait;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     Mutex,

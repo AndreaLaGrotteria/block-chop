@@ -1,11 +1,7 @@
-use async_trait::async_trait;
-
 use crate::order::Order;
-
+use async_trait::async_trait;
 use sha1::{Digest, Sha1};
-
 use std::{error::Error, net::SocketAddr};
-
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{

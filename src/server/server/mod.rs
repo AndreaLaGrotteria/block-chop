@@ -10,17 +10,13 @@ use crate::{
     system::{Directory, Membership},
     warn, Entry,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::sync::Arc;
-
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, KeyChain},
     net::{Session, SessionListener},
     sync::fuse::Fuse,
 };
-
 use tokio::{
     sync::{
         mpsc,

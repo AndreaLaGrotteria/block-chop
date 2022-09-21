@@ -1,14 +1,10 @@
 use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Membership};
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     sync::{Arc, Mutex},
 };
-
 use talk::{crypto::KeyChain, sync::fuse::Fuse};
-
 use tokio::{
     io,
     sync::{

@@ -4,11 +4,8 @@ use crate::{
     debug,
     system::{Directory, Membership},
 };
-
 use std::{collections::HashMap, sync::Arc};
-
 use talk::net::{DatagramSender, SessionConnector};
-
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
@@ -121,8 +118,9 @@ mod tests {
         time::sleep(Duration::from_millis(200)).await;
     }
 
-    //#[tokio::test]
-    #[allow(dead_code)]
+    // TODO: Re-enable this test after implementing multi equal message support
+    #[ignore]
+    #[tokio::test]
     async fn broker_manage_single_client_multi_equal_messages() {
         let (_servers, membership, directory, connector_map, client_keychains) =
             generate_system(1000, 4).await;

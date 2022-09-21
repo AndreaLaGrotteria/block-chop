@@ -5,17 +5,13 @@ use crate::{
     debug, info,
     system::{Directory, Membership},
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
-
 use talk::{
     crypto::primitives::sign::Signature,
     net::{DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
-
 use tokio::{
     sync::{broadcast, mpsc::Receiver as MpscReceiver},
     time,

@@ -4,11 +4,8 @@ use crate::{
     crypto::{statements::BatchWitness, Certificate},
     warn, BrokerSettings,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::sync::Arc;
-
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -16,7 +13,6 @@ use talk::{
     },
     net::SessionConnector,
 };
-
 use tokio::sync::{oneshot::Sender as OneshotSender, watch::Receiver as WatchReceiver};
 
 #[derive(Doom)]

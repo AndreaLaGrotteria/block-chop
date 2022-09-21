@@ -6,16 +6,12 @@ use crate::{
     system::Membership,
     Entry,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{
     collections::{hash_map::Entry as HashMapEntry, HashMap, VecDeque},
     sync::Arc,
 };
-
 use talk::crypto::primitives::hash::Hash;
-
 use tokio::sync::{
     mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
     oneshot::Sender as OneshotSender,

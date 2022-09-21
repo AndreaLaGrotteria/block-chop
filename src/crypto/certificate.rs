@@ -1,11 +1,7 @@
-use bit_vec::BitVec;
-
 use crate::system::Membership;
-
+use bit_vec::BitVec;
 use doomstack::{here, Doom, ResultExt, Top};
-
 use serde::{Deserialize, Serialize};
-
 use talk::crypto::{primitives::multi::Signature as MultiSignature, Identity, Statement};
 
 #[derive(Clone, Serialize, Deserialize)]

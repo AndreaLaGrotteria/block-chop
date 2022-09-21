@@ -3,13 +3,9 @@ use crate::{
     crypto::statements::Reduction,
     Entry,
 };
-
 use std::iter;
-
 use talk::crypto::{primitives::multi::Signature as MultiSignature, KeyChain};
-
 use varcram::VarCram;
-
 use zebra::vector::Vector;
 
 pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> CompressedBatch {

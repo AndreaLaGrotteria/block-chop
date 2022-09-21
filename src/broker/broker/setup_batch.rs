@@ -4,16 +4,12 @@ use crate::{
     crypto::records::Height as HeightRecord,
     info,
 };
-
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-
 use std::collections::HashMap;
-
 use talk::net::DatagramSender;
-
 use zebra::vector::Vector;
 
 impl Broker {

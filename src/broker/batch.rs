@@ -2,7 +2,6 @@ use crate::{
     broadcast::{Entry, PACKING},
     broker::Submission,
 };
-
 use zebra::vector::Vector;
 
 pub(in crate::broker) enum BatchStatus {

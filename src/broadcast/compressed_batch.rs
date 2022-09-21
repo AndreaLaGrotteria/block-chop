@@ -1,26 +1,19 @@
 use crate::broadcast::{Message, Straggler};
-
 #[cfg(feature = "benchmark")]
 use crate::{
     broadcast::{Entry, PACKING},
     crypto::statements::Reduction as ReductionStatement,
     system::{Directory, Passepartout},
 };
-
 #[cfg(feature = "benchmark")]
 use rand::seq::IteratorRandom;
-
 #[cfg(feature = "benchmark")]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-
 #[cfg(feature = "benchmark")]
 use serde::{Deserialize, Serialize};
-
 #[cfg(feature = "benchmark")]
 use std::iter;
-
 use talk::crypto::primitives::multi::Signature as MultiSignature;
-
 use varcram::VarCram;
 
 #[cfg(feature = "benchmark")]

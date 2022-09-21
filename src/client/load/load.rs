@@ -8,16 +8,12 @@ use crate::{
     debug, info,
     system::{Directory, Passepartout},
 };
-
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-
 use std::{iter, net::ToSocketAddrs, ops::Range, sync::Arc, time::Duration};
-
 use talk::{
     net::{DatagramDispatcher, DatagramDispatcherSettings},
     sync::fuse::Fuse,
 };
-
 use tokio::time;
 
 pub async fn load<A>(

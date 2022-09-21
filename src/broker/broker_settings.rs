@@ -1,5 +1,4 @@
 use std::{sync::Arc, time::Duration};
-
 use talk::time::{sleep_schedules::CappedExponential, SleepSchedule};
 
 #[derive(Debug, Clone)]

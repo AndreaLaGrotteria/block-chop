@@ -3,16 +3,12 @@ use crate::{
     system::Membership,
     Directory,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{net::ToSocketAddrs, sync::Arc};
-
 use talk::{
     net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
-
 use tokio::sync::mpsc;
 
 pub struct Broker {

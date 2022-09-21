@@ -10,15 +10,12 @@ use crate::{
         },
     },
 };
-
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
 };
-
 use talk::{crypto::KeyChain, net::DatagramSender};
-
 use tokio::time;
 
 impl Client {

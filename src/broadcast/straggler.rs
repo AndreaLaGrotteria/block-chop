@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 use talk::crypto::primitives::sign::Signature;
 
 #[derive(Serialize, Deserialize)]

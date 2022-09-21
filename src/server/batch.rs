@@ -3,11 +3,8 @@ use crate::{
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     system::Directory,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use talk::crypto::primitives::{hash::Hash, sign::Signature};
-
 use zebra::vector::Vector;
 
 pub(in crate::server) struct Batch {

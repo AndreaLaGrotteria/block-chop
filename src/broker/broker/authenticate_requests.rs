@@ -7,13 +7,9 @@ use crate::{
     },
     system::Directory,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{net::SocketAddr, sync::Arc};
-
 use talk::crypto::{primitives::sign::Signature, KeyCard};
-
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 
 type BurstOutlet = MpscReceiver<Vec<(SocketAddr, Request)>>;

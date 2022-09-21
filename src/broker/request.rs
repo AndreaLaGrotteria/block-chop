@@ -1,7 +1,5 @@
 use crate::{broadcast::Entry, crypto::records::Height as HeightRecord};
-
 use serde::{Deserialize, Serialize};
-
 use talk::crypto::primitives::{hash::Hash, multi::Signature as MultiSignature, sign::Signature};
 
 #[derive(Clone, Serialize, Deserialize)]

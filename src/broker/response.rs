@@ -1,9 +1,6 @@
 use crate::crypto::{records::Height as HeightRecord, Certificate};
-
 use serde::{Deserialize, Serialize};
-
 use talk::crypto::primitives::hash::Hash;
-
 use zebra::vector::Proof;
 
 #[derive(Clone, Serialize, Deserialize)]

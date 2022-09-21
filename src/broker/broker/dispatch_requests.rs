@@ -1,9 +1,6 @@
 use crate::broker::{Broker, BrokerSettings, Request};
-
 use std::{mem, net::SocketAddr, time::Instant};
-
 use talk::net::DatagramReceiver;
-
 use tokio::{sync::mpsc::Sender as MpscSender, time};
 
 type BurstInlet = MpscSender<Vec<(SocketAddr, Request)>>;

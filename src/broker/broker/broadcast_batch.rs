@@ -7,19 +7,14 @@ use crate::{
     crypto::{statements::BatchDelivery, Certificate},
     warn, BrokerSettings, Membership,
 };
-
 use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
-
 use rand::{seq::SliceRandom, thread_rng};
-
 use std::{collections::HashMap, sync::Arc};
-
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
     net::SessionConnector,
     sync::fuse::Fuse,
 };
-
 use tokio::{
     sync::{
         oneshot::{self, Receiver as OneshotReceiver},

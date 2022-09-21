@@ -3,13 +3,9 @@ use crate::{
     crypto::{records::Height, statements::BatchDelivery, Certificate},
     system::Membership,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use serde::{Deserialize, Serialize};
-
 use talk::crypto::primitives::hash::Hash;
-
 use zebra::vector::Proof;
 
 #[derive(Clone, Serialize, Deserialize)]

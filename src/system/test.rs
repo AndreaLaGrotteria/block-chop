@@ -1,7 +1,5 @@
 use crate::{order::LoopBack, server::ServerSettings, Directory, Membership, Server};
-
 use std::{collections::HashMap, iter, net::SocketAddr};
-
 use talk::{
     crypto::{Identity, KeyChain},
     net::{test::TestListener, SessionListener},

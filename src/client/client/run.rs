@@ -11,22 +11,18 @@ use crate::{
     },
     debug, info, warn, Membership,
 };
-
 use doomstack::{here, Doom, ResultExt, Top};
-
 use std::{
     cmp,
     net::{SocketAddr, ToSocketAddrs},
     ops::RangeInclusive,
     sync::{Arc, Mutex},
 };
-
 use talk::{
     crypto::KeyChain,
     net::{DatagramDispatcher, DatagramSender},
     sync::fuse::Fuse,
 };
-
 use tokio::sync::{mpsc::Receiver as MpscReceiver, oneshot::Sender as OneshotSender};
 
 type BroadcastOutlet = MpscReceiver<(Message, DeliveryInlet)>;

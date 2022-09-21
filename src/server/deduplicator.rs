@@ -2,20 +2,15 @@ use crate::{
     broadcast::{Entry, Message},
     server::{Batch, DeduplicatorSettings, Duplicate},
 };
-
 use futures::{stream::FuturesOrdered, StreamExt};
-
 use oh_snap::Snap;
-
 use std::{
     cmp, iter,
     ops::{Bound, Range, RangeBounds},
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use talk::sync::fuse::Fuse;
-
 use tokio::{
     sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender},
     task, time,

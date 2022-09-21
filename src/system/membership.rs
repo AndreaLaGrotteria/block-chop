@@ -1,14 +1,10 @@
 use doomstack::{here, Doom, ResultExt, Top};
-
 use rand::{seq::SliceRandom, SeedableRng};
-
 use rand_chacha::ChaCha12Rng;
-
 use std::{
     collections::{BTreeMap, HashSet},
     path::Path,
 };
-
 use talk::crypto::{primitives::hash::Hash, Identity, KeyCard};
 
 #[derive(Clone)]

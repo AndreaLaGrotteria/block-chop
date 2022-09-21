@@ -1,7 +1,5 @@
 use crate::crypto::Header;
-
 use serde::Serialize;
-
 use talk::crypto::{primitives::hash::Hash, Statement};
 
 #[derive(Serialize)]

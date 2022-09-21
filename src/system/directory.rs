@@ -1,9 +1,6 @@
 use doomstack::{here, Doom, ResultExt, Top};
-
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-
 use std::path::Path;
-
 use talk::crypto::KeyCard;
 
 #[derive(Clone)]

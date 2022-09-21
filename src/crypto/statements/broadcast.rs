@@ -1,7 +1,5 @@
 use crate::{broadcast::Message, crypto::Header};
-
 use serde::Serialize;
-
 use talk::crypto::Statement;
 
 #[derive(Serialize)]

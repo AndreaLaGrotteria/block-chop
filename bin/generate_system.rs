@@ -1,10 +1,8 @@
 use chop_chop::{Directory, Membership, Passepartout};
-
 use std::{
     io::{self, prelude::*},
     iter,
 };
-
 use talk::crypto::KeyChain;
 
 fn main() {

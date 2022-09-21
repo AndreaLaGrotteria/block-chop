@@ -1,10 +1,9 @@
-use talk::net::DatagramSender;
-
 use crate::{
     broker::{batch::Batch, Broker, Response},
     crypto::Certificate,
     Entry,
 };
+use talk::net::DatagramSender;
 
 impl Broker {
     pub(in crate::broker::broker) async fn deliver(
