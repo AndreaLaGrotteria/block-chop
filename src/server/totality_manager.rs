@@ -478,7 +478,10 @@ mod tests {
     use super::*;
     use crate::broadcast::test::random_unauthenticated_batch;
     use std::collections::HashMap;
-    use talk::{crypto::KeyChain, net::test::TestConnector};
+    use talk::{
+        crypto::KeyChain,
+        net::test::{TestConnector, TestListener},
+    };
 
     #[tokio::test]
     async fn all_hits() {
@@ -487,7 +490,10 @@ mod tests {
         let connector =
             SessionConnector::new(TestConnector::new(KeyChain::random(), HashMap::new()));
 
-        let mut totality_manager = TotalityManager::new(membership, connector);
+        let (listener, _) = TestListener::new(KeyChain::random()).await;
+        let listener = SessionListener::new(listener);
+
+        let mut totality_manager = TotalityManager::new(membership, connector, listener);
 
         for _ in 0..128 {
             let compressed_batch = random_unauthenticated_batch(128, 32);
