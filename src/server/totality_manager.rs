@@ -1,14 +1,22 @@
 use crate::{server::Batch, system::Membership};
+use doomstack::{here, Doom, ResultExt, Top};
+use futures::{stream::FuturesUnordered, StreamExt};
+use rand::seq::IteratorRandom;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{atomic::AtomicU64, Arc, Mutex},
+    time::Duration,
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
     sync::fuse::Fuse,
 };
-use tokio::sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender};
+use tokio::{
+    sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender},
+    task, time,
+};
 
 type CallInlet = MpscSender<Call>;
 type CallOutlet = MpscReceiver<Call>;
@@ -22,6 +30,7 @@ type EntryOutlet = MpscReceiver<(u64, Batch)>;
 // TODO: Refactor constants into settings
 
 const PIPELINE: usize = 8192;
+const EXTEND_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
@@ -44,8 +53,34 @@ struct TotalityQueue {
     entries: VecDeque<Option<Arc<Vec<u8>>>>,
 }
 
+#[derive(Serialize, Deserialize)]
+enum Request {
+    Retrieve(u64),
+    Collect(u64),
+}
+
+#[derive(Doom)]
+enum AskError {
+    #[doom(description("Failed to connect"))]
+    ConnectFailed,
+    #[doom(description("Connection error"))]
+    ConnectionError,
+    #[doom(description("Batch miss"))]
+    Miss,
+    #[doom(description("Failed to deserialize: {}", source))]
+    #[doom(wrap(deserialize_failed))]
+    DeserializeFailed { source: Box<bincode::ErrorKind> },
+    #[doom(description("Failed to expand batch"))]
+    ExpandFailed,
+    #[doom(description("Root mismatch"))]
+    RootMismatch,
+}
+
 impl TotalityManager {
-    pub fn new(membership: Membership, _connector: SessionConnector) -> Self {
+    pub fn new(membership: Membership, connector: SessionConnector) -> Self {
+        let membership = Arc::new(membership);
+        let connector = Arc::new(connector);
+
         let totality_queue = TotalityQueue {
             offset: 0,
             entries: VecDeque::new(),
@@ -68,8 +103,10 @@ impl TotalityManager {
         let fuse = Fuse::new();
 
         fuse.spawn(TotalityManager::run(
+            membership,
             totality_queue.clone(),
             vector_clock.clone(),
+            connector.clone(),
             run_call_outlet,
             pull_inlet,
         ));
@@ -99,8 +136,10 @@ impl TotalityManager {
     }
 
     async fn run(
+        membership: Arc<Membership>,
         totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
+        connector: Arc<SessionConnector>,
         mut run_call_outlet: CallOutlet,
         pull_inlet: BatchInlet,
     ) {
@@ -139,8 +178,10 @@ impl TotalityManager {
                         delivery_queue.offset + ((delivery_queue.entries.len() - 1) as u64);
 
                     fuse.spawn(TotalityManager::retrieve(
+                        membership.clone(),
                         height,
                         root,
+                        connector.clone(),
                         run_entry_inlet.clone(),
                     ));
                 }
@@ -157,7 +198,98 @@ impl TotalityManager {
         }
     }
 
-    async fn retrieve(height: u64, root: Hash, run_entry_inlet: EntryInlet) {}
+    async fn retrieve(
+        membership: Arc<Membership>,
+        height: u64,
+        root: Hash,
+        connector: Arc<SessionConnector>,
+        run_entry_inlet: EntryInlet,
+    ) {
+        let mut servers = membership
+            .servers()
+            .keys()
+            .copied()
+            .choose_multiple(&mut rand::thread_rng(), membership.servers().len())
+            .into_iter();
+
+        let mut ask_tasks = FuturesUnordered::new();
+
+        loop {
+            if !ask_tasks.is_empty() {
+                tokio::select! {
+                    Some(batch) = ask_tasks.next() => {
+                        if let Ok(batch) = batch {
+                            let _ = run_entry_inlet.send((height, batch)).await;
+                            return;
+                        } else {
+                            continue;
+                        }
+                    },
+                    _ = time::sleep(EXTEND_TIMEOUT) => {}
+                }
+            }
+
+            if let Some(server) = servers.next() {
+                ask_tasks.push(TotalityManager::ask(
+                    height,
+                    root,
+                    server,
+                    connector.clone(),
+                ));
+            }
+        }
+    }
+
+    async fn ask(
+        height: u64,
+        root: Hash,
+        server: Identity,
+        connector: Arc<SessionConnector>,
+    ) -> Result<Batch, Top<AskError>> {
+        let mut session = connector
+            .connect(server)
+            .await
+            .pot(AskError::ConnectFailed, here!())?;
+
+        session
+            .send_plain(&Request::Retrieve(height))
+            .await
+            .pot(AskError::ConnectionError, here!())?;
+
+        let hit = session
+            .receive_plain::<bool>()
+            .await
+            .pot(AskError::ConnectionError, here!())?;
+
+        if !hit {
+            session.end();
+            return AskError::Miss.fail().spot(here!());
+        }
+
+        let batch = session
+            .receive_raw_bytes()
+            .await
+            .pot(AskError::ConnectionError, here!())?;
+
+        let batch = task::spawn_blocking(move || -> Result<Batch, Top<AskError>> {
+            let batch = bincode::deserialize(batch.as_slice())
+                .map_err(AskError::deserialize_failed)
+                .map_err(Doom::into_top)
+                .spot(here!())?;
+
+            Batch::expand_unverified(batch).pot(AskError::ExpandFailed, here!())
+        })
+        .await
+        .unwrap()?;
+
+        session.end();
+
+        if batch.root() == root {
+            Ok(batch)
+        } else {
+            AskError::RootMismatch.fail()
+        }
+    }
 }
 
 #[cfg(test)]
