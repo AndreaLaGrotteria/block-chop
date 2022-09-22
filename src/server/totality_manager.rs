@@ -1,10 +1,19 @@
 use crate::{server::Batch, system::Membership};
-use std::collections::VecDeque;
-use talk::{crypto::primitives::hash::Hash, net::SessionConnector, sync::fuse::Fuse};
+use sled::Atomic;
+use std::{
+    collections::{HashMap, VecDeque},
+    iter,
+    sync::{atomic::AtomicU64, Arc, Mutex},
+};
+use talk::{
+    crypto::{primitives::hash::Hash, Identity},
+    net::SessionConnector,
+    sync::fuse::Fuse,
+};
 use tokio::sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender};
 
-type EntryInlet = MpscSender<Entry>;
-type EntryOutlet = MpscReceiver<Entry>;
+type CallInlet = MpscSender<Call>;
+type CallOutlet = MpscReceiver<Call>;
 
 type BatchInlet = MpscSender<Batch>;
 type BatchOutlet = MpscReceiver<Batch>;
@@ -14,27 +23,58 @@ type BatchOutlet = MpscReceiver<Batch>;
 const PIPELINE: usize = 8192;
 
 pub(in crate::server) struct TotalityManager {
-    run_inlet: EntryInlet,
+    run_call_inlet: CallInlet,
     pull_outlet: BatchOutlet,
     _fuse: Fuse,
 }
 
-enum Entry {
+enum Call {
     Hit(Vec<u8>, Batch),
     Miss(Hash),
 }
 
+struct DeliveryQueue {
+    offset: u64,
+    entries: VecDeque<Option<Batch>>,
+}
+
+struct TotalityQueue {
+    offset: u64,
+    entries: VecDeque<Option<Arc<Vec<u8>>>>,
+}
+
 impl TotalityManager {
-    pub fn new(_membership: Membership, _connector: SessionConnector) -> Self {
-        let (run_inlet, run_outlet) = mpsc::channel(PIPELINE);
+    pub fn new(membership: Membership, _connector: SessionConnector) -> Self {
+        let totality_queue = TotalityQueue {
+            offset: 0,
+            entries: VecDeque::new(),
+        };
+
+        let totality_queue = Arc::new(Mutex::new(totality_queue));
+
+        let vector_clock = membership
+            .servers()
+            .keys()
+            .copied()
+            .map(|identity| (identity, AtomicU64::new(0)))
+            .collect::<HashMap<_, _>>();
+
+        let vector_clock = Arc::new(vector_clock);
+
+        let (run_call_inlet, run_call_outlet) = mpsc::channel(PIPELINE);
         let (pull_inlet, pull_outlet) = mpsc::channel(PIPELINE);
 
         let fuse = Fuse::new();
 
-        fuse.spawn(TotalityManager::run(run_outlet, pull_inlet));
+        fuse.spawn(TotalityManager::run(
+            totality_queue.clone(),
+            vector_clock.clone(),
+            run_call_outlet,
+            pull_inlet,
+        ));
 
         TotalityManager {
-            run_inlet,
+            run_call_inlet,
             pull_outlet,
             _fuse: fuse,
         }
@@ -42,13 +82,13 @@ impl TotalityManager {
 
     pub async fn hit(&self, compressed_batch: Vec<u8>, batch: Batch) {
         let _ = self
-            .run_inlet
-            .send(Entry::Hit(compressed_batch, batch))
+            .run_call_inlet
+            .send(Call::Hit(compressed_batch, batch))
             .await;
     }
 
     pub async fn miss(&self, root: Hash) {
-        let _ = self.run_inlet.send(Entry::Miss(root)).await;
+        let _ = self.run_call_inlet.send(Call::Miss(root)).await;
     }
 
     pub async fn pull(&mut self) -> Batch {
@@ -57,34 +97,45 @@ impl TotalityManager {
         self.pull_outlet.recv().await.unwrap()
     }
 
-    async fn run(mut run_outlet: EntryOutlet, pull_inlet: BatchInlet) {
-        let mut delivery_queue = VecDeque::new();
-        let mut delivery_offset = 0;
-
-        let mut totality_queue = VecDeque::new();
-        let mut totality_offset = 0;
+    async fn run(
+        totality_queue: Arc<Mutex<TotalityQueue>>,
+        vector_clock: Arc<HashMap<Identity, AtomicU64>>,
+        mut run_call_outlet: CallOutlet,
+        pull_inlet: BatchInlet,
+    ) {
+        let mut delivery_queue = DeliveryQueue {
+            offset: 0,
+            entries: VecDeque::new(),
+        };
 
         loop {
-            let entry = if let Some(entry) = run_outlet.recv().await {
-                entry
+            let call = if let Some(call) = run_call_outlet.recv().await {
+                call
             } else {
                 // `TotalityManager` has dropped, shutdown
                 return;
             };
 
-            match entry {
-                Entry::Hit(compressed_batch, batch) => {
-                    delivery_queue.push_back(Some(batch));
-                    totality_queue.push_back(Some(compressed_batch));
+            match call {
+                Call::Hit(compressed_batch, batch) => {
+                    delivery_queue.entries.push_back(Some(batch));
+
+                    totality_queue
+                        .lock()
+                        .unwrap()
+                        .entries
+                        .push_back(Some(Arc::new(compressed_batch)));
                 }
-                Entry::Miss(root) => {
+                Call::Miss(root) => {
                     todo!()
                 }
             }
 
-            while delivery_queue.front().is_some() && delivery_queue.front().unwrap().is_some() {
-                let batch = delivery_queue.pop_front().unwrap().unwrap();
-                delivery_offset += 1;
+            while delivery_queue.entries.front().is_some()
+                && delivery_queue.entries.front().unwrap().is_some()
+            {
+                let batch = delivery_queue.entries.pop_front().unwrap().unwrap();
+                delivery_queue.offset += 1;
 
                 let _ = pull_inlet.send(batch).await;
             }
