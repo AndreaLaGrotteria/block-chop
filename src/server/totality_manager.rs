@@ -1,6 +1,5 @@
-use std::{collections::VecDeque, f32::consts::PI};
-
-use crate::server::Batch;
+use crate::{server::Batch, system::Membership};
+use std::collections::VecDeque;
 use talk::{crypto::primitives::hash::Hash, net::SessionConnector, sync::fuse::Fuse};
 use tokio::sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender};
 
@@ -26,7 +25,7 @@ enum Entry {
 }
 
 impl TotalityManager {
-    pub fn new(_connector: SessionConnector) -> Self {
+    pub fn new(_membership: Membership, _connector: SessionConnector) -> Self {
         let (run_inlet, run_outlet) = mpsc::channel(PIPELINE);
         let (pull_inlet, pull_outlet) = mpsc::channel(PIPELINE);
 
@@ -102,10 +101,12 @@ mod tests {
 
     #[tokio::test]
     async fn all_hits() {
+        let membership = Membership::new([]);
+
         let connector =
             SessionConnector::new(TestConnector::new(KeyChain::random(), HashMap::new()));
 
-        let mut totality_manager = TotalityManager::new(connector);
+        let mut totality_manager = TotalityManager::new(membership, connector);
 
         for _ in 0..128 {
             let compressed_batch = random_unauthenticated_batch(128, 32);
