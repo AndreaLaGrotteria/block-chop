@@ -90,3 +90,35 @@ impl TotalityManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broadcast::test::random_unauthenticated_batch;
+    use std::collections::HashMap;
+    use talk::{crypto::KeyChain, net::test::TestConnector};
+
+    #[tokio::test]
+    async fn all_hits() {
+        let connector =
+            SessionConnector::new(TestConnector::new(KeyChain::random(), HashMap::new()));
+
+        let mut totality_manager = TotalityManager::new(connector);
+
+        for _ in 0..128 {
+            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+
+            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let root = batch.root();
+
+            totality_manager
+                .hit(serialized_compressed_batch, batch)
+                .await;
+
+            let batch = totality_manager.pull().await;
+
+            assert_eq!(batch.root(), root);
+        }
+    }
+}
