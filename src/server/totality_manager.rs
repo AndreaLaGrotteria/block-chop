@@ -59,11 +59,11 @@ impl TotalityManager {
     }
 
     async fn run(mut run_outlet: EntryOutlet, pull_inlet: BatchInlet) {
-        let mut delivery_offset = 0;
         let mut delivery_queue = VecDeque::new();
+        let mut delivery_offset = 0;
 
-        let mut totality_offset = 0;
         let mut totality_queue = VecDeque::new();
+        let mut totality_offset = 0;
 
         loop {
             let entry = if let Some(entry) = run_outlet.recv().await {
@@ -85,6 +85,8 @@ impl TotalityManager {
 
             while delivery_queue.front().is_some() && delivery_queue.front().unwrap().is_some() {
                 let batch = delivery_queue.pop_front().unwrap().unwrap();
+                delivery_offset += 1;
+
                 let _ = pull_inlet.send(batch).await;
             }
         }
