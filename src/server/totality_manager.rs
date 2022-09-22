@@ -1,8 +1,6 @@
 use crate::{server::Batch, system::Membership};
-use sled::Atomic;
 use std::{
     collections::{HashMap, VecDeque},
-    iter,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
 use talk::{
@@ -17,6 +15,9 @@ type CallOutlet = MpscReceiver<Call>;
 
 type BatchInlet = MpscSender<Batch>;
 type BatchOutlet = MpscReceiver<Batch>;
+
+type EntryInlet = MpscSender<(u64, Batch)>;
+type EntryOutlet = MpscReceiver<(u64, Batch)>;
 
 // TODO: Refactor constants into settings
 
@@ -108,6 +109,10 @@ impl TotalityManager {
             entries: VecDeque::new(),
         };
 
+        let (run_entry_inlet, run_entry_outlet) = mpsc::channel(PIPELINE);
+
+        let fuse = Fuse::new();
+
         loop {
             let call = if let Some(call) = run_call_outlet.recv().await {
                 call
@@ -127,7 +132,17 @@ impl TotalityManager {
                         .push_back(Some(Arc::new(compressed_batch)));
                 }
                 Call::Miss(root) => {
-                    todo!()
+                    delivery_queue.entries.push_back(None);
+                    totality_queue.lock().unwrap().entries.push_back(None);
+
+                    let height =
+                        delivery_queue.offset + ((delivery_queue.entries.len() - 1) as u64);
+
+                    fuse.spawn(TotalityManager::retrieve(
+                        height,
+                        root,
+                        run_entry_inlet.clone(),
+                    ));
                 }
             }
 
@@ -141,6 +156,8 @@ impl TotalityManager {
             }
         }
     }
+
+    async fn retrieve(height: u64, root: Hash, run_entry_inlet: EntryInlet) {}
 }
 
 #[cfg(test)]
