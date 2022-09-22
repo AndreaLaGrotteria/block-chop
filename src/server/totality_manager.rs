@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
@@ -34,6 +34,10 @@ type EntryOutlet = MpscReceiver<(u64, Batch)>;
 
 const PIPELINE: usize = 8192;
 const EXTEND_TIMEOUT: Duration = Duration::from_secs(2);
+
+const SYNC_INTERVAL: Duration = Duration::from_secs(1);
+const COLLECT_INTERVAL: Duration = Duration::from_millis(500);
+const WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
@@ -77,6 +81,14 @@ enum AskError {
     ExpandFailed,
     #[doom(description("Root mismatch"))]
     RootMismatch,
+}
+
+#[derive(Doom)]
+enum UpdateError {
+    #[doom(description("Failed to connect"))]
+    ConnectFailed,
+    #[doom(description("Connection error"))]
+    ConnectionError,
 }
 
 #[derive(Doom)]
@@ -171,6 +183,9 @@ impl TotalityManager {
 
         let fuse = Fuse::new();
 
+        let mut last_sync = Instant::now();
+        let mut last_collect = Instant::now();
+
         loop {
             tokio::select! {
                 call = run_call_outlet.recv() => {
@@ -220,6 +235,8 @@ impl TotalityManager {
 
                     *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(batch);
                 }
+
+                _ = time::sleep(WAKE_INTERVAL) => {}
             }
 
             while delivery_queue.entries.front().is_some()
@@ -229,6 +246,31 @@ impl TotalityManager {
                 delivery_queue.offset += 1;
 
                 let _ = pull_inlet.send(batch).await;
+            }
+
+            if last_collect.elapsed() >= COLLECT_INTERVAL {
+                let max_clock = vector_clock
+                    .values()
+                    .map(|clock| clock.load(Ordering::Relaxed))
+                    .max()
+                    .unwrap();
+
+                let mut totality_queue = totality_queue.lock().unwrap();
+
+                while totality_queue.offset > max_clock {
+                    totality_queue.entries.pop_front();
+                    totality_queue.offset += 1;
+                }
+            }
+
+            if last_sync.elapsed() >= SYNC_INTERVAL {
+                fuse.spawn(TotalityManager::sync(
+                    membership.clone(),
+                    delivery_queue.offset,
+                    connector.clone(),
+                ));
+
+                last_sync = Instant::now();
             }
         }
     }
@@ -324,6 +366,34 @@ impl TotalityManager {
         } else {
             AskError::RootMismatch.fail()
         }
+    }
+
+    async fn sync(membership: Arc<Membership>, height: u64, connector: Arc<SessionConnector>) {
+        let fuse = Fuse::new();
+
+        for server in membership.servers().keys().copied() {
+            fuse.spawn(TotalityManager::update(server, height, connector.clone()));
+        }
+    }
+
+    async fn update(
+        server: Identity,
+        height: u64,
+        connector: Arc<SessionConnector>,
+    ) -> Result<(), Top<UpdateError>> {
+        let mut session = connector
+            .connect(server)
+            .await
+            .pot(UpdateError::ConnectFailed, here!())?;
+
+        session
+            .send_plain(&Request::Collect(height))
+            .await
+            .pot(UpdateError::ConnectionError, here!())?;
+
+        session.end();
+
+        Ok(())
     }
 
     async fn listen(
