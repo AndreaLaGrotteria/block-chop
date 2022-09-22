@@ -148,42 +148,57 @@ impl TotalityManager {
             entries: VecDeque::new(),
         };
 
-        let (run_entry_inlet, run_entry_outlet) = mpsc::channel(PIPELINE);
+        let (run_entry_inlet, mut run_entry_outlet) = mpsc::channel(PIPELINE);
 
         let fuse = Fuse::new();
 
         loop {
-            let call = if let Some(call) = run_call_outlet.recv().await {
-                call
-            } else {
-                // `TotalityManager` has dropped, shutdown
-                return;
-            };
+            tokio::select! {
+                call = run_call_outlet.recv() => {
+                    let call = if let Some(call) = call {
+                        call
+                    } else {
+                        // `TotalityManager` has dropped, shutdown
+                        return;
+                    };
 
-            match call {
-                Call::Hit(compressed_batch, batch) => {
-                    delivery_queue.entries.push_back(Some(batch));
+                    match call {
+                        Call::Hit(compressed_batch, batch) => {
+                            delivery_queue.entries.push_back(Some(batch));
 
-                    totality_queue
-                        .lock()
-                        .unwrap()
-                        .entries
-                        .push_back(Some(Arc::new(compressed_batch)));
+                            totality_queue
+                                .lock()
+                                .unwrap()
+                                .entries
+                                .push_back(Some(Arc::new(compressed_batch)));
+                        }
+                        Call::Miss(root) => {
+                            delivery_queue.entries.push_back(None);
+                            totality_queue.lock().unwrap().entries.push_back(None);
+
+                            let height =
+                                delivery_queue.offset + ((delivery_queue.entries.len() - 1) as u64);
+
+                            fuse.spawn(TotalityManager::retrieve(
+                                membership.clone(),
+                                height,
+                                root,
+                                connector.clone(),
+                                run_entry_inlet.clone(),
+                            ));
+                        }
+                    }
                 }
-                Call::Miss(root) => {
-                    delivery_queue.entries.push_back(None);
-                    totality_queue.lock().unwrap().entries.push_back(None);
 
-                    let height =
-                        delivery_queue.offset + ((delivery_queue.entries.len() - 1) as u64);
+                entry = run_entry_outlet.recv() => {
+                    let (height, batch) = if let Some(entry) = entry {
+                        entry
+                    } else {
+                        // `TotalityManager` has dropped, shutdown
+                        return;
+                    };
 
-                    fuse.spawn(TotalityManager::retrieve(
-                        membership.clone(),
-                        height,
-                        root,
-                        connector.clone(),
-                        run_entry_inlet.clone(),
-                    ));
+                    *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(batch);
                 }
             }
 
