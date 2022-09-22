@@ -5,12 +5,15 @@ use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
-    net::SessionConnector,
+    net::{Session, SessionConnector, SessionListener},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -76,8 +79,18 @@ enum AskError {
     RootMismatch,
 }
 
+#[derive(Doom)]
+enum ServeError {
+    #[doom(description("Connnection error"))]
+    ConnectionError,
+}
+
 impl TotalityManager {
-    pub fn new(membership: Membership, connector: SessionConnector) -> Self {
+    pub fn new(
+        membership: Membership,
+        connector: SessionConnector,
+        listener: SessionListener,
+    ) -> Self {
         let membership = Arc::new(membership);
         let connector = Arc::new(connector);
 
@@ -109,6 +122,12 @@ impl TotalityManager {
             connector.clone(),
             run_call_outlet,
             pull_inlet,
+        ));
+
+        fuse.spawn(TotalityManager::listen(
+            totality_queue.clone(),
+            vector_clock.clone(),
+            listener,
         ));
 
         TotalityManager {
@@ -172,6 +191,7 @@ impl TotalityManager {
                                 .entries
                                 .push_back(Some(Arc::new(compressed_batch)));
                         }
+
                         Call::Miss(root) => {
                             delivery_queue.entries.push_back(None);
                             totality_queue.lock().unwrap().entries.push_back(None);
@@ -304,6 +324,82 @@ impl TotalityManager {
         } else {
             AskError::RootMismatch.fail()
         }
+    }
+
+    async fn listen(
+        totality_queue: Arc<Mutex<TotalityQueue>>,
+        vector_clock: Arc<HashMap<Identity, AtomicU64>>,
+        mut listener: SessionListener,
+    ) {
+        let fuse = Fuse::new();
+
+        loop {
+            let (server, session) = listener.accept().await;
+
+            fuse.spawn(TotalityManager::serve(
+                totality_queue.clone(),
+                vector_clock.clone(),
+                server,
+                session,
+            ));
+        }
+    }
+
+    async fn serve(
+        totality_queue: Arc<Mutex<TotalityQueue>>,
+        vector_clock: Arc<HashMap<Identity, AtomicU64>>,
+        server: Identity,
+        mut session: Session,
+    ) -> Result<(), Top<ServeError>> {
+        let request = session
+            .receive_plain::<Request>()
+            .await
+            .pot(ServeError::ConnectionError, here!())?;
+
+        match request {
+            Request::Retrieve(height) => {
+                let batch = {
+                    let totality_queue = totality_queue.lock().unwrap();
+
+                    if height >= totality_queue.offset {
+                        totality_queue
+                            .entries
+                            .get((height - totality_queue.offset) as usize)
+                            .cloned()
+                            .flatten()
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(batch) = batch {
+                    session
+                        .send_plain(&true)
+                        .await
+                        .pot(ServeError::ConnectionError, here!())?;
+
+                    session
+                        .send_raw_bytes(batch.as_slice())
+                        .await
+                        .pot(ServeError::ConnectionError, here!())?;
+                } else {
+                    session
+                        .send_plain(&false)
+                        .await
+                        .pot(ServeError::ConnectionError, here!())?;
+                }
+            }
+
+            Request::Collect(height) => {
+                if let Some(clock) = vector_clock.get(&server) {
+                    clock.fetch_max(height, Ordering::Relaxed);
+                }
+            }
+        }
+
+        session.end();
+
+        Ok(())
     }
 }
 
