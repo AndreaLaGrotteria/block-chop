@@ -289,6 +289,7 @@ impl Server {
     }
 }
 
+mod broker_state;
 mod deliver;
 
 #[cfg(test)]
