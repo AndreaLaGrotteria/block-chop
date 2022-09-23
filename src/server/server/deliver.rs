@@ -148,7 +148,7 @@ impl Server {
                 &membership,
                 &BatchWitness {
                     broker: &broker,
-                    sequence: &0,   // TODO: replace with real sequence
+                    sequence: &0, // TODO: replace with real sequence
                     root: &root,
                 },
             )
