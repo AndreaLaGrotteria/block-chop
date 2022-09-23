@@ -311,11 +311,12 @@ impl TotalityManager {
             // all batches have been delivered, i.e., `delivery_queue.offset`
 
             if last_update.elapsed() >= UPDATE_INTERVAL {
-                fuse.spawn(TotalityManager::update(
+                TotalityManager::update(
                     delivery_queue.offset,
                     membership.clone(),
                     connector.clone(),
-                ));
+                    &fuse,
+                );
 
                 last_update = Instant::now();
             }
@@ -424,9 +425,12 @@ impl TotalityManager {
         }
     }
 
-    async fn update(height: u64, membership: Arc<Membership>, connector: Arc<SessionConnector>) {
-        let fuse = Fuse::new();
-
+    fn update(
+        height: u64,
+        membership: Arc<Membership>,
+        connector: Arc<SessionConnector>,
+        fuse: &Fuse,
+    ) {
         for server in membership.servers().keys().copied() {
             fuse.spawn(TotalityManager::release(server, height, connector.clone()));
         }
@@ -537,20 +541,28 @@ impl TotalityManager {
 mod tests {
     use super::*;
     use crate::broadcast::test::random_unauthenticated_batch;
-    use std::{collections::HashMap, iter};
-    use talk::{
-        crypto::{KeyCard, KeyChain},
-        net::test::{System, TestConnector, TestListener},
-    };
+    use std::iter;
+    use talk::{crypto::KeyChain, net::test::System};
 
     #[tokio::test]
     async fn all_hits() {
-        let membership = Membership::new([]);
+        let keychains = iter::repeat_with(KeyChain::random)
+            .take(1)
+            .collect::<Vec<_>>();
 
-        let connector = TestConnector::new(KeyChain::random(), HashMap::new());
-        let (listener, _) = TestListener::new(KeyChain::random()).await;
+        let keycards = keychains.iter().map(KeyChain::keycard).collect::<Vec<_>>();
 
-        let mut totality_manager = TotalityManager::new(membership, connector, listener);
+        let membership = Membership::new(keycards);
+        let system = System::setup_with_keychains(keychains).await;
+
+        let mut connectors = system.connectors.into_iter();
+        let mut listeners = system.listeners.into_iter();
+
+        let mut totality_manager = TotalityManager::new(
+            membership.clone(),
+            connectors.next().unwrap(),
+            listeners.next().unwrap(),
+        );
 
         for _ in 0..128 {
             let compressed_batch = random_unauthenticated_batch(128, 32);
