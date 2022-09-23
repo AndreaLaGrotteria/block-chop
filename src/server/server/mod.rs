@@ -11,7 +11,10 @@ use crate::{
     warn, Entry,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
     net::{Session, SessionListener},
@@ -59,6 +62,7 @@ impl Server {
     where
         B: Order,
     {
+        let brokers = Arc::new(Mutex::new(HashMap::<Identity, BrokerState>::new()));
         let directory_capacity = directory.capacity();
 
         let broadcast = Arc::new(broadcast);
@@ -70,6 +74,7 @@ impl Server {
             let membership = membership.clone();
             let broadcast = broadcast.clone();
             let settings = settings.clone();
+            let brokers = brokers.clone();
 
             fuse.spawn(async move {
                 Server::listen(
@@ -79,6 +84,7 @@ impl Server {
                     broadcast,
                     batch_inlet,
                     listener,
+                    brokers,
                     settings,
                 )
                 .await;
@@ -88,16 +94,21 @@ impl Server {
         let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
         let (apply_inlet, apply_outlet) = mpsc::channel(settings.apply_channel_capacity);
 
-        fuse.spawn(async move {
-            Server::deliver(
-                membership,
-                broadcast,
-                batch_outlet,
-                deduplicator,
-                apply_inlet,
-            )
-            .await;
-        });
+        {
+            let brokers = brokers.clone();
+
+            fuse.spawn(async move {
+                Server::deliver(
+                    membership,
+                    broadcast,
+                    batch_outlet,
+                    brokers,
+                    deduplicator,
+                    apply_inlet,
+                )
+                .await;
+            });
+        }
 
         Server {
             apply_outlet,
@@ -121,6 +132,7 @@ impl Server {
         broadcast: Arc<dyn Order>,
         batch_inlet: BatchInlet,
         mut listener: SessionListener,
+        brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
         settings: ServerSettings,
     ) {
         let membership = Arc::new(membership);
@@ -291,6 +303,8 @@ impl Server {
 
 mod broker_state;
 mod deliver;
+
+use broker_state::BrokerState;
 
 #[cfg(test)]
 mod tests {

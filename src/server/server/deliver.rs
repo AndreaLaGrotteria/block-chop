@@ -2,14 +2,14 @@ use crate::{
     broadcast::Amendment,
     crypto::{statements::BatchWitness, Certificate},
     order::Order,
-    server::{Batch, Deduplicator, Duplicate, Server},
+    server::{server::BrokerState, Batch, Deduplicator, Duplicate, Server},
     system::Membership,
     Entry,
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
     collections::{hash_map::Entry as HashMapEntry, HashMap, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use talk::crypto::{primitives::hash::Hash, Identity};
 use tokio::sync::{
@@ -41,6 +41,7 @@ impl Server {
         membership: Membership,
         broadcast: Arc<dyn Order>,
         mut batches_outlet: BatchOutlet,
+        brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
         mut deduplicator: Deduplicator,
         mut apply_inlet: ApplyInlet,
     ) {
@@ -61,7 +62,14 @@ impl Server {
                     }
                 }
                 submission = broadcast.deliver() => {
-                    if let Ok(delivery) = Self::validate(&membership, &submission) {
+                    if let Ok((broker, delivery)) = Self::validate(&membership, &submission, &brokers) {
+                        let _expected_batch = {
+                            let mut guard = brokers.lock().unwrap();
+                            let broker = guard.get_mut(&broker).unwrap();
+                            broker.next_sequence += 1;
+                            broker.expected_batch.take()
+                        };
+
                         pending_deliveries.push((height, delivery));
                         Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
                     }
@@ -136,25 +144,36 @@ impl Server {
         }
     }
 
-    fn validate(membership: &Membership, submission: &[u8]) -> Result<Hash, Top<ProcessError>> {
+    fn validate(
+        membership: &Membership,
+        submission: &[u8],
+        brokers: &Mutex<HashMap<Identity, BrokerState>>,
+    ) -> Result<(Identity, Hash), Top<ProcessError>> {
         let (broker, root, witness) =
             bincode::deserialize::<(Identity, Hash, Certificate)>(submission)
                 .map_err(ProcessError::deserialize_failed)
                 .map_err(ProcessError::into_top)
                 .spot(here!())?;
 
+        let sequence = brokers
+            .lock()
+            .unwrap()
+            .entry(broker)
+            .or_insert(Default::default())
+            .next_sequence;
+
         witness
             .verify_plurality(
                 &membership,
                 &BatchWitness {
                     broker: &broker,
-                    sequence: &0, // TODO: replace with real sequence
+                    sequence: &sequence, // TODO: replace with real sequence
                     root: &root,
                 },
             )
             .pot(ProcessError::WitnessInvalid, here!())?;
 
-        Ok(root)
+        Ok((broker, root))
     }
 
     async fn process(
