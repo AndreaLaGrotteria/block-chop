@@ -28,6 +28,8 @@ enum TrySubmitError {
 impl Broker {
     pub(in crate::broker::broker) async fn submit(
         compressed_batch: &CompressedBatch,
+        worker: Identity,
+        sequence: u64,
         expected_root: Hash,
         server: &KeyCard,
         connector: Arc<SessionConnector>,
@@ -42,6 +44,8 @@ impl Broker {
         loop {
             match Broker::try_submit(
                 compressed_batch,
+                worker,
+                sequence,
                 expected_root,
                 &server,
                 connector.as_ref(),
@@ -64,6 +68,8 @@ impl Broker {
 
     async fn try_submit(
         compressed_batch: &CompressedBatch,
+        worker: Identity,
+        sequence: u64,
         expected_root: Hash,
         server: &KeyCard,
         connector: &SessionConnector,
@@ -79,6 +85,11 @@ impl Broker {
 
         session
             .send_raw::<CompressedBatch>(compressed_batch)
+            .await
+            .pot(TrySubmitError::ConnectionError, here!())?;
+
+        session
+            .send_raw::<u64>(&sequence)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -101,6 +112,8 @@ impl Broker {
                 .verify(
                     [server],
                     &BatchWitness {
+                        broker: &worker,
+                        sequence: &sequence,
                         root: &expected_root,
                     },
                 )

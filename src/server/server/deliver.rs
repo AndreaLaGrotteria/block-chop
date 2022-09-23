@@ -11,7 +11,7 @@ use std::{
     collections::{hash_map::Entry as HashMapEntry, HashMap, VecDeque},
     sync::Arc,
 };
-use talk::crypto::primitives::hash::Hash;
+use talk::crypto::{primitives::hash::Hash, Identity};
 use tokio::sync::{
     mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
     oneshot::Sender as OneshotSender,
@@ -137,13 +137,21 @@ impl Server {
     }
 
     fn validate(membership: &Membership, submission: &[u8]) -> Result<Hash, Top<ProcessError>> {
-        let (root, witness) = bincode::deserialize::<(Hash, Certificate)>(submission)
-            .map_err(ProcessError::deserialize_failed)
-            .map_err(ProcessError::into_top)
-            .spot(here!())?;
+        let (broker, root, witness) =
+            bincode::deserialize::<(Identity, Hash, Certificate)>(submission)
+                .map_err(ProcessError::deserialize_failed)
+                .map_err(ProcessError::into_top)
+                .spot(here!())?;
 
         witness
-            .verify_plurality(&membership, &BatchWitness { root: &root })
+            .verify_plurality(
+                &membership,
+                &BatchWitness {
+                    broker: &broker,
+                    sequence: &0,   // TODO: replace with real sequence
+                    root: &root,
+                },
+            )
             .pot(ProcessError::WitnessInvalid, here!())?;
 
         Ok(root)

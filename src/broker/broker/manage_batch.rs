@@ -5,13 +5,19 @@ use crate::{
     system::{Directory, Membership},
 };
 use std::{collections::HashMap, sync::Arc};
-use talk::net::{DatagramSender, SessionConnector};
-use tokio::sync::broadcast::Receiver as BroadcastReceiver;
+use talk::{
+    crypto::Identity,
+    net::{DatagramSender, SessionConnector},
+};
+use tokio::sync::{broadcast::Receiver as BroadcastReceiver, mpsc::Sender as MpscSender};
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
+type WorkerInlet = MpscSender<Identity>;
 
 impl Broker {
     pub(in crate::broker::broker) async fn manage_batch(
+        worker: Identity,
+        sequence: u64,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         pool: HashMap<u64, Submission>,
@@ -19,6 +25,7 @@ impl Broker {
         reduction_outlet: ReductionOutlet,
         sender: Arc<DatagramSender<Response>>,
         connector: Arc<SessionConnector>,
+        worker_inlet: WorkerInlet,
         settings: BrokerSettings,
     ) {
         let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
@@ -29,11 +36,15 @@ impl Broker {
         let (height, delivery_certificate) = Broker::broadcast(
             &mut batch,
             compressed_batch,
+            worker,
+            sequence,
             membership.clone(),
             connector,
             settings.clone(),
         )
         .await;
+
+        worker_inlet.send(worker).await.unwrap();
 
         debug!("Got height and delivery certificate!");
 
@@ -62,14 +73,16 @@ mod tests {
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
-        let connector = TestConnector::new(KeyChain::random(), connector_map.clone());
+        let keychain = KeyChain::random();
+        let broker_identity = keychain.keycard().identity();
+        let connector = TestConnector::new(keychain, connector_map.clone());
         let session_connector = SessionConnector::new(connector);
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
-            session_connector,
+            [(broker_identity, session_connector)],
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -92,14 +105,16 @@ mod tests {
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
-        let connector = TestConnector::new(KeyChain::random(), connector_map.clone());
+        let keychain = KeyChain::random();
+        let broker_identity = keychain.keycard().identity();
+        let connector = TestConnector::new(keychain, connector_map.clone());
         let session_connector = SessionConnector::new(connector);
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
-            session_connector,
+            [(broker_identity, session_connector)],
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -126,14 +141,16 @@ mod tests {
             generate_system(1000, 4).await;
 
         let broker_address = "127.0.0.1:9000";
-        let connector = TestConnector::new(KeyChain::random(), connector_map.clone());
+        let keychain = KeyChain::random();
+        let broker_identity = keychain.keycard().identity();
+        let connector = TestConnector::new(keychain, connector_map.clone());
         let session_connector = SessionConnector::new(connector);
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
-            session_connector,
+            [(broker_identity, session_connector)],
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),

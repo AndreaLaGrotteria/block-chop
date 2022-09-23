@@ -6,6 +6,7 @@ use crate::{
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{net::ToSocketAddrs, sync::Arc};
 use talk::{
+    crypto::Identity,
     net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
@@ -23,21 +24,22 @@ pub enum BrokerError {
 }
 
 impl Broker {
-    pub async fn new<A>(
+    pub async fn new<A, I>(
         membership: Membership,
         directory: Directory,
         bind: A,
-        connector: SessionConnector,
+        connectors: I,
         settings: BrokerSettings,
     ) -> Result<Self, Top<BrokerError>>
     where
         A: Clone + ToSocketAddrs,
+        I: IntoIterator<Item = (Identity, SessionConnector)>,
     {
         // Build `Arc`s
 
         let membership = Arc::new(membership);
         let directory = Arc::new(directory);
-        let connector = Arc::new(connector);
+        let connectors = connectors.into_iter().collect::<Vec<_>>();
 
         // Bind `DatagramDispatcher`
 
@@ -85,7 +87,7 @@ impl Broker {
             directory.clone(),
             handle_outlet,
             sender.clone(),
-            connector,
+            connectors,
             settings.clone(),
         ));
 

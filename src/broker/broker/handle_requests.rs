@@ -8,12 +8,15 @@ use crate::{
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 use talk::{
-    crypto::primitives::sign::Signature,
+    crypto::{primitives::sign::Signature, Identity},
     net::{DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
 use tokio::{
-    sync::{broadcast, mpsc::Receiver as MpscReceiver},
+    sync::{
+        broadcast,
+        mpsc::{self, Receiver as MpscReceiver},
+    },
     time,
 };
 
@@ -28,14 +31,27 @@ enum FilterError {
 }
 
 impl Broker {
-    pub(in crate::broker::broker) async fn handle_requests(
+    pub(in crate::broker::broker) async fn handle_requests<I>(
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         mut handle_outlet: RequestOutlet,
         sender: Arc<DatagramSender<Response>>,
-        connector: Arc<SessionConnector>,
+        connectors: I,
         settings: BrokerSettings,
-    ) {
+    ) where
+        I: IntoIterator<Item = (Identity, SessionConnector)>,
+    {
+        let mut workers = connectors
+            .into_iter()
+            .map(|(identity, connector)| (identity, (Arc::new(connector), 0u64)))
+            .collect::<HashMap<_, _>>();
+
+        let (worker_inlet, mut worker_outlet) = mpsc::channel(workers.len());
+
+        for identity in workers.keys().copied() {
+            worker_inlet.send(identity).await.unwrap();
+        }
+
         let mut top_record = None;
         let mut next_flush = None;
         let mut pool = HashMap::new();
@@ -105,7 +121,12 @@ impl Broker {
 
                 next_flush = None;
 
+                let identity = worker_outlet.recv().await.unwrap();
+                let (connector, sequence) = workers.get_mut(&identity).unwrap();
+
                 fuse.spawn(Broker::manage_batch(
+                    identity,
+                    *sequence,
                     membership.clone(),
                     directory.clone(),
                     mem::take(&mut pool),
@@ -113,8 +134,11 @@ impl Broker {
                     reduction_inlet.subscribe(),
                     sender.clone(),
                     connector.clone(),
+                    worker_inlet.clone(),
                     settings.clone(),
                 ));
+
+                *sequence += 1;
             }
         }
     }

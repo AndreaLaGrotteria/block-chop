@@ -34,6 +34,8 @@ impl Broker {
     pub(in crate::broker::broker) async fn broadcast(
         batch: &mut Batch,
         compressed_batch: CompressedBatch,
+        worker: Identity,
+        sequence: u64,
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         settings: BrokerSettings,
@@ -85,6 +87,8 @@ impl Broker {
                 let handle = fuse.spawn(async move {
                     Broker::submit(
                         &compressed_batch,
+                        worker,
+                        sequence,
                         witness_root,
                         &server,
                         connector,
@@ -394,6 +398,8 @@ mod tests {
         let entries = expanded_batch_entries(null_batch(&clients_keychains, batch_size));
         let fake_signature = clients_keychains[0]
             .sign(&BatchWitness {
+                broker: &broker.keycard().identity(),
+                sequence: &0,
                 root: &hash(&0).unwrap(),
             })
             .unwrap();
@@ -421,6 +427,8 @@ mod tests {
         let (height, certificate) = Broker::broadcast(
             &mut batch,
             compressed_batch,
+            broker.keycard().identity(),
+            0,
             membership.clone(),
             session_connector,
             BrokerSettings {
@@ -460,6 +468,8 @@ mod tests {
         let entries = expanded_batch_entries(null_batch(&clients, batch_size));
         let fake_signature = clients[0]
             .sign(&BatchWitness {
+                broker: &broker.keycard().identity(),
+                sequence: &0,
                 root: &hash(&0).unwrap(),
             })
             .unwrap();
@@ -487,6 +497,8 @@ mod tests {
         let (height, certificate) = Broker::broadcast(
             &mut batch,
             compressed_batch,
+            broker.keycard().identity(),
+            0,
             membership.clone(),
             session_connector,
             BrokerSettings {

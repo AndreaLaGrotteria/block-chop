@@ -13,7 +13,7 @@ use crate::{
 use doomstack::{here, Doom, ResultExt, Top};
 use std::sync::Arc;
 use talk::{
-    crypto::{primitives::multi::Signature as MultiSignature, KeyChain},
+    crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
     net::{Session, SessionListener},
     sync::fuse::Fuse,
 };
@@ -133,7 +133,7 @@ impl Server {
         let fuse = Fuse::new();
 
         loop {
-            let (_, session) = listener.accept().await;
+            let (broker, session) = listener.accept().await;
 
             let keychain = keychain.clone();
             let membership = membership.clone();
@@ -151,6 +151,7 @@ impl Server {
                     batch_inlet,
                     semaphore,
                     session,
+                    broker,
                 )
                 .await
                 {
@@ -168,11 +169,19 @@ impl Server {
         batch_inlet: Arc<BatchInlet>,
         semaphore: Arc<Semaphore>,
         mut session: Session,
+        broker: Identity,
     ) -> Result<(), Top<ServeError>> {
         let compressed_batch = session
             .receive_raw::<CompressedBatch>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
+
+        let sequence = session
+            .receive_raw::<u64>()
+            .await
+            .pot(ServeError::ConnectionError, here!())?;
+
+        // TODO: check sequence
 
         let verify = session
             .receive_raw::<bool>()
@@ -190,6 +199,8 @@ impl Server {
 
                         let witness_shard = keychain
                             .multisign(&BatchWitness {
+                                broker: &broker,
+                                sequence: &sequence,
                                 root: &batch.root(),
                             })
                             .unwrap();
@@ -222,7 +233,14 @@ impl Server {
         let root = batch.root();
 
         witness
-            .verify_plurality(membership.as_ref(), &BatchWitness { root: &root })
+            .verify_plurality(
+                membership.as_ref(),
+                &BatchWitness {
+                    broker: &broker,
+                    sequence: &sequence,
+                    root: &root,
+                },
+            )
             .pot(ServeError::WitnessInvalid, here!())?;
 
         debug!("Certificate valid!");
@@ -234,7 +252,7 @@ impl Server {
 
         // Sending batch to be ordered by TOB
 
-        let submission = bincode::serialize(&(root, witness)).unwrap();
+        let submission = bincode::serialize(&(broker, root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
         // Always Ok unless `Server` is shutting down
@@ -317,6 +335,7 @@ mod tests {
         let mut responses = Vec::new();
         for (identity, session) in sessions[0..2].iter_mut() {
             session.send_raw(&compressed_batch).await.unwrap();
+            session.send_raw(&0u64).await.unwrap();
             session.send_raw(&true).await.unwrap();
 
             let response: MultiSignature = session.receive_raw().await.unwrap();
@@ -325,6 +344,7 @@ mod tests {
 
         for (_, session) in sessions[2..].iter_mut() {
             session.send_raw(&compressed_batch).await.unwrap();
+            session.send_raw(&0u64).await.unwrap();
             session.send_raw(&false).await.unwrap();
         }
 
@@ -332,7 +352,11 @@ mod tests {
         let batch_root = batch.root();
 
         for (identity, multisignature) in responses.iter() {
-            let statement = BatchWitness { root: &batch_root };
+            let statement = BatchWitness {
+                broker: &broker.keycard().identity(),
+                sequence: &0,
+                root: &batch_root,
+            };
             let keycard = membership.servers().get(identity).unwrap();
 
             multisignature.verify([keycard], &statement).unwrap();
