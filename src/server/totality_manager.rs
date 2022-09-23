@@ -537,21 +537,18 @@ impl TotalityManager {
 mod tests {
     use super::*;
     use crate::broadcast::test::random_unauthenticated_batch;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, iter};
     use talk::{
-        crypto::KeyChain,
-        net::test::{TestConnector, TestListener},
+        crypto::{KeyCard, KeyChain},
+        net::test::{System, TestConnector, TestListener},
     };
 
     #[tokio::test]
     async fn all_hits() {
         let membership = Membership::new([]);
 
-        let connector =
-            SessionConnector::new(TestConnector::new(KeyChain::random(), HashMap::new()));
-
+        let connector = TestConnector::new(KeyChain::random(), HashMap::new());
         let (listener, _) = TestListener::new(KeyChain::random()).await;
-        let listener = SessionListener::new(listener);
 
         let mut totality_manager = TotalityManager::new(membership, connector, listener);
 
@@ -569,6 +566,50 @@ mod tests {
             let batch = totality_manager.pull().await;
 
             assert_eq!(batch.root(), root);
+        }
+    }
+
+    #[tokio::test]
+    async fn all_hits_all_misses() {
+        let keychains = iter::repeat_with(KeyChain::random)
+            .take(2)
+            .collect::<Vec<_>>();
+
+        let keycards = keychains.iter().map(KeyChain::keycard).collect::<Vec<_>>();
+
+        let membership = Membership::new(keycards);
+        let system = System::setup_with_keychains(keychains).await;
+
+        let mut connectors = system.connectors.into_iter();
+        let mut listeners = system.listeners.into_iter();
+
+        let mut hitter = TotalityManager::new(
+            membership.clone(),
+            connectors.next().unwrap(),
+            listeners.next().unwrap(),
+        );
+
+        let mut misser = TotalityManager::new(
+            membership.clone(),
+            connectors.next().unwrap(),
+            listeners.next().unwrap(),
+        );
+
+        for _ in 0..128 {
+            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+
+            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let root = batch.root();
+
+            hitter.hit(serialized_compressed_batch, batch).await;
+            misser.miss(root).await;
+
+            let hitter_batch = hitter.pull().await;
+            let misser_batch = misser.pull().await;
+
+            assert_eq!(hitter_batch.root(), root);
+            assert_eq!(misser_batch.root(), root);
         }
     }
 }
