@@ -1,4 +1,7 @@
-use crate::{server::Batch, system::Membership};
+use crate::{
+    server::{Batch, TotalityManagerSettings},
+    system::Membership,
+};
 use doomstack::{here, Doom, ResultExt, Top};
 use futures::{stream::FuturesUnordered, StreamExt};
 use rand::seq::IteratorRandom;
@@ -29,15 +32,6 @@ type BatchOutlet = MpscReceiver<Batch>;
 
 type EntryInlet = MpscSender<(u64, Batch)>;
 type EntryOutlet = MpscReceiver<(u64, Batch)>;
-
-// TODO: Refactor constants into settings
-
-const PIPELINE: usize = 8192;
-const EXTEND_TIMEOUT: Duration = Duration::from_secs(2);
-
-const UPDATE_INTERVAL: Duration = Duration::from_secs(1);
-const COLLECT_INTERVAL: Duration = Duration::from_millis(500);
-const WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
@@ -98,7 +92,12 @@ enum ServeError {
 }
 
 impl TotalityManager {
-    pub fn new<C, L>(membership: Membership, connector: C, listener: L) -> Self
+    pub fn new<C, L>(
+        membership: Membership,
+        connector: C,
+        listener: L,
+        settings: TotalityManagerSettings,
+    ) -> Self
     where
         C: Connector,
         L: Listener,
@@ -132,8 +131,8 @@ impl TotalityManager {
 
         // Initialize channels
 
-        let (run_call_inlet, run_call_outlet) = mpsc::channel(PIPELINE);
-        let (pull_inlet, pull_outlet) = mpsc::channel(PIPELINE);
+        let (run_call_inlet, run_call_outlet) = mpsc::channel(settings.pipeline);
+        let (pull_inlet, pull_outlet) = mpsc::channel(settings.pipeline);
 
         // Spawn tasks
 
@@ -146,6 +145,7 @@ impl TotalityManager {
             connector.clone(),
             run_call_outlet,
             pull_inlet,
+            settings,
         ));
 
         fuse.spawn(TotalityManager::listen(
@@ -187,13 +187,14 @@ impl TotalityManager {
         connector: Arc<SessionConnector>,
         mut run_call_outlet: CallOutlet,
         pull_inlet: BatchInlet,
+        settings: TotalityManagerSettings,
     ) {
         let mut delivery_queue = DeliveryQueue {
             offset: 0,
             entries: VecDeque::new(),
         };
 
-        let (run_entry_inlet, mut run_entry_outlet) = mpsc::channel(PIPELINE);
+        let (run_entry_inlet, mut run_entry_outlet) = mpsc::channel(settings.pipeline);
 
         let fuse = Fuse::new();
 
@@ -243,6 +244,7 @@ impl TotalityManager {
                                 membership.clone(),
                                 connector.clone(),
                                 run_entry_inlet.clone(),
+                                settings.clone()
                             ));
                         }
                     }
@@ -266,7 +268,7 @@ impl TotalityManager {
                     *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(batch);
                 }
 
-                _ = time::sleep(WAKE_INTERVAL) => {}
+                _ = time::sleep(settings.wake_interval) => {}
             }
 
             // Deliver all `Some` elements at the beginning of `delivery_queue`
@@ -279,9 +281,9 @@ impl TotalityManager {
                 let _ = pull_inlet.send(batch).await;
             }
 
-            // Every `COLLECT_INTERVAL`, garbage collect `totality_queue`
+            // Every `settings.collect_interval`, garbage collect `totality_queue`
 
-            if last_collect.elapsed() >= COLLECT_INTERVAL {
+            if last_collect.elapsed() >= settings.collect_interval {
                 // Compute minimum height below which all batches can be garbage
                 // collected, i.e., the minimum value in `vector_clock` (remark:
                 // each entry of `vector_clock` lower-bounds the value of
@@ -307,10 +309,10 @@ impl TotalityManager {
                 last_collect = Instant::now();
             }
 
-            // Every `UPDATE_INTERVAL`, update all servers on the below which
-            // all batches have been delivered, i.e., `delivery_queue.offset`
+            // Every `settings.update_interval`, update all servers on the below
+            // which all batches have been delivered, i.e., `delivery_queue.offset`
 
-            if last_update.elapsed() >= UPDATE_INTERVAL {
+            if last_update.elapsed() >= settings.update_interval {
                 TotalityManager::update(
                     delivery_queue.offset,
                     membership.clone(),
@@ -329,6 +331,7 @@ impl TotalityManager {
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         run_entry_inlet: EntryInlet,
+        settings: TotalityManagerSettings,
     ) {
         // Randomize query order (compute a random permutation of `membership` keys)
 
@@ -356,7 +359,7 @@ impl TotalityManager {
                             continue; // Back to waiting (if `ask_tasks` is still non-empty)
                         }
                     },
-                    _ = time::sleep(EXTEND_TIMEOUT) => {}
+                    _ = time::sleep(settings.extend_timeout) => {}
                 }
             }
 
@@ -562,6 +565,7 @@ mod tests {
             membership.clone(),
             connectors.next().unwrap(),
             listeners.next().unwrap(),
+            Default::default(),
         );
 
         for _ in 0..128 {
@@ -599,12 +603,14 @@ mod tests {
             membership.clone(),
             connectors.next().unwrap(),
             listeners.next().unwrap(),
+            Default::default(),
         );
 
         let mut misser = TotalityManager::new(
             membership.clone(),
             connectors.next().unwrap(),
             listeners.next().unwrap(),
+            Default::default(),
         );
 
         for _ in 0..128 {
