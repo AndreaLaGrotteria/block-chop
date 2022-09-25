@@ -36,6 +36,7 @@ type EntryOutlet = MpscReceiver<(u64, Batch)>;
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
     pull_outlet: BatchOutlet,
+    totality_queue: Arc<Mutex<TotalityQueue>>,
     _fuse: Fuse,
 }
 
@@ -159,6 +160,7 @@ impl TotalityManager {
         TotalityManager {
             run_call_inlet,
             pull_outlet,
+            totality_queue,
             _fuse: fuse,
         }
     }
@@ -178,6 +180,10 @@ impl TotalityManager {
         // The `Fuse` to `TotalityManager::run` is owned by
         // `self`, so `pull_inlet` cannot have been dropped
         self.pull_outlet.recv().await.unwrap()
+    }
+
+    pub fn garbage(&self) -> usize {
+        self.totality_queue.lock().unwrap().entries.len()
     }
 
     async fn run(
