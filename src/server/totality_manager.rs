@@ -544,6 +544,7 @@ impl TotalityManager {
 mod tests {
     use super::*;
     use crate::broadcast::test::random_unauthenticated_batch;
+    use rand::seq::SliceRandom;
     use std::iter;
     use talk::{crypto::KeyChain, net::test::System};
 
@@ -628,6 +629,62 @@ mod tests {
 
             assert_eq!(hitter_batch.root(), root);
             assert_eq!(misser_batch.root(), root);
+        }
+    }
+
+    #[tokio::test]
+    async fn stress() {
+        let keychains = iter::repeat_with(KeyChain::random)
+            .take(16)
+            .collect::<Vec<_>>();
+
+        let keycards = keychains.iter().map(KeyChain::keycard).collect::<Vec<_>>();
+
+        let membership = Membership::new(keycards);
+        let system = System::setup_with_keychains(keychains).await;
+
+        let mut totality_managers = system
+            .connectors
+            .into_iter()
+            .zip(system.listeners)
+            .map(|(connector, listener)| {
+                TotalityManager::new(
+                    membership.clone(),
+                    connector,
+                    listener,
+                    TotalityManagerSettings {
+                        pipeline: 8192,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for _ in 0..1024 {
+            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+
+            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let root = batch.root();
+
+            totality_managers.shuffle(&mut rand::thread_rng());
+
+            let hitters = rand::random::<usize>() % 16 + 1;
+
+            for hitter in &totality_managers[0..hitters] {
+                hitter
+                    .hit(serialized_compressed_batch.clone(), batch.clone())
+                    .await;
+            }
+
+            for misser in &totality_managers[hitters..] {
+                misser.miss(root).await;
+            }
+
+            for totality_manager in totality_managers.iter_mut() {
+                let batch = totality_manager.pull().await;
+                assert_eq!(batch.root(), root);
+            }
         }
     }
 }
