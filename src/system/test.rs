@@ -56,7 +56,8 @@ pub(crate) async fn generate_system(
     for (keychain, broker_listener, totality_listener) in listeners {
         let broadcast = LoopBack::new();
 
-        let totality_connector = TestConnector::new(keychain.clone(), totality_connector_map.clone());
+        let totality_connector =
+            TestConnector::new(keychain.clone(), totality_connector_map.clone());
 
         let server = Server::new(
             keychain.clone(),

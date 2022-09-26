@@ -12,7 +12,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
@@ -31,7 +31,6 @@ type BatchInlet = MpscSender<Batch>;
 type BatchOutlet = MpscReceiver<Batch>;
 
 type EntryInlet = MpscSender<(u64, Batch)>;
-type EntryOutlet = MpscReceiver<(u64, Batch)>;
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,

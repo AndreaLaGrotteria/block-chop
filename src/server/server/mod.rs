@@ -14,7 +14,7 @@ use std::{
 };
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
-    net::{Session, SessionListener, Connector, Listener},
+    net::{Connector, Listener, Session, SessionListener},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -94,8 +94,12 @@ impl Server {
 
         {
             let brokers = brokers.clone();
-            let totality_manager =
-                TotalityManager::new(membership.clone(), totality_connector, totality_listener, Default::default());
+            let totality_manager = TotalityManager::new(
+                membership.clone(),
+                totality_connector,
+                totality_listener,
+                Default::default(),
+            );
             let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
 
             fuse.spawn(async move {
