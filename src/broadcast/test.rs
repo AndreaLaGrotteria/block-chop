@@ -3,6 +3,7 @@ use crate::{
     crypto::statements::Reduction,
     Entry,
 };
+use rand::seq::IteratorRandom;
 use std::iter;
 use talk::crypto::{primitives::multi::Signature as MultiSignature, KeyChain};
 use varcram::VarCram;
@@ -37,5 +38,29 @@ pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> Compr
         raise: 0,
         multisignature,
         stragglers: vec![],
+    }
+}
+
+pub(crate) fn random_unauthenticated_batch(clients: usize, size: usize) -> CompressedBatch {
+    let mut ids = (0..(clients as u64))
+        .into_iter()
+        .choose_multiple(&mut rand::thread_rng(), size);
+
+    ids.sort_unstable();
+
+    let ids = VarCram::cram(ids.as_slice());
+
+    let messages = iter::repeat_with(rand::random)
+        .take(size)
+        .collect::<Vec<_>>();
+
+    let raise = 0;
+
+    CompressedBatch {
+        ids,
+        messages,
+        raise,
+        multisignature: None,
+        stragglers: Vec::new(),
     }
 }
