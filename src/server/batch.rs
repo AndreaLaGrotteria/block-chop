@@ -7,6 +7,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use talk::crypto::primitives::{hash::Hash, sign::Signature};
 use zebra::vector::Vector;
 
+#[derive(Clone)]
 pub(in crate::server) struct Batch {
     pub entries: Vector<Option<Entry>, PACKING>,
 }

@@ -4,7 +4,7 @@ use talk::{
     crypto::{Identity, KeyChain},
     net::{
         test::{TestConnector, TestListener},
-        SessionConnector, SessionListener,
+        SessionListener,
     },
 };
 
@@ -45,8 +45,7 @@ pub(crate) async fn generate_system(
         let (listener, address_broker) = TestListener::new(keychain.clone()).await;
         let broker_listener = SessionListener::new(listener);
 
-        let (listener, address_totality) = TestListener::new(keychain.clone()).await;
-        let totality_listener = SessionListener::new(listener);
+        let (totality_listener, address_totality) = TestListener::new(keychain.clone()).await;
 
         broker_connector_map.insert(keychain.keycard().identity(), address_broker);
         totality_connector_map.insert(keychain.keycard().identity(), address_totality);
@@ -57,8 +56,7 @@ pub(crate) async fn generate_system(
     for (keychain, broker_listener, totality_listener) in listeners {
         let broadcast = LoopBack::new();
 
-        let connector = TestConnector::new(keychain.clone(), totality_connector_map.clone());
-        let totality_connector = SessionConnector::new(connector);
+        let totality_connector = TestConnector::new(keychain.clone(), totality_connector_map.clone());
 
         let server = Server::new(
             keychain.clone(),

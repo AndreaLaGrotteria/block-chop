@@ -5,12 +5,14 @@ mod duplicate;
 mod server;
 mod server_settings;
 mod totality_manager;
+mod totality_manager_settings;
 
 use batch::{Batch, BatchError};
 use deduplicator::Deduplicator;
 use deduplicator_settings::DeduplicatorSettings;
 use duplicate::Duplicate;
 use totality_manager::TotalityManager;
+use totality_manager_settings::TotalityManagerSettings;
 
 #[cfg(test)]
 pub(crate) use batch::expanded_batch_entries;

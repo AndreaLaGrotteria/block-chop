@@ -14,7 +14,7 @@ use std::{
 };
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
-    net::{Session, SessionConnector, SessionListener},
+    net::{Session, SessionListener, Connector, Listener},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -47,18 +47,20 @@ enum ServeError {
 }
 
 impl Server {
-    pub fn new<B>(
+    pub fn new<B, C, L>(
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
         broadcast: B,
         broker_listener: SessionListener,
-        totality_connector: SessionConnector,
-        totality_listener: SessionListener,
+        totality_connector: C,
+        totality_listener: L,
         settings: ServerSettings,
     ) -> Self
     where
         B: Order,
+        C: Connector,
+        L: Listener,
     {
         let brokers = Arc::new(Mutex::new(HashMap::<Identity, BrokerState>::new()));
         let directory_capacity = directory.capacity();
@@ -93,7 +95,7 @@ impl Server {
         {
             let brokers = brokers.clone();
             let totality_manager =
-                TotalityManager::new(membership.clone(), totality_connector, totality_listener);
+                TotalityManager::new(membership.clone(), totality_connector, totality_listener, Default::default());
             let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
 
             fuse.spawn(async move {
