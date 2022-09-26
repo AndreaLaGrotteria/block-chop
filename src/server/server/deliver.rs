@@ -1,6 +1,9 @@
 use crate::{
-    broadcast::Amendment,
-    crypto::{statements::BatchWitness, Certificate},
+    broadcast::{Amendment, DeliveryShard},
+    crypto::{
+        statements::{BatchDelivery, BatchWitness},
+        Certificate,
+    },
     order::Order,
     server::{server::BrokerState, Batch, Deduplicator, Duplicate, Server},
     system::Membership,
@@ -8,23 +11,15 @@ use crate::{
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
-    collections::{hash_map::Entry as HashMapEntry, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
-use talk::crypto::{primitives::hash::Hash, Identity};
+use talk::crypto::{primitives::hash::Hash, Identity, KeyChain};
 use tokio::sync::{
-    mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
-    oneshot::Sender as OneshotSender,
+    mpsc::{self, Sender as MpscSender},
+    watch::Sender as WatchSender,
 };
 
-pub(in crate::server::server) struct AmendedDelivery {
-    pub height: u64,
-    pub amended_root: Hash,
-    pub amendments: Vec<Amendment>,
-}
-
-type BatchOutlet = MpscReceiver<(Batch, DeliveryInlet)>;
-type DeliveryInlet = OneshotSender<AmendedDelivery>;
 type ApplyInlet = MpscSender<Vec<Option<Entry>>>;
 
 #[derive(Doom)]
@@ -38,108 +33,67 @@ enum ProcessError {
 
 impl Server {
     pub(in crate::server::server) async fn deliver(
+        keychain: Arc<KeyChain>,
         membership: Membership,
         broadcast: Arc<dyn Order>,
-        mut batches_outlet: BatchOutlet,
         brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
         mut deduplicator: Deduplicator,
         mut apply_inlet: ApplyInlet,
     ) {
         let mut height: u64 = 1;
 
-        let mut pending_batches: HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>> = HashMap::new();
-        let mut pending_deliveries: Vec<(u64, Hash)> = Vec::new();
+        let mut pending_deliveries: VecDeque<(
+            u64,
+            Arc<WatchSender<Option<(u64, DeliveryShard)>>>,
+        )> = VecDeque::new();
+        let (totality_inlet, mut totality_outlet) = mpsc::channel(10_000);
 
         loop {
             tokio::select! {
-                out = batches_outlet.recv() => {
+                out = totality_outlet.recv() => {
                     match out {
-                        Some((batch, delivery_inlet)) => {
-                            Self::add_pending_batch(&mut pending_batches, batch, delivery_inlet);
-                            Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
-                        }
-                        None => return, // `Server` has dropped, shutdown
-                    }
-                }
-                submission = broadcast.deliver() => {
-                    if let Ok((broker, delivery)) = Self::validate(&membership, &submission, &brokers) {
-                        let _expected_batch = {
-                            let mut guard = brokers.lock().unwrap();
-                            let broker = guard.get_mut(&broker).unwrap();
-                            broker.next_sequence += 1;
-                            broker.expected_batch.take()
-                        };
+                        Some(batch) => {
+                            let (sequence, watch_sender) = pending_deliveries.pop_back().unwrap();
 
-                        pending_deliveries.push((height, delivery));
-                        Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
+                            let (amended_root, amendments) =
+                                Self::process(batch, &mut deduplicator, &mut apply_inlet).await;
+
+                            let statement = BatchDelivery {
+                                height: &height,
+                                root: &amended_root,
+                            };
+
+                            let multisignature = keychain.multisign(&statement).unwrap();
+
+                            let delivery_shard = DeliveryShard {
+                                height,
+                                amendments,
+                                multisignature,
+                            };
+
+                            watch_sender.send_modify(|value| { *value = Some((sequence, delivery_shard)); });
+                        },
+                        None => return, // Shutting down
                     }
 
                     height += 1;
                 }
-            }
-        }
-    }
+                submission = broadcast.deliver() => {
+                    if let Ok((broker, _delivery)) = Self::validate(&membership, &submission, &brokers) {
+                        let (sequence, expected_batch, watch_sender) = {
+                            let mut guard = brokers.lock().unwrap();
+                            let broker = guard.get_mut(&broker).unwrap();
+                            broker.next_sequence += 1;
 
-    fn add_pending_batch(
-        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
-        batch: Batch,
-        delivery_inlet: DeliveryInlet,
-    ) {
-        match pending_batches.entry(batch.entries.root()) {
-            HashMapEntry::Vacant(entry) => {
-                entry.insert(vec![(batch, delivery_inlet)].into());
-            }
-            HashMapEntry::Occupied(mut entry) => {
-                entry.get_mut().push_front((batch, delivery_inlet));
-            }
-        }
-    }
+                            (broker.next_sequence - 1, broker.expected_batch.take(), broker.last_delivery_shard.clone())
+                        };
 
-    fn remove_pending_batch(
-        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
-        batch_root: &Hash,
-    ) -> Option<(Batch, DeliveryInlet)> {
-        match pending_batches.entry(batch_root.clone()) {
-            HashMapEntry::Vacant(_) => None,
-            HashMapEntry::Occupied(mut entry) => {
-                let pending = entry.get_mut();
+                        pending_deliveries.push_front((sequence, watch_sender));
+                        let _ = totality_inlet.send(expected_batch.unwrap().1).await;
 
-                let result = pending.pop_back();
-
-                if pending.is_empty() {
-                    entry.remove();
+                        // Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
+                    }
                 }
-
-                result
-            }
-        }
-    }
-
-    async fn flush_deliveries(
-        pending_batches: &mut HashMap<Hash, VecDeque<(Batch, DeliveryInlet)>>,
-        pending_deliveries: &mut Vec<(u64, Hash)>,
-        deduplicator: &mut Deduplicator,
-        apply_inlet: &mut ApplyInlet,
-    ) {
-        while !pending_deliveries.is_empty() {
-            let (height, batch_root) = *pending_deliveries.last().unwrap();
-
-            match Self::remove_pending_batch(pending_batches, &batch_root) {
-                Some((batch, delivery_inlet)) => {
-                    pending_deliveries.pop().unwrap();
-
-                    let (amended_root, amendments) =
-                        Self::process(batch, deduplicator, apply_inlet).await;
-
-                    let amended_delivery = AmendedDelivery {
-                        height,
-                        amended_root,
-                        amendments,
-                    };
-
-                    let _ = delivery_inlet.send(amended_delivery);
-                }
-                None => break,
             }
         }
     }

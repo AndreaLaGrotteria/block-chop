@@ -2,7 +2,7 @@ use crate::{
     broadcast::{CompressedBatch, DeliveryShard},
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
-    warn, BrokerSettings,
+    warn, BrokerSettings, debug
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::sync::Arc;
@@ -21,6 +21,9 @@ enum TrySubmitError {
     ConnectFailed,
     #[doom(description("Connection error"))]
     ConnectionError,
+    #[doom(description("Failed to serialize: {}", source))]
+    #[doom(wrap(serialize_failed))]
+    SerializeFailed { source: bincode::Error },
     #[doom(description("Witness error: server multisigned an unexpected batch root"))]
     WitnessError,
 }
@@ -83,10 +86,17 @@ impl Broker {
             .await
             .pot(TrySubmitError::ConnectFailed, here!())?;
 
+        let raw_batch = bincode::serialize(&compressed_batch)
+            .map_err(TrySubmitError::serialize_failed)
+            .map_err(Doom::into_top)
+            .spot(here!())?;
+
         session
-            .send_raw::<CompressedBatch>(compressed_batch)
+            .send_raw_bytes(&raw_batch)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
+
+        debug!("Sending batch for sequence {} and worker {:?}", sequence, worker);
 
         session
             .send_raw::<u64>(&sequence)
