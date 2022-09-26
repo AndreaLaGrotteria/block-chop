@@ -5,7 +5,10 @@ use crate::{
         Certificate,
     },
     order::Order,
-    server::{server::BrokerState, Batch, Deduplicator, Duplicate, Server},
+    server::{
+        server::BrokerState, totality_manager::TotalityManager, Batch, Deduplicator, Duplicate,
+        Server,
+    },
     system::Membership,
     Entry,
 };
@@ -15,10 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use talk::crypto::{primitives::hash::Hash, Identity, KeyChain};
-use tokio::sync::{
-    mpsc::{self, Sender as MpscSender},
-    watch::Sender as WatchSender,
-};
+use tokio::sync::{mpsc::Sender as MpscSender, watch::Sender as WatchSender};
 
 type ApplyInlet = MpscSender<Vec<Option<Entry>>>;
 
@@ -37,6 +37,7 @@ impl Server {
         membership: Membership,
         broadcast: Arc<dyn Order>,
         brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
+        mut totality_manager: TotalityManager,
         mut deduplicator: Deduplicator,
         mut apply_inlet: ApplyInlet,
     ) {
@@ -46,40 +47,11 @@ impl Server {
             u64,
             Arc<WatchSender<Option<(u64, DeliveryShard)>>>,
         )> = VecDeque::new();
-        let (totality_inlet, mut totality_outlet) = mpsc::channel(10_000);
 
         loop {
             tokio::select! {
-                out = totality_outlet.recv() => {
-                    match out {
-                        Some(batch) => {
-                            let (sequence, watch_sender) = pending_deliveries.pop_back().unwrap();
-
-                            let (amended_root, amendments) =
-                                Self::process(batch, &mut deduplicator, &mut apply_inlet).await;
-
-                            let statement = BatchDelivery {
-                                height: &height,
-                                root: &amended_root,
-                            };
-
-                            let multisignature = keychain.multisign(&statement).unwrap();
-
-                            let delivery_shard = DeliveryShard {
-                                height,
-                                amendments,
-                                multisignature,
-                            };
-
-                            watch_sender.send_modify(|value| { *value = Some((sequence, delivery_shard)); });
-                        },
-                        None => return, // Shutting down
-                    }
-
-                    height += 1;
-                }
                 submission = broadcast.deliver() => {
-                    if let Ok((broker, _delivery)) = Self::validate(&membership, &submission, &brokers) {
+                    if let Ok((broker, expected_root)) = Self::validate(&membership, &submission, &brokers) {
                         let (sequence, expected_batch, watch_sender) = {
                             let mut guard = brokers.lock().unwrap();
                             let broker = guard.get_mut(&broker).unwrap();
@@ -89,10 +61,41 @@ impl Server {
                         };
 
                         pending_deliveries.push_front((sequence, watch_sender));
-                        let _ = totality_inlet.send(expected_batch.unwrap().1).await;
 
-                        // Self::flush_deliveries(&mut pending_batches, &mut pending_deliveries, &mut deduplicator, &mut apply_inlet).await;
+                        match expected_batch {
+                            Some((raw_batch, batch)) if batch.root() == expected_root =>
+                                totality_manager.hit(raw_batch, batch).await,
+                            _ => totality_manager.miss(expected_root).await,
+                        };
                     }
+                }
+
+                batch = totality_manager.pull() => {
+                    deduplicator.push(batch).await;
+                }
+
+                (batch, duplicates) = deduplicator.pop() => {
+                    let (amended_root, amendments) =
+                        Self::process(batch, duplicates, &mut apply_inlet).await;
+
+                    let statement = BatchDelivery {
+                        height: &height,
+                        root: &amended_root,
+                    };
+
+                    let multisignature = keychain.multisign(&statement).unwrap();
+
+                    let delivery_shard = DeliveryShard {
+                        height,
+                        amendments,
+                        multisignature,
+                    };
+
+                    let (sequence, watch_sender) = pending_deliveries.pop_back().unwrap();
+
+                    watch_sender.send_modify(|value| { *value = Some((sequence, delivery_shard)); });
+
+                    height += 1;
                 }
             }
         }
@@ -131,14 +134,10 @@ impl Server {
     }
 
     async fn process(
-        batch: Batch,
-        deduplicator: &mut Deduplicator,
+        mut batch: Batch,
+        duplicates: Vec<Duplicate>,
         apply_inlet: &mut ApplyInlet,
     ) -> (Hash, Vec<Amendment>) {
-        deduplicator.push(batch).await;
-
-        let (mut batch, duplicates) = deduplicator.pop().await; // TODO: Deduplication
-
         let mut to_ignore = Vec::new();
 
         for duplicate in duplicates.iter() {

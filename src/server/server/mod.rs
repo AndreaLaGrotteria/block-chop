@@ -3,7 +3,7 @@ use crate::{
     crypto::{statements::BatchWitness, Certificate},
     debug,
     order::Order,
-    server::{Batch, BatchError, Deduplicator, ServerSettings},
+    server::{Batch, BatchError, Deduplicator, ServerSettings, TotalityManager},
     system::{Directory, Membership},
     warn, Entry,
 };
@@ -14,7 +14,7 @@ use std::{
 };
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
-    net::{Session, SessionListener},
+    net::{Session, SessionConnector, SessionListener},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -52,7 +52,9 @@ impl Server {
         membership: Membership,
         directory: Directory,
         broadcast: B,
-        listener: SessionListener,
+        broker_listener: SessionListener,
+        totality_connector: SessionConnector,
+        totality_listener: SessionListener,
         settings: ServerSettings,
     ) -> Self
     where
@@ -74,17 +76,25 @@ impl Server {
 
             fuse.spawn(async move {
                 Server::listen(
-                    keychain, membership, directory, broadcast, listener, brokers, settings,
+                    keychain,
+                    membership,
+                    directory,
+                    broadcast,
+                    broker_listener,
+                    brokers,
+                    settings,
                 )
                 .await;
             });
         }
 
-        let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
         let (apply_inlet, apply_outlet) = mpsc::channel(settings.apply_channel_capacity);
 
         {
             let brokers = brokers.clone();
+            let totality_manager =
+                TotalityManager::new(membership.clone(), totality_connector, totality_listener);
+            let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
 
             fuse.spawn(async move {
                 Server::deliver(
@@ -92,6 +102,7 @@ impl Server {
                     membership,
                     broadcast,
                     brokers,
+                    totality_manager,
                     deduplicator,
                     apply_inlet,
                 )

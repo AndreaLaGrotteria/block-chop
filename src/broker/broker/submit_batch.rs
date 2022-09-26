@@ -2,7 +2,7 @@ use crate::{
     broadcast::{CompressedBatch, DeliveryShard},
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
-    warn, BrokerSettings, debug
+    debug, warn, BrokerSettings,
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::sync::Arc;
@@ -96,7 +96,10 @@ impl Broker {
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        debug!("Sending batch for sequence {} and worker {:?}", sequence, worker);
+        debug!(
+            "Sending batch for sequence {} and worker {:?}",
+            sequence, worker
+        );
 
         session
             .send_raw::<u64>(&sequence)
