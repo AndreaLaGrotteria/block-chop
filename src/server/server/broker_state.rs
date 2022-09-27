@@ -11,6 +11,7 @@ pub(in crate::server::server) struct BrokerState {
 impl Default for BrokerState {
     fn default() -> Self {
         let (sender, _) = watch::channel(None);
+
         Self {
             next_sequence: 0,
             expected_batch: None,
