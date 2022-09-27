@@ -6,7 +6,7 @@ use crate::{
     },
     order::Order,
     server::{
-        server::BrokerState, totality_manager::TotalityManager, Batch, Deduplicator, Duplicate,
+        server::BrokerSlot, totality_manager::TotalityManager, Batch, Deduplicator, Duplicate,
         Server,
     },
     system::Membership,
@@ -20,7 +20,7 @@ use std::{
 use talk::crypto::{primitives::hash::Hash, Identity, KeyChain};
 use tokio::sync::{mpsc::Sender as MpscSender, watch::Sender as WatchSender};
 
-type ApplyInlet = MpscSender<Vec<Option<Entry>>>;
+type BurstInlet = MpscSender<Vec<Option<Entry>>>;
 
 #[derive(Doom)]
 enum ProcessError {
@@ -33,13 +33,13 @@ enum ProcessError {
 
 impl Server {
     pub(in crate::server::server) async fn deliver(
-        keychain: Arc<KeyChain>,
+        keychain: KeyChain,
         membership: Membership,
         broadcast: Arc<dyn Order>,
-        brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
+        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
         mut totality_manager: TotalityManager,
         mut deduplicator: Deduplicator,
-        mut apply_inlet: ApplyInlet,
+        mut next_batch_inlet: BurstInlet,
     ) {
         let mut height: u64 = 1;
 
@@ -51,9 +51,9 @@ impl Server {
         loop {
             tokio::select! {
                 submission = broadcast.deliver() => {
-                    if let Ok((broker, expected_root)) = Self::validate(&membership, &submission, &brokers) {
+                    if let Ok((broker, expected_root)) = Self::validate(&membership, &submission, &broker_slots) {
                         let (sequence, expected_batch, watch_sender) = {
-                            let mut guard = brokers.lock().unwrap();
+                            let mut guard = broker_slots.lock().unwrap();
                             let broker = guard.get_mut(&broker).unwrap();
                             broker.next_sequence += 1;
 
@@ -76,7 +76,7 @@ impl Server {
 
                 (batch, duplicates) = deduplicator.pop() => {
                     let (amended_root, amendments) =
-                        Self::process(batch, duplicates, &mut apply_inlet).await;
+                        Self::process(batch, duplicates, &mut next_batch_inlet).await;
 
                     let statement = BatchDelivery {
                         height: &height,
@@ -104,7 +104,7 @@ impl Server {
     fn validate(
         membership: &Membership,
         submission: &[u8],
-        brokers: &Mutex<HashMap<Identity, BrokerState>>,
+        broker_slots: &Mutex<HashMap<Identity, BrokerSlot>>,
     ) -> Result<(Identity, Hash), Top<ProcessError>> {
         let (broker, root, witness) =
             bincode::deserialize::<(Identity, Hash, Certificate)>(submission)
@@ -112,7 +112,7 @@ impl Server {
                 .map_err(ProcessError::into_top)
                 .spot(here!())?;
 
-        let sequence = brokers
+        let sequence = broker_slots
             .lock()
             .unwrap()
             .entry(broker)
@@ -136,7 +136,7 @@ impl Server {
     async fn process(
         mut batch: Batch,
         duplicates: Vec<Duplicate>,
-        apply_inlet: &mut ApplyInlet,
+        next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
         let mut to_ignore = Vec::new();
 
@@ -173,7 +173,7 @@ impl Server {
             entries[ignore] = None;
         }
 
-        let _ = apply_inlet.send(entries).await;
+        let _ = next_batch_inlet.send(entries).await;
 
         (
             amended_root,

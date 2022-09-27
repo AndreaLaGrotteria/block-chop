@@ -2,10 +2,7 @@ use crate::{order::LoopBack, server::ServerSettings, Directory, Membership, Serv
 use std::{collections::HashMap, iter, net::SocketAddr};
 use talk::{
     crypto::{Identity, KeyChain},
-    net::{
-        test::{TestConnector, TestListener},
-        SessionListener,
-    },
+    net::test::{TestConnector, TestListener},
 };
 
 pub(crate) async fn generate_system(
@@ -42,13 +39,12 @@ pub(crate) async fn generate_system(
     let mut listeners = Vec::new();
 
     for keychain in server_keychains {
-        let (listener, address_broker) = TestListener::new(keychain.clone()).await;
-        let broker_listener = SessionListener::new(listener);
+        let (broker_listener, broker_address) = TestListener::new(keychain.clone()).await;
 
-        let (totality_listener, address_totality) = TestListener::new(keychain.clone()).await;
+        let (totality_listener, totality_address) = TestListener::new(keychain.clone()).await;
 
-        broker_connector_map.insert(keychain.keycard().identity(), address_broker);
-        totality_connector_map.insert(keychain.keycard().identity(), address_totality);
+        broker_connector_map.insert(keychain.keycard().identity(), broker_address);
+        totality_connector_map.insert(keychain.keycard().identity(), totality_address);
 
         listeners.push((keychain, broker_listener, totality_listener));
     }

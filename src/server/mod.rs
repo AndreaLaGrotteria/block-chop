@@ -1,4 +1,5 @@
 mod batch;
+mod broker_slot;
 mod deduplicator;
 mod deduplicator_settings;
 mod duplicate;
@@ -8,6 +9,7 @@ mod totality_manager;
 mod totality_manager_settings;
 
 use batch::{Batch, BatchError};
+use broker_slot::BrokerSlot;
 use deduplicator::Deduplicator;
 use deduplicator_settings::DeduplicatorSettings;
 use duplicate::Duplicate;

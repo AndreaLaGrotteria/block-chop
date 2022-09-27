@@ -3,7 +3,7 @@ use crate::{
     crypto::{statements::BatchWitness, Certificate},
     debug,
     order::Order,
-    server::{Batch, BatchError, Deduplicator, ServerSettings, TotalityManager},
+    server::{Batch, BatchError, BrokerSlot, Deduplicator, ServerSettings, TotalityManager},
     system::{Directory, Membership},
     warn, Entry,
 };
@@ -22,10 +22,10 @@ use tokio::{
     task,
 };
 
-type ApplyOutlet = MpscReceiver<Vec<Option<Entry>>>;
+type BurstOutlet = MpscReceiver<Vec<Option<Entry>>>;
 
 pub struct Server {
-    apply_outlet: ApplyOutlet,
+    next_batch_outlet: BurstOutlet,
     _fuse: Fuse,
 }
 
@@ -40,41 +40,62 @@ enum ServeError {
     BatchInvalid,
     #[doom(description("Witness invalid"))]
     WitnessInvalid,
-    #[doom(description("Old batch sequence"))]
+    #[doom(description("Old batch sequence number"))]
     OldBatchSequence,
-    #[doom(description("Far future batch sequence"))]
+    #[doom(description("Future batch sequence number"))]
     FutureBatchSequence,
 }
 
 impl Server {
-    pub fn new<B, C, L>(
+    pub fn new<B, BL, TC, TL>(
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
         broadcast: B,
-        broker_listener: SessionListener,
-        totality_connector: C,
-        totality_listener: L,
+        broker_listener: BL,
+        totality_connector: TC,
+        totality_listener: TL,
         settings: ServerSettings,
     ) -> Self
     where
         B: Order,
-        C: Connector,
-        L: Listener,
+        BL: Listener,
+        TC: Connector,
+        TL: Listener,
     {
-        let brokers = Arc::new(Mutex::new(HashMap::<Identity, BrokerState>::new()));
-        let directory_capacity = directory.capacity();
+        // Preprocess arguments
 
-        let keychain = Arc::new(keychain);
         let broadcast = Arc::new(broadcast);
+        let broker_listener = SessionListener::new(broker_listener);
+
+        // Initialize components
+
+        let broker_slots = Arc::new(Mutex::new(HashMap::new()));
+
+        let totality_manager = TotalityManager::new(
+            membership.clone(),
+            totality_connector,
+            totality_listener,
+            Default::default(),
+        );
+
+        let deduplicator = Deduplicator::with_capacity(directory.capacity(), Default::default());
+
+        // Initialize channels
+
+        let (next_batch_inlet, next_batch_outlet) =
+            mpsc::channel(settings.next_batch_channel_capacity);
+
+        // Spawn tasks
+
         let fuse = Fuse::new();
 
         {
             let keychain = keychain.clone();
             let membership = membership.clone();
             let broadcast = broadcast.clone();
+            let broker_slots = broker_slots.clone();
             let settings = settings.clone();
-            let brokers = brokers.clone();
 
             fuse.spawn(async move {
                 Server::listen(
@@ -82,48 +103,44 @@ impl Server {
                     membership,
                     directory,
                     broadcast,
+                    broker_slots,
                     broker_listener,
-                    brokers,
                     settings,
                 )
                 .await;
             });
         }
 
-        let (apply_inlet, apply_outlet) = mpsc::channel(settings.apply_channel_capacity);
-
         {
-            let brokers = brokers.clone();
-            let totality_manager = TotalityManager::new(
-                membership.clone(),
-                totality_connector,
-                totality_listener,
-                Default::default(),
-            );
-            let deduplicator = Deduplicator::with_capacity(directory_capacity, Default::default());
+            let broker_slots = broker_slots.clone();
 
             fuse.spawn(async move {
                 Server::deliver(
                     keychain,
                     membership,
                     broadcast,
-                    brokers,
+                    broker_slots,
                     totality_manager,
                     deduplicator,
-                    apply_inlet,
+                    next_batch_inlet,
                 )
                 .await;
             });
         }
 
+        // Assemble `Server`
+
         Server {
-            apply_outlet,
+            next_batch_outlet,
             _fuse: fuse,
         }
     }
 
     pub async fn next_batch(&mut self) -> impl Iterator<Item = Entry> {
-        self.apply_outlet
+        // The `Fuse` to `Server::deliver` is owned by `self`,
+        // so `next_batch_inlet` cannot have been dropped
+
+        self.next_batch_outlet
             .recv()
             .await
             .unwrap()
@@ -132,12 +149,12 @@ impl Server {
     }
 
     async fn listen(
-        keychain: Arc<KeyChain>,
+        keychain: KeyChain,
         membership: Membership,
         directory: Directory,
         broadcast: Arc<dyn Order>,
+        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
         mut listener: SessionListener,
-        brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
         settings: ServerSettings,
     ) {
         let membership = Arc::new(membership);
@@ -156,11 +173,18 @@ impl Server {
             let directory = directory.clone();
             let broadcast = broadcast.clone();
             let semaphore = semaphore.clone();
-            let brokers = brokers.clone();
+            let broker_slots = broker_slots.clone();
 
             fuse.spawn(async move {
                 if let Err(error) = Server::serve(
-                    keychain, membership, directory, broadcast, semaphore, session, broker, brokers,
+                    keychain,
+                    membership,
+                    directory,
+                    broadcast,
+                    semaphore,
+                    session,
+                    broker,
+                    broker_slots,
                 )
                 .await
                 {
@@ -171,14 +195,14 @@ impl Server {
     }
 
     async fn serve(
-        keychain: Arc<KeyChain>,
+        keychain: KeyChain,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         broadcast: Arc<dyn Order>,
         semaphore: Arc<Semaphore>,
         mut session: Session,
         broker: Identity,
-        brokers: Arc<Mutex<HashMap<Identity, BrokerState>>>,
+        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
     ) -> Result<(), Top<ServeError>> {
         let raw_batch = session
             .receive_raw_bytes()
@@ -200,7 +224,7 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        let expected_sequence = brokers
+        let expected_sequence = broker_slots
             .lock()
             .unwrap()
             .entry(broker.clone())
@@ -259,10 +283,10 @@ impl Server {
 
         let root = batch.root();
 
-        // Store the expanded batch (and its raw format) in the `brokers` map
+        // Store the expanded batch (and its raw format) in the `broker_slots` map
 
         let mut delivery_shard_watch = {
-            let mut guard = brokers.lock().unwrap();
+            let mut guard = broker_slots.lock().unwrap();
 
             let mut broker_state = guard.entry(broker.clone()).or_insert(Default::default());
 
@@ -339,10 +363,7 @@ impl Server {
     }
 }
 
-mod broker_state;
 mod deliver;
-
-use broker_state::BrokerState;
 
 #[cfg(test)]
 mod tests {
