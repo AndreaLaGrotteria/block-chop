@@ -13,7 +13,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 use talk::{
-    crypto::{primitives::multi::Signature as MultiSignature, Identity, KeyChain},
+    crypto::{
+        primitives::{hash::Hash, multi::Signature as MultiSignature},
+        Identity, KeyChain,
+    },
     net::{Connector, Listener, Session, SessionListener},
     sync::fuse::Fuse,
 };
@@ -44,6 +47,8 @@ enum ServeError {
     OldBatchSequence,
     #[doom(description("Future batch sequence number"))]
     FutureBatchSequence,
+    #[doom(description("Authenticated root does not match that of the batch provided"))]
+    RootMismatch,
 }
 
 impl Server {
@@ -204,20 +209,20 @@ impl Server {
         broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
         semaphore: Arc<Semaphore>,
     ) -> Result<(), Top<ServeError>> {
+        let (sequence, root) = session
+            .receive_plain::<(u64, Hash)>()
+            .await
+            .pot(ServeError::ConnectionError, here!())?;
+
         let raw_batch = session
             .receive_raw_bytes()
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        let compressed_batch = bincode::deserialize(&raw_batch)
+        let compressed_batch = bincode::deserialize(raw_batch.as_slice())
             .map_err(ServeError::deserialize_failed)
             .map_err(Doom::into_top)
             .spot(here!())?;
-
-        let sequence = session
-            .receive_raw::<u64>()
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
 
         let verify = session
             .receive_raw::<bool>()
@@ -281,7 +286,9 @@ impl Server {
             .pot(ServeError::BatchInvalid, here!())?
         };
 
-        let root = batch.root();
+        if root != batch.root() {
+            return ServeError::RootMismatch.fail().spot(here!());
+        }
 
         // Store the expanded batch (and its raw format) in the `broker_slots` map
 
@@ -391,7 +398,7 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let connector = SessionConnector::new(connector);
 
-        let compressed_batch = null_batch(&client_keychains, 1);
+        let (root, compressed_batch) = null_batch(&client_keychains, 1);
         let ids = compressed_batch.ids.uncram().unwrap();
 
         let mut sessions = membership
@@ -410,8 +417,9 @@ mod tests {
         let mut responses = Vec::new();
         for (identity, session) in sessions[0..2].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+
+            session.send_plain(&(0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send_raw(&0u64).await.unwrap();
             session.send_raw(&true).await.unwrap();
 
             let response: MultiSignature = session.receive_raw().await.unwrap();
@@ -420,19 +428,19 @@ mod tests {
 
         for (_, session) in sessions[2..].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+
+            session.send_plain(&(0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send_raw(&0u64).await.unwrap();
             session.send_raw(&false).await.unwrap();
         }
 
         let mut batch = Batch::expand_unverified(compressed_batch).unwrap();
-        let batch_root = batch.root();
 
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitness {
                 broker: &broker.keycard().identity(),
                 sequence: &0,
-                root: &batch_root,
+                root: &root,
             };
             let keycard = membership.servers().get(identity).unwrap();
 

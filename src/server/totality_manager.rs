@@ -575,7 +575,7 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
             let batch = Batch::expand_unverified(compressed_batch).unwrap();
@@ -620,7 +620,7 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
             let batch = Batch::expand_unverified(compressed_batch).unwrap();
@@ -666,7 +666,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         for _ in 0..1024 {
-            let compressed_batch = random_unauthenticated_batch(128, 32);
+            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
             let batch = Batch::expand_unverified(compressed_batch).unwrap();

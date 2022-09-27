@@ -392,10 +392,9 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let session_connector = Arc::new(SessionConnector::new(connector));
 
-        let batch_size = 1;
-        let compressed_batch = null_batch(&clients_keychains, batch_size);
+        let (_, compressed_batch) = null_batch(&clients_keychains, 1);
+        let entries = expanded_batch_entries(compressed_batch.clone());
 
-        let entries = expanded_batch_entries(null_batch(&clients_keychains, batch_size));
         let fake_signature = clients_keychains[0]
             .sign(&BatchWitness {
                 broker: &broker.keycard().identity(),
@@ -462,10 +461,9 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let session_connector = Arc::new(SessionConnector::new(connector));
 
-        let batch_size = 1;
-        let compressed_batch = null_batch(&clients, batch_size);
+        let (_, compressed_batch) = null_batch(&clients, 1);
+        let entries = expanded_batch_entries(compressed_batch.clone());
 
-        let entries = expanded_batch_entries(null_batch(&clients, batch_size));
         let fake_signature = clients[0]
             .sign(&BatchWitness {
                 broker: &broker.keycard().identity(),

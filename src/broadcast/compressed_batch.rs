@@ -13,6 +13,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "benchmark")]
 use std::iter;
+#[cfg(feature = "benchmark")]
+use talk::crypto::primitives::hash::Hash;
 use talk::crypto::primitives::multi::Signature as MultiSignature;
 use varcram::VarCram;
 
@@ -35,7 +37,7 @@ impl CompressedBatch {
         directory: &Directory,
         passepartout: &Passepartout,
         size: usize,
-    ) -> Self {
+    ) -> (Hash, CompressedBatch) {
         let mut ids = (0..(directory.capacity() as u64))
             .into_iter()
             .choose_multiple(&mut rand::thread_rng(), size);
@@ -62,6 +64,7 @@ impl CompressedBatch {
             .collect::<Vec<_>>();
 
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
+        let root = entries.root();
 
         let statement = ReductionStatement {
             root: &entries.root(),
@@ -83,12 +86,14 @@ impl CompressedBatch {
 
         let ids = VarCram::cram(ids.as_slice());
 
-        CompressedBatch {
+        let compressed_batch = CompressedBatch {
             ids,
             messages,
             raise,
             multisignature,
             stragglers: Vec::new(),
-        }
+        };
+
+        (root, compressed_batch)
     }
 }

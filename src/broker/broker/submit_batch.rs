@@ -81,10 +81,17 @@ impl Broker {
         mut witness_receiver: WatchReceiver<Option<Certificate>>,
         delivery_shard_sender: &mut Option<OneshotSender<(Identity, DeliveryShard)>>,
     ) -> Result<(), Top<TrySubmitError>> {
+        debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
+
         let mut session = connector
             .connect(server.identity())
             .await
             .pot(TrySubmitError::ConnectFailed, here!())?;
+
+        session
+            .send_plain(&(sequence, expected_root))
+            .await
+            .pot(TrySubmitError::ConnectionError, here!())?;
 
         let raw_batch = bincode::serialize(&compressed_batch)
             .map_err(TrySubmitError::serialize_failed)
@@ -93,16 +100,6 @@ impl Broker {
 
         session
             .send_raw_bytes(&raw_batch)
-            .await
-            .pot(TrySubmitError::ConnectionError, here!())?;
-
-        debug!(
-            "Sending batch for sequence {} and worker {:?}",
-            sequence, worker
-        );
-
-        session
-            .send_raw::<u64>(&sequence)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
