@@ -2,7 +2,7 @@ use std::cmp;
 
 #[derive(Debug, Clone)]
 pub struct ServerSettings {
-    pub serve_tasks: usize,
+    pub expand_tasks: usize,
     pub batch_channel_capacity: usize,
     pub next_batch_channel_capacity: usize,
 }
@@ -10,7 +10,7 @@ pub struct ServerSettings {
 impl Default for ServerSettings {
     fn default() -> Self {
         ServerSettings {
-            serve_tasks: cmp::max(((num_cpus::get() as f64) * 0.85) as usize, 1),
+            expand_tasks: cmp::max(((num_cpus::get() as f64) * 0.85) as usize, 1),
             batch_channel_capacity: 8192,
             next_batch_channel_capacity: 8192,
         }

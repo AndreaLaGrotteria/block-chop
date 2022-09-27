@@ -160,7 +160,7 @@ impl Server {
         let membership = Arc::new(membership);
         let directory = Arc::new(directory);
 
-        let semaphore = Semaphore::new(settings.serve_tasks);
+        let semaphore = Semaphore::new(settings.expand_tasks);
         let semaphore = Arc::new(semaphore);
 
         let fuse = Fuse::new();
@@ -172,19 +172,19 @@ impl Server {
             let membership = membership.clone();
             let directory = directory.clone();
             let broadcast = broadcast.clone();
-            let semaphore = semaphore.clone();
             let broker_slots = broker_slots.clone();
+            let semaphore = semaphore.clone();
 
             fuse.spawn(async move {
                 if let Err(error) = Server::serve(
+                    broker,
+                    session,
                     keychain,
                     membership,
                     directory,
                     broadcast,
-                    semaphore,
-                    session,
-                    broker,
                     broker_slots,
+                    semaphore,
                 )
                 .await
                 {
@@ -195,14 +195,14 @@ impl Server {
     }
 
     async fn serve(
+        broker: Identity,
+        mut session: Session,
         keychain: KeyChain,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         broadcast: Arc<dyn Order>,
-        semaphore: Arc<Semaphore>,
-        mut session: Session,
-        broker: Identity,
         broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
+        semaphore: Arc<Semaphore>,
     ) -> Result<(), Top<ServeError>> {
         let raw_batch = session
             .receive_raw_bytes()

@@ -64,7 +64,7 @@ pub(crate) async fn generate_system(
             totality_connector,
             totality_listener,
             ServerSettings {
-                serve_tasks: num_cpus::get(),
+                expand_tasks: num_cpus::get(),
                 ..Default::default()
             },
         );
