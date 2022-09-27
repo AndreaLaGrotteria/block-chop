@@ -1,3 +1,5 @@
+use std::cmp;
+
 #[derive(Debug, Clone)]
 pub struct ServerSettings {
     pub serve_tasks: usize,
@@ -8,9 +10,9 @@ pub struct ServerSettings {
 impl Default for ServerSettings {
     fn default() -> Self {
         ServerSettings {
-            serve_tasks: 27,
-            batch_channel_capacity: 10_000,
-            apply_channel_capacity: 10_000,
+            serve_tasks: cmp::max(((num_cpus::get() as f64) * 0.85) as usize, 1),
+            batch_channel_capacity: 8192,
+            apply_channel_capacity: 8192,
         }
     }
 }
