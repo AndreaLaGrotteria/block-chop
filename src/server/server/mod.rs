@@ -3,7 +3,7 @@ use crate::{
     crypto::{statements::BatchWitness, Certificate},
     debug,
     order::Order,
-    server::{Batch, BatchError, BrokerSlot, Deduplicator, ServerSettings, TotalityManager},
+    server::{Batch, BrokerSlot, Deduplicator, ServerSettings, TotalityManager},
     system::{Directory, Membership},
     warn, Entry,
 };
@@ -13,10 +13,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use talk::{
-    crypto::{
-        primitives::{hash::Hash, multi::Signature as MultiSignature},
-        Identity, KeyChain,
-    },
+    crypto::{primitives::hash::Hash, Identity, KeyChain},
     net::{Connector, Listener, Session, SessionListener},
     sync::fuse::Fuse,
 };
@@ -209,6 +206,8 @@ impl Server {
         broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
         semaphore: Arc<Semaphore>,
     ) -> Result<(), Top<ServeError>> {
+        // Receive broker request
+
         let (sequence, root) = session
             .receive_plain::<(u64, Hash)>()
             .await
@@ -229,89 +228,103 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        let expected_sequence = broker_slots
+        // Reject request if `sequence` is too old or future
+
+        let next_sequence = broker_slots
             .lock()
             .unwrap()
             .entry(broker.clone())
-            .or_insert(Default::default())
+            .or_default()
             .next_sequence;
 
-        if sequence > expected_sequence {
-            session.end();
-            return ServeError::FutureBatchSequence.fail().spot(here!());
-        }
-
-        // Now guaranteed: sequence <= expected_sequence
-
-        if sequence + 1 < expected_sequence {
+        if sequence + 1 < next_sequence {
             session.end();
             return ServeError::OldBatchSequence.fail().spot(here!());
         }
 
-        // Now guaranteed: sequence == expected_sequence OR sequence == (expected_sequence - 1)
+        if sequence > next_sequence {
+            return ServeError::FutureBatchSequence.fail().spot(here!());
+        }
 
-        let (batch, witness_shard) = {
-            let keychain = keychain.clone();
-            let _permit = semaphore.acquire().await.unwrap();
+        // Expand `compressed_batch`
 
-            task::spawn_blocking(
-                move || -> Result<(Batch, Option<MultiSignature>), Top<BatchError>> {
-                    if verify {
-                        let batch = if sequence == expected_sequence {
-                            // New batch, must verify
-                            Batch::expand_verified(&directory, compressed_batch)?
-                        } else {
-                            // Already ordered, consistency guaranteed by TOB
-                            Batch::expand_unverified(compressed_batch)?
-                        };
+        let batch = {
+            let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
-                        let witness_shard = keychain
-                            .multisign(&BatchWitness {
-                                broker: &broker,
-                                sequence: &sequence,
-                                root: &batch.root(),
-                            })
-                            .unwrap();
-
-                        Ok((batch, Some(witness_shard)))
-                    } else {
-                        let batch = Batch::expand_unverified(compressed_batch)?;
-
-                        Ok((batch, None))
-                    }
-                },
-            )
+            task::spawn_blocking(move || {
+                if verify {
+                    Batch::expand_verified(&directory, compressed_batch)
+                } else {
+                    Batch::expand_unverified(compressed_batch)
+                }
+            })
             .await
             .unwrap()
             .pot(ServeError::BatchInvalid, here!())?
         };
 
+        // Reject request if `batch.root()` does not match `root`. In case of
+        // root mismatch, either the broker is Byzantine, or some miscommunication
+        // happened while `send_raw_bytes()`ing `raw_batch` (e.g., malicious
+        // routing node). In either case, a witness cannot be produced:
+        //  - On `root`, as the broker never provided a batch whose root is `root`;
+        //  - On `batch.root()`, as the broker never authenticated its intention
+        //    to submit a batch with root `batch.root()`.
+        // Remark: `batch_raw` is sent unauthenticated to save hashing (computing
+        // `batch_raw`'s Merkle tree is sufficient to authenticate `batch`).
+
         if root != batch.root() {
             return ServeError::RootMismatch.fail().spot(here!());
         }
 
-        // Store the expanded batch (and its raw format) in the `broker_slots` map
+        // Store `raw_batch` and `batch`, retrieve a copy of the delivery shard outlet
 
-        let mut delivery_shard_watch = {
-            let mut guard = broker_slots.lock().unwrap();
+        let mut delivery_shard_watch;
 
-            let mut broker_state = guard.entry(broker.clone()).or_insert(Default::default());
+        let store = {
+            let mut broker_slots = broker_slots.lock().unwrap();
+            let mut broker_slot = broker_slots.entry(broker).or_default();
+            delivery_shard_watch = broker_slot.last_delivery_shard.subscribe();
 
-            if sequence == broker_state.next_sequence && broker_state.expected_batch.is_none() {
-                broker_state.expected_batch = Some((raw_batch, batch));
+            if sequence == broker_slot.next_sequence {
+                if broker_slot.expected_batch.is_none() {
+                    broker_slot.expected_batch = Some((raw_batch, batch));
+                    true
+                } else {
+                    broker_slot.expected_batch.as_ref().unwrap().1.root() == root
+                }
+            } else {
+                false
             }
-
-            broker_state.last_delivery_shard.subscribe()
         };
 
-        // Send the witness shard to the broker
+        // Produce a witness shard if `verify` and `store`:
+        //  - Because `root` was authenticated and `batch.root() == root`,
+        //    batch can be safely attributed to the broker.
+        //  - Because `verify`, `batch` was verified, so its correctness
+        //    can be attested.
+        //  - Because `store`, `batch` is the next expected batch and was
+        //    stored, either anew or redundantly (i.e., `batch` was already
+        //    stored in the broker's slot).
 
-        if let Some(witness_shard) = witness_shard {
-            session
-                .send_raw::<MultiSignature>(&witness_shard)
-                .await
-                .pot(ServeError::ConnectionError, here!())?;
-        }
+        let witness_shard = if verify && store {
+            let witness_shard = keychain
+                .multisign(&BatchWitness {
+                    broker: &broker,
+                    sequence: &sequence,
+                    root: &root,
+                })
+                .unwrap();
+
+            Some(witness_shard)
+        } else {
+            None
+        };
+
+        session
+            .send(&witness_shard)
+            .await
+            .pot(ServeError::ConnectionError, here!())?;
 
         // Receive and validate the witness certificate
 
@@ -375,18 +388,17 @@ mod deliver;
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::{
         broadcast::{test::null_batch, Amendment},
         crypto::statements::BatchDelivery,
         system::test::generate_system,
     };
-
     use futures::stream::{FuturesUnordered, StreamExt};
-
     use std::collections::HashMap;
-
-    use talk::net::{test::TestConnector, SessionConnector};
+    use talk::{
+        crypto::primitives::multi::Signature as MultiSignature,
+        net::{test::TestConnector, SessionConnector},
+    };
 
     #[tokio::test]
     async fn server_interact() {
@@ -422,7 +434,12 @@ mod tests {
             session.send_raw_bytes(&raw_batch).await.unwrap();
             session.send_raw(&true).await.unwrap();
 
-            let response: MultiSignature = session.receive_raw().await.unwrap();
+            let response = session
+                .receive::<Option<MultiSignature>>()
+                .await
+                .unwrap()
+                .unwrap();
+
             responses.push((*identity, response));
         }
 
@@ -432,6 +449,8 @@ mod tests {
             session.send_plain(&(0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
             session.send_raw(&false).await.unwrap();
+
+            session.receive::<Option<MultiSignature>>().await.unwrap();
         }
 
         let mut batch = Batch::expand_unverified(compressed_batch).unwrap();

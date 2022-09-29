@@ -114,28 +114,34 @@ impl Broker {
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
             let witness_shard = session
-                .receive_raw::<MultiSignature>()
+                .receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
-            witness_shard
-                .verify(
-                    [server],
-                    &BatchWitness {
-                        broker: &worker,
-                        sequence: &sequence,
-                        root: &expected_root,
-                    },
-                )
-                .pot(TrySubmitError::WitnessError, here!())?;
+            let witness_shard_sender = witness_shard_sender.take().unwrap();
 
-            let _ = witness_shard_sender
-                .take()
-                .unwrap()
-                .send((server.identity(), witness_shard));
+            if let Some(witness_shard) = witness_shard {
+                witness_shard
+                    .verify(
+                        [server],
+                        &BatchWitness {
+                            broker: &worker,
+                            sequence: &sequence,
+                            root: &expected_root,
+                        },
+                    )
+                    .pot(TrySubmitError::WitnessError, here!())?;
+
+                let _ = witness_shard_sender.send((server.identity(), witness_shard));
+            }
         } else {
             session
                 .send_raw(&false)
+                .await
+                .pot(TrySubmitError::ConnectionError, here!())?;
+
+            session
+                .receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
         }

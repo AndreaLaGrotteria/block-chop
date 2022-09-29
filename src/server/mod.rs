@@ -8,7 +8,7 @@ mod server_settings;
 mod totality_manager;
 mod totality_manager_settings;
 
-use batch::{Batch, BatchError};
+use batch::Batch;
 use broker_slot::BrokerSlot;
 use deduplicator::Deduplicator;
 use deduplicator_settings::DeduplicatorSettings;
