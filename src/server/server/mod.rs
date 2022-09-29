@@ -458,7 +458,7 @@ mod tests {
         let mut batch = Batch::expand_unverified(compressed_batch).unwrap();
 
         for (identity, multisignature) in responses.iter() {
-            let statement = BatchWitness {
+            let statement = BatchWitnessStatement {
                 broker: &broker.keycard().identity(),
                 sequence: &0,
                 root: &root,

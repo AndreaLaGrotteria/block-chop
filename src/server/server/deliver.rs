@@ -26,7 +26,7 @@ type DeliveryShardInlet = WatchSender<Option<(u64, DeliveryShard)>>;
 type BurstInlet = MpscSender<Vec<Option<Entry>>>;
 
 #[derive(Doom)]
-enum ProcessError {
+enum ParseSubmissionError {
     #[doom(description("Failed to deserialize: {}", source))]
     #[doom(wrap(deserialize_failed))]
     DeserializeFailed { source: Box<bincode::ErrorKind> },
@@ -51,15 +51,15 @@ impl Server {
         loop {
             tokio::select! {
                 submission = broadcast.deliver() => {
-                    // Validate `submission` to obtain broker identity and batch root
+                    // Parse `submission` to obtain broker identity and batch root
 
-                    if let Ok((broker, root)) = Self::validate(submission.as_slice(), &membership, broker_slots.as_ref()) {
+                    if let Ok((broker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref()) {
                         // Retrieve broker sequence number, expected batch, and delivery shard inlet
 
                         let (sequence, expected_batch, delivery_shard_inlet) = {
                             let mut guard = broker_slots.lock().unwrap();
 
-                            // Because validation was successful, a broker slot is
+                            // Because parsing was successful, a broker slot is
                             // guaranteed to exist, and the `unwrap()` never fails
                             let broker = guard.get_mut(&broker).unwrap();
 
@@ -95,7 +95,7 @@ impl Server {
                     // Process `batch` to obtain amended root and amendments
 
                     let (amended_root, amendments) =
-                        Self::process(batch, duplicates, &mut next_batch_inlet).await;
+                        Self::burst_batch(batch, duplicates, &mut next_batch_inlet).await;
 
                     // Assemble and post `DeliveryShard`to the broker slot's inlet
 
@@ -125,15 +125,15 @@ impl Server {
         }
     }
 
-    fn validate(
+    fn parse_submission(
         submission: &[u8],
         membership: &Membership,
         broker_slots: &Mutex<HashMap<Identity, BrokerSlot>>,
-    ) -> Result<(Identity, Hash), Top<ProcessError>> {
+    ) -> Result<(Identity, Hash), Top<ParseSubmissionError>> {
         let (broker, root, witness) =
             bincode::deserialize::<(Identity, Hash, Certificate)>(submission)
-                .map_err(ProcessError::deserialize_failed)
-                .map_err(ProcessError::into_top)
+                .map_err(ParseSubmissionError::deserialize_failed)
+                .map_err(ParseSubmissionError::into_top)
                 .spot(here!())?;
 
         let sequence = broker_slots
@@ -152,12 +152,12 @@ impl Server {
                     root: &root,
                 },
             )
-            .pot(ProcessError::WitnessInvalid, here!())?;
+            .pot(ParseSubmissionError::WitnessInvalid, here!())?;
 
         Ok((broker, root))
     }
 
-    async fn process(
+    async fn burst_batch(
         mut batch: Batch,
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
