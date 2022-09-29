@@ -3,8 +3,6 @@ mod compressed_batch;
 mod delivery_shard;
 mod entry;
 mod message;
-
-#[allow(dead_code)]
 mod straggler;
 
 #[cfg(test)]
