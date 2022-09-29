@@ -1,7 +1,9 @@
 use crate::{
     broadcast::{Amendment, DeliveryShard},
     crypto::{
-        statements::{BatchDelivery, BatchWitness},
+        statements::{
+            BatchDelivery as BatchDeliveryStatement, BatchWitness as BatchWitnessStatement,
+        },
         Certificate,
     },
     order::Order,
@@ -20,6 +22,7 @@ use std::{
 use talk::crypto::{primitives::hash::Hash, Identity, KeyChain};
 use tokio::sync::{mpsc::Sender as MpscSender, watch::Sender as WatchSender};
 
+type DeliveryShardInlet = WatchSender<Option<(u64, DeliveryShard)>>;
 type BurstInlet = MpscSender<Vec<Option<Entry>>>;
 
 #[derive(Doom)]
@@ -41,32 +44,46 @@ impl Server {
         mut deduplicator: Deduplicator,
         mut next_batch_inlet: BurstInlet,
     ) {
-        let mut height: u64 = 1;
+        let mut next_height: u64 = 1;
 
-        let mut pending_deliveries: VecDeque<(
-            u64,
-            Arc<WatchSender<Option<(u64, DeliveryShard)>>>,
-        )> = VecDeque::new();
+        let mut pending_deliveries: VecDeque<(u64, Arc<DeliveryShardInlet>)> = VecDeque::new();
 
         loop {
             tokio::select! {
                 submission = broadcast.deliver() => {
-                    if let Ok((broker, expected_root)) = Self::validate(&membership, &submission, &broker_slots) {
-                        let (sequence, expected_batch, watch_sender) = {
+                    // Validate `submission` to obtain broker identity and batch root
+
+                    if let Ok((broker, root)) = Self::validate(submission.as_slice(), &membership, broker_slots.as_ref()) {
+                        // Retrieve broker sequence number, expected batch, and delivery shard inlet
+
+                        let (sequence, expected_batch, delivery_shard_inlet) = {
                             let mut guard = broker_slots.lock().unwrap();
+
+                            // Because validation was successful, a broker slot is
+                            // guaranteed to exist, and the `unwrap()` never fails
                             let broker = guard.get_mut(&broker).unwrap();
+
+                            let sequence = broker.next_sequence;
+                            let expected_batch = broker.expected_batch.take();
+                            let last_delivery_shard = broker.last_delivery_shard.clone();
+
                             broker.next_sequence += 1;
 
-                            (broker.next_sequence - 1, broker.expected_batch.take(), broker.last_delivery_shard.clone())
+                            (sequence, expected_batch, last_delivery_shard)
                         };
 
-                        pending_deliveries.push_front((sequence, watch_sender));
+                        // If `expected_batch` contains the batch relevant to `root`, make it
+                        // available to other servers. Otherwise, retrieve the appropriate batch.
 
                         match expected_batch {
-                            Some((raw_batch, batch)) if batch.root() == expected_root =>
+                            Some((raw_batch, batch)) if batch.root() == root =>
                                 totality_manager.hit(raw_batch, batch).await,
-                            _ => totality_manager.miss(expected_root).await,
+                            _ => totality_manager.miss(root).await,
                         };
+
+                        // Push batch metadata to `pending_deliveries`
+
+                        pending_deliveries.push_front((sequence, delivery_shard_inlet));
                     }
                 }
 
@@ -75,35 +92,42 @@ impl Server {
                 }
 
                 (batch, duplicates) = deduplicator.pop() => {
+                    // Process `batch` to obtain amended root and amendments
+
                     let (amended_root, amendments) =
                         Self::process(batch, duplicates, &mut next_batch_inlet).await;
 
-                    let statement = BatchDelivery {
-                        height: &height,
-                        root: &amended_root,
-                    };
+                    // Assemble and post `DeliveryShard`to the broker slot's inlet
 
-                    let multisignature = keychain.multisign(&statement).unwrap();
+                    let multisignature = keychain.multisign(&BatchDeliveryStatement {
+                        height: &next_height,
+                        root: &amended_root,
+                    }).unwrap();
 
                     let delivery_shard = DeliveryShard {
-                        height,
+                        height: next_height,
                         amendments,
                         multisignature,
                     };
 
-                    let (sequence, watch_sender) = pending_deliveries.pop_back().unwrap();
+                    // Because `TotalityManager` and `Deduplicator` preserve batches, the `unwrap()` never fails
+                    let (sequence, delivery_shard_inlet) = pending_deliveries.pop_back().unwrap();
 
-                    watch_sender.send_modify(|value| { *value = Some((sequence, delivery_shard)); });
+                    // Unlike `send`, `send_replace` guarantees that the new value is
+                    // posted to `delivery_shard_inlet` even if no outlets are subscribed
+                    delivery_shard_inlet.send_replace(Some((sequence, delivery_shard)));
 
-                    height += 1;
+                    // Increment `next_height`
+
+                    next_height += 1;
                 }
             }
         }
     }
 
     fn validate(
-        membership: &Membership,
         submission: &[u8],
+        membership: &Membership,
         broker_slots: &Mutex<HashMap<Identity, BrokerSlot>>,
     ) -> Result<(Identity, Hash), Top<ProcessError>> {
         let (broker, root, witness) =
@@ -116,15 +140,15 @@ impl Server {
             .lock()
             .unwrap()
             .entry(broker)
-            .or_insert(Default::default())
+            .or_default()
             .next_sequence;
 
         witness
             .verify_plurality(
                 &membership,
-                &BatchWitness {
+                &BatchWitnessStatement {
                     broker: &broker,
-                    sequence: &sequence, // TODO: replace with real sequence
+                    sequence: &sequence,
                     root: &root,
                 },
             )
@@ -138,13 +162,22 @@ impl Server {
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
+        // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`,
+        // store `Ignore` elements of `duplicates` for later removal
+
         let mut to_ignore = Vec::new();
 
         for duplicate in duplicates.iter() {
+            // Locate `duplicate` within `batch`
+
             let index = batch
                 .entries
                 .items()
                 .binary_search_by(|entry| match entry {
+                    // Before processing, all elements of `batch.entries` are `Some`.
+                    // Moreover, `duplicates` is sorted by id. As a result, if `entry`
+                    // is `None`, then its id matches that of a previous duplicate
+                    // which, in turn, was smaller than the current `duplicate.id()`.
                     None => std::cmp::Ordering::Less,
                     Some(entry) => entry.id.cmp(&duplicate.id()),
                 })
@@ -155,6 +188,7 @@ impl Server {
                     to_ignore.push(index);
                 }
                 Duplicate::Nudge { sequence, .. } => {
+                    // TODO: Streamline the following code when `Vector` supports in-place updates
                     let mut entry = batch.entries.items()[index].clone().unwrap();
                     entry.sequence = *sequence;
                     batch.entries.set(index, Some(entry)).unwrap();
@@ -167,13 +201,20 @@ impl Server {
 
         let amended_root = batch.root();
 
+        // Extract `batch`'s entries, remove all `Ignore` duplicates
+
         let mut entries = Vec::from(batch.entries);
 
         for ignore in to_ignore {
             entries[ignore] = None;
         }
 
+        // Send `entries` to `next_batch`
+
         let _ = next_batch_inlet.send(entries).await;
+
+        // Return `amended_root` and all elements of `duplicates` (`Nudge`
+        // and `Drop`) that can be transformed into `Amendment`s
 
         (
             amended_root,

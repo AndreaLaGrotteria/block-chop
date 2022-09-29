@@ -1,6 +1,6 @@
 use crate::{
     broadcast::DeliveryShard,
-    crypto::{statements::BatchWitness, Certificate},
+    crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
     server::{Batch, BrokerSlot, Deduplicator, ServerSettings, TotalityManager},
@@ -308,7 +308,7 @@ impl Server {
 
         let witness_shard = if verify && store {
             let witness_shard = keychain
-                .multisign(&BatchWitness {
+                .multisign(&BatchWitnessStatement {
                     broker: &broker,
                     sequence: &sequence,
                     root: &root,
@@ -335,7 +335,7 @@ impl Server {
         witness
             .verify_plurality(
                 membership.as_ref(),
-                &BatchWitness {
+                &BatchWitnessStatement {
                     broker: &broker,
                     sequence: &sequence,
                     root: &root,
