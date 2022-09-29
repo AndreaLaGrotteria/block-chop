@@ -88,7 +88,7 @@ impl Server {
                     deduplicator.push(batch).await;
                 }
 
-                (batch, duplicates) = deduplicator.pop() => {
+                (batch, duplicates) = deduplicator.pull() => {
                     // Process `batch` to obtain amended root and amendments
 
                     let (amended_root, amendments) =

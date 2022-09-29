@@ -30,7 +30,7 @@ type DuplicatesBurstOutlet = MpscReceiver<Vec<Vec<Duplicate>>>;
 
 pub(in crate::server) struct Deduplicator {
     dispatch_inlet: BatchInlet,
-    pop_outlet: DeduplicatedBatchOutlet,
+    pull_outlet: DeduplicatedBatchOutlet,
     _fuse: Fuse,
 }
 
@@ -46,20 +46,20 @@ impl Deduplicator {
         let logs = vec![None; capacity];
 
         let (dispatch_inlet, dispatch_outlet) = mpsc::channel(settings.pipeline);
-        let (pop_inlet, pop_outlet) = mpsc::channel(settings.pipeline);
+        let (pull_inlet, pull_outlet) = mpsc::channel(settings.pipeline);
 
         let fuse = Fuse::new();
 
         fuse.spawn(Deduplicator::run(
             logs,
             dispatch_outlet,
-            pop_inlet,
+            pull_inlet,
             settings,
         ));
 
         Deduplicator {
             dispatch_inlet,
-            pop_outlet,
+            pull_outlet,
             _fuse: fuse,
         }
     }
@@ -70,16 +70,16 @@ impl Deduplicator {
         let _ = self.dispatch_inlet.send(batch).await;
     }
 
-    pub async fn pop(&mut self) -> (Batch, Vec<Duplicate>) {
+    pub async fn pull(&mut self) -> (Batch, Vec<Duplicate>) {
         // `self` holds the `Fuse` to all tasks,
         // so this is guaranteed to succeed.
-        self.pop_outlet.recv().await.unwrap()
+        self.pull_outlet.recv().await.unwrap()
     }
 
     async fn run(
         logs: Vec<Option<Log>>,
         mut dispatch_outlet: BatchOutlet,
-        mut pop_inlet: DeduplicatedBatchInlet,
+        mut pull_inlet: DeduplicatedBatchInlet,
         settings: DeduplicatorSettings,
     ) {
         let mut logs = Snap::new(logs);
@@ -87,7 +87,7 @@ impl Deduplicator {
         let fuse = Fuse::new();
 
         loop {
-            (logs, dispatch_outlet, pop_inlet) = {
+            (logs, dispatch_outlet, pull_inlet) = {
                 // Partition `logs` in `settings.tasks` chunks
 
                 let capacity = logs.len();
@@ -160,7 +160,7 @@ impl Deduplicator {
                 let join_task = fuse.spawn(Deduplicator::join(
                     join_batch_burst_outlet,
                     join_duplicates_burst_outlets,
-                    pop_inlet,
+                    pull_inlet,
                     settings.clone(),
                 ));
 
@@ -177,7 +177,7 @@ impl Deduplicator {
                     .await;
 
                 let mut tail = process_tail_task.await.unwrap();
-                let pop_inlet = join_task.await.unwrap().unwrap();
+                let pull_inlet = join_task.await.unwrap().unwrap();
 
                 // Merge all `snaps`, unwrap, concatenate `tail`, `Snap` again
 
@@ -192,7 +192,7 @@ impl Deduplicator {
 
                 let logs = Snap::new(logs);
 
-                (logs, dispatch_outlet, pop_inlet)
+                (logs, dispatch_outlet, pull_inlet)
             };
         }
     }
@@ -345,7 +345,7 @@ impl Deduplicator {
     async fn join(
         mut join_batch_burst_outlet: BatchBurstOutlet,
         mut join_duplicates_burst_outlets: Vec<DuplicatesBurstOutlet>,
-        pop_inlet: DeduplicatedBatchInlet,
+        pull_inlet: DeduplicatedBatchInlet,
         settings: DeduplicatorSettings,
     ) -> DeduplicatedBatchInlet {
         loop {
@@ -401,7 +401,7 @@ impl Deduplicator {
 
             // For each `Batch` in `batch_burst`, concatenate the corresponding
             // `Vec<Duplicate>`s from each element of `duplicates_burst`. Send
-            // each resulting deduplicated batch to `pop`
+            // each resulting deduplicated batch to `pull`
 
             for batch in batch_burst {
                 let mut duplicates = Vec::new();
@@ -410,11 +410,11 @@ impl Deduplicator {
                     duplicates.extend(duplicates_burst.next().unwrap());
                 }
 
-                let _ = pop_inlet.send((batch, duplicates)).await;
+                let _ = pull_inlet.send((batch, duplicates)).await;
             }
         }
 
-        pop_inlet
+        pull_inlet
     }
 
     fn crop<R>(entries: &[Option<Entry>], range: R) -> &[Option<Entry>]
@@ -682,7 +682,7 @@ mod tests {
             let entries = [(0, 0, 0)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -692,7 +692,7 @@ mod tests {
             let entries = [(0, 1, 1)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -702,7 +702,7 @@ mod tests {
             let entries = [(0, 1, 1)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Ignore { id: 0 }]);
@@ -712,7 +712,7 @@ mod tests {
             let entries = [(0, 2, 1)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Nudge { id: 0, sequence: 1 }]);
@@ -722,7 +722,7 @@ mod tests {
             let entries = [(0, 1, 2)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
@@ -732,7 +732,7 @@ mod tests {
             let entries = [(0, 0, 0)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
@@ -742,7 +742,7 @@ mod tests {
             let entries = [(0, 3, 3)];
 
             deduplicator.push(build_batch(entries)).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -774,31 +774,31 @@ mod tests {
         let entries_6 = [(0, 3, 3)];
         deduplicator.push(build_batch(entries_6)).await;
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_2));
         assert_eq!(duplicates, vec![Duplicate::Ignore { id: 0 }]);
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_3));
         assert_eq!(duplicates, vec![Duplicate::Nudge { id: 0, sequence: 1 }]);
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_4));
         assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_5));
         assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
@@ -813,7 +813,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -825,7 +825,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -837,7 +837,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
 
@@ -855,7 +855,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
 
@@ -876,7 +876,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
 
@@ -894,7 +894,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
 
@@ -912,7 +912,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             deduplicator.push(build_batch(entries.clone())).await;
-            let (batch, duplicates) = deduplicator.pop().await;
+            let (batch, duplicates) = deduplicator.pull().await;
 
             assert_eq!(batch.entries.items(), &build_entries(entries));
             assert!(duplicates.is_empty());
@@ -965,15 +965,15 @@ mod tests {
 
         deduplicator.push(build_batch(entries_6.clone())).await;
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_2));
 
         assert_eq!(
@@ -983,7 +983,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_3));
 
         assert_eq!(
@@ -996,7 +996,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_4));
 
         assert_eq!(
@@ -1006,7 +1006,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_5));
 
         assert_eq!(
@@ -1016,7 +1016,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
@@ -1067,15 +1067,15 @@ mod tests {
 
         deduplicator.push(build_batch(entries_6.clone())).await;
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_2));
 
         assert_eq!(
@@ -1085,7 +1085,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_3));
 
         assert_eq!(
@@ -1098,7 +1098,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_4));
 
         assert_eq!(
@@ -1108,7 +1108,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_5));
 
         assert_eq!(
@@ -1118,7 +1118,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
@@ -1187,15 +1187,15 @@ mod tests {
 
         deduplicator.push(build_batch(entries_6.clone())).await;
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_2));
 
         assert_eq!(
@@ -1205,7 +1205,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_3));
 
         assert_eq!(
@@ -1218,7 +1218,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_4));
 
         assert_eq!(
@@ -1228,7 +1228,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_5));
 
         assert_eq!(
@@ -1238,7 +1238,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let (batch, duplicates) = deduplicator.pop().await;
+        let (batch, duplicates) = deduplicator.pull().await;
         assert_eq!(batch.entries.items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
@@ -1321,7 +1321,7 @@ mod tests {
 
         for (batch, expected_duplicates) in deduplicated_batches {
             deduplicator.push(batch).await;
-            let (_, duplicates) = deduplicator.pop().await;
+            let (_, duplicates) = deduplicator.pull().await;
             assert_eq!(duplicates, expected_duplicates);
         }
     }
