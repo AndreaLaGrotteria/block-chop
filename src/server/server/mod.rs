@@ -1,51 +1,25 @@
 use crate::{
-    broadcast::DeliveryShard,
-    crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
-    debug,
     order::Order,
-    server::{Batch, BrokerSlot, Deduplicator, ServerSettings, TotalityManager},
+    server::{Deduplicator, ServerSettings, TotalityManager},
     system::{Directory, Membership},
-    warn, Entry,
+    Entry,
 };
-use doomstack::{here, Doom, ResultExt, Top};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 use talk::{
-    crypto::{primitives::hash::Hash, Identity, KeyChain},
-    net::{Connector, Listener, Session, SessionListener},
+    crypto::KeyChain,
+    net::{Connector, Listener, SessionListener},
     sync::fuse::Fuse,
 };
-use tokio::{
-    sync::{mpsc, mpsc::Receiver as MpscReceiver, Semaphore},
-    task,
-};
+use tokio::sync::{mpsc, mpsc::Receiver as MpscReceiver};
 
 type BurstOutlet = MpscReceiver<Vec<Option<Entry>>>;
 
 pub struct Server {
     next_batch_outlet: BurstOutlet,
     _fuse: Fuse,
-}
-
-#[derive(Doom)]
-enum ServeError {
-    #[doom(description("Connection error"))]
-    ConnectionError,
-    #[doom(description("Failed to deserialize: {}", source))]
-    #[doom(wrap(deserialize_failed))]
-    DeserializeFailed { source: bincode::Error },
-    #[doom(description("Batch invalid"))]
-    BatchInvalid,
-    #[doom(description("Witness invalid"))]
-    WitnessInvalid,
-    #[doom(description("Old batch sequence number"))]
-    OldBatchSequence,
-    #[doom(description("Future batch sequence number"))]
-    FutureBatchSequence,
-    #[doom(description("Authenticated root does not match that of the batch provided"))]
-    RootMismatch,
 }
 
 impl Server {
@@ -149,250 +123,23 @@ impl Server {
             .into_iter()
             .flatten()
     }
-
-    async fn listen(
-        keychain: KeyChain,
-        membership: Membership,
-        directory: Directory,
-        broadcast: Arc<dyn Order>,
-        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
-        mut listener: SessionListener,
-        settings: ServerSettings,
-    ) {
-        let membership = Arc::new(membership);
-        let directory = Arc::new(directory);
-
-        let semaphore = Semaphore::new(settings.expand_tasks);
-        let semaphore = Arc::new(semaphore);
-
-        let fuse = Fuse::new();
-
-        loop {
-            let (broker, session) = listener.accept().await;
-
-            let keychain = keychain.clone();
-            let membership = membership.clone();
-            let directory = directory.clone();
-            let broadcast = broadcast.clone();
-            let broker_slots = broker_slots.clone();
-            let semaphore = semaphore.clone();
-
-            fuse.spawn(async move {
-                if let Err(error) = Server::serve(
-                    broker,
-                    session,
-                    keychain,
-                    membership,
-                    directory,
-                    broadcast,
-                    broker_slots,
-                    semaphore,
-                )
-                .await
-                {
-                    warn!("{:?}", error);
-                }
-            });
-        }
-    }
-
-    async fn serve(
-        broker: Identity,
-        mut session: Session,
-        keychain: KeyChain,
-        membership: Arc<Membership>,
-        directory: Arc<Directory>,
-        broadcast: Arc<dyn Order>,
-        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
-        semaphore: Arc<Semaphore>,
-    ) -> Result<(), Top<ServeError>> {
-        // Receive broker request
-
-        let (sequence, root) = session
-            .receive_plain::<(u64, Hash)>()
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        let raw_batch = session
-            .receive_raw_bytes()
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        let compressed_batch = bincode::deserialize(raw_batch.as_slice())
-            .map_err(ServeError::deserialize_failed)
-            .map_err(Doom::into_top)
-            .spot(here!())?;
-
-        let verify = session
-            .receive_raw::<bool>()
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        // Reject request if `sequence` is too old or future
-
-        let next_sequence = broker_slots
-            .lock()
-            .unwrap()
-            .entry(broker.clone())
-            .or_default()
-            .next_sequence;
-
-        if sequence + 1 < next_sequence {
-            return ServeError::OldBatchSequence.fail().spot(here!());
-        }
-
-        if sequence > next_sequence {
-            return ServeError::FutureBatchSequence.fail().spot(here!());
-        }
-
-        // Expand `compressed_batch`
-
-        let batch = {
-            let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
-
-            task::spawn_blocking(move || {
-                if verify {
-                    Batch::expand_verified(&directory, compressed_batch)
-                } else {
-                    Batch::expand_unverified(compressed_batch)
-                }
-            })
-            .await
-            .unwrap()
-            .pot(ServeError::BatchInvalid, here!())?
-        };
-
-        // Reject request if `batch.root()` does not match `root`. In case of
-        // root mismatch, either the broker is Byzantine, or some miscommunication
-        // happened while `send_raw_bytes()`ing `raw_batch` (e.g., malicious
-        // routing node). In either case, a witness cannot be produced:
-        //  - On `root`, as the broker never provided a batch whose root is `root`;
-        //  - On `batch.root()`, as the broker never authenticated its intention
-        //    to submit a batch with root `batch.root()`.
-        // Remark: `batch_raw` is sent unauthenticated to save hashing (computing
-        // `batch_raw`'s Merkle tree is sufficient to authenticate `batch`).
-
-        if root != batch.root() {
-            return ServeError::RootMismatch.fail().spot(here!());
-        }
-
-        // Store `raw_batch` and `batch`, retrieve a copy of the delivery shard outlet
-
-        let mut last_delivery_shard;
-
-        let store = {
-            let mut broker_slots = broker_slots.lock().unwrap();
-            let mut broker_slot = broker_slots.entry(broker).or_default();
-            last_delivery_shard = broker_slot.last_delivery_shard.subscribe();
-
-            if sequence == broker_slot.next_sequence {
-                if broker_slot.expected_batch.is_none() {
-                    broker_slot.expected_batch = Some((raw_batch, batch));
-                    true
-                } else {
-                    broker_slot.expected_batch.as_ref().unwrap().1.root() == root
-                }
-            } else {
-                false
-            }
-        };
-
-        // Produce a witness shard if `verify` and `store`:
-        //  - Because `root` was authenticated and `batch.root() == root`,
-        //    batch can be safely attributed to the broker.
-        //  - Because `verify`, `batch` was verified, so its correctness
-        //    can be attested.
-        //  - Because `store`, `batch` is the next expected batch and was
-        //    stored, either anew or redundantly (i.e., `batch` was already
-        //    stored in the broker's slot).
-
-        let witness_shard = if verify && store {
-            let witness_shard = keychain
-                .multisign(&BatchWitnessStatement {
-                    broker: &broker,
-                    sequence: &sequence,
-                    root: &root,
-                })
-                .unwrap();
-
-            Some(witness_shard)
-        } else {
-            None
-        };
-
-        session
-            .send(&witness_shard)
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        // Receive and verify the witness certificate
-
-        let witness = session
-            .receive_raw::<Certificate>()
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        witness
-            .verify_plurality(
-                membership.as_ref(),
-                &BatchWitnessStatement {
-                    broker: &broker,
-                    sequence: &sequence,
-                    root: &root,
-                },
-            )
-            .pot(ServeError::WitnessInvalid, here!())?;
-
-        debug!("Witness certificate valid.");
-
-        // Submit the batch for ordering by Total-Order Broadcast (TOB)
-
-        let submission = bincode::serialize(&(broker, root, witness)).unwrap();
-        broadcast.order(submission.as_slice()).await;
-
-        // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
-
-        let delivery_shard = loop {
-            if let Some((last_sequence, last_shard)) =
-                last_delivery_shard.borrow_and_update().as_ref()
-            {
-                if sequence == *last_sequence {
-                    break last_shard.clone();
-                } else if sequence < *last_sequence {
-                    // A delivery shard was produced for a later batch than the one
-                    // being processed. This means that the broker moved on, having
-                    // already successfully attained a delivery shard for the current
-                    // batch: break the connection and return.
-                    return ServeError::OldBatchSequence.fail().spot(here!());
-                }
-            }
-
-            let _ = last_delivery_shard.changed().await;
-        };
-
-        // Send `delivery_shard` to the broker and end the session
-
-        session
-            .send_plain::<DeliveryShard>(&delivery_shard)
-            .await
-            .pot(ServeError::ConnectionError, here!())?;
-
-        debug!("Delivery shard sent.");
-
-        session.end();
-
-        Ok(())
-    }
 }
 
 mod deliver;
+mod listen;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        broadcast::{test::null_batch, Amendment},
-        crypto::statements::BatchDelivery,
+        broadcast::{test::null_batch, Amendment, DeliveryShard},
+        crypto::{
+            statements::{
+                BatchDelivery as BatchDeliveryStatement, BatchWitness as BatchWitnessStatement,
+            },
+            Certificate,
+        },
+        server::Batch,
         system::test::generate_system,
     };
     use futures::stream::{FuturesUnordered, StreamExt};
@@ -515,7 +262,7 @@ mod tests {
             }
         });
 
-        let statement = BatchDelivery {
+        let statement = BatchDeliveryStatement {
             height: &height,
             root: &batch.root(),
         };

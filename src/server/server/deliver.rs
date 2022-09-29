@@ -7,10 +7,7 @@ use crate::{
         Certificate,
     },
     order::Order,
-    server::{
-        server::BrokerSlot, totality_manager::TotalityManager, Batch, Deduplicator, Duplicate,
-        Server,
-    },
+    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager},
     system::Membership,
     Entry,
 };
