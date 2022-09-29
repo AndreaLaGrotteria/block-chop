@@ -238,7 +238,6 @@ impl Server {
             .next_sequence;
 
         if sequence + 1 < next_sequence {
-            session.end();
             return ServeError::OldBatchSequence.fail().spot(here!());
         }
 
@@ -279,12 +278,12 @@ impl Server {
 
         // Store `raw_batch` and `batch`, retrieve a copy of the delivery shard outlet
 
-        let mut delivery_shard_watch;
+        let mut last_delivery_shard;
 
         let store = {
             let mut broker_slots = broker_slots.lock().unwrap();
             let mut broker_slot = broker_slots.entry(broker).or_default();
-            delivery_shard_watch = broker_slot.last_delivery_shard.subscribe();
+            last_delivery_shard = broker_slot.last_delivery_shard.subscribe();
 
             if sequence == broker_slot.next_sequence {
                 if broker_slot.expected_batch.is_none() {
@@ -326,7 +325,7 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        // Receive and validate the witness certificate
+        // Receive and verify the witness certificate
 
         let witness = session
             .receive_raw::<Certificate>()
@@ -344,38 +343,41 @@ impl Server {
             )
             .pot(ServeError::WitnessInvalid, here!())?;
 
-        debug!("Witness certificate valid!");
+        debug!("Witness certificate valid.");
 
-        // Submit the batch to be ordered by TOB
+        // Submit the batch for ordering by Total-Order Broadcast (TOB)
 
         let submission = bincode::serialize(&(broker, root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
-        // Wait for the batch's delivery by TOB and the corresponding delivery shard
+        // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
 
         let delivery_shard = loop {
-            if let Some((last_sequence, delivery_shard)) =
-                delivery_shard_watch.borrow_and_update().as_ref()
+            if let Some((last_sequence, last_shard)) =
+                last_delivery_shard.borrow_and_update().as_ref()
             {
                 if sequence == *last_sequence {
-                    break delivery_shard.clone();
+                    break last_shard.clone();
                 } else if sequence < *last_sequence {
-                    session.end();
+                    // A delivery shard was produced for a later batch than the one
+                    // being processed. This means that the broker moved on, having
+                    // already successfully attained a delivery shard for the current
+                    // batch: break the connection and return.
                     return ServeError::OldBatchSequence.fail().spot(here!());
                 }
             }
 
-            let _ = delivery_shard_watch.changed().await;
+            let _ = last_delivery_shard.changed().await;
         };
 
-        // Send the delivery shard to the broker
+        // Send `delivery_shard` to the broker and end the session
 
         session
             .send_plain::<DeliveryShard>(&delivery_shard)
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
-        debug!("Sent delivery shard!");
+        debug!("Delivery shard sent.");
 
         session.end();
 
