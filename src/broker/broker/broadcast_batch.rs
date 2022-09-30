@@ -7,7 +7,7 @@ use crate::{
     crypto::{statements::BatchDelivery, Certificate},
     warn, BrokerSettings, Membership,
 };
-use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
+use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
 use std::{collections::HashMap, sync::Arc};
 use talk::{
@@ -16,16 +16,10 @@ use talk::{
     sync::{fuse::Fuse, promise::Promise},
 };
 use tokio::{
-    sync::oneshot::{self, Receiver as OneshotReceiver},
+    sync::mpsc::{self, Receiver as MpscReceiver},
     task,
     time::{self, timeout},
 };
-
-enum WitnessingRole {
-    Verifier,
-    Backup,
-    Idle,
-}
 
 impl Broker {
     pub(in crate::broker::broker) async fn broadcast_batch(
@@ -46,53 +40,39 @@ impl Broker {
 
         let fuse = Fuse::new();
 
+        let (witness_shard_sender, witness_shard_receiver) =
+            mpsc::channel::<(Identity, MultiSignature)>(membership.servers().len());
+
+        let (delivery_shard_sender, delivery_shard_receiver) =
+            mpsc::channel::<(Identity, DeliveryShard)>(membership.servers().len());
+
         let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
-        let mut witness_shard_receivers = Vec::with_capacity(membership.servers().len());
         let mut witness_solvers = Vec::with_capacity(membership.servers().len());
-        let mut delivery_shard_receivers = Vec::with_capacity(membership.servers().len());
         let mut submit_handles = Vec::with_capacity(membership.servers().len());
 
         for (index, server) in servers.into_iter().enumerate() {
-            let role = if index < membership.plurality() {
-                WitnessingRole::Verifier
+            let verify_promise = if index < membership.plurality() {
+                // Server witnessing role: Verifier
+                Promise::solved(true)
             } else if index < membership.quorum() {
-                WitnessingRole::Backup
+                // Server witnessing role: Backup verifier
+                let (promise, solver) = Promise::pending();
+                backup_verifiers.push(solver);
+                promise
             } else {
-                WitnessingRole::Idle
-            };
-
-            let verify_promise = match role {
-                WitnessingRole::Verifier => Promise::solved(true),
-                WitnessingRole::Idle => Promise::solved(false),
-                WitnessingRole::Backup => {
-                    let (promise, solver) = Promise::pending();
-                    backup_verifiers.push(solver);
-                    promise
-                }
+                // Server witnessing role: Idle
+                Promise::solved(false)
             };
 
             let (witness_promise, witness_solver) = Promise::pending();
             witness_solvers.push(witness_solver);
 
-            let (witness_shard_sender, witness_shard_receiver) =
-                oneshot::channel::<(Identity, MultiSignature)>();
-
-            match role {
-                WitnessingRole::Verifier | WitnessingRole::Backup => {
-                    witness_shard_receivers.push(witness_shard_receiver);
-                }
-                _ => (),
-            };
-
-            let (delivery_shard_sender, delivery_shard_receiver) =
-                oneshot::channel::<(Identity, DeliveryShard)>();
-
-            delivery_shard_receivers.push(delivery_shard_receiver);
-
             let settings = settings.clone();
             let connector = connector.clone();
             let server = server.clone();
             let compressed_batch = compressed_batch.clone();
+            let witness_shard_sender = witness_shard_sender.clone();
+            let delivery_shard_sender = delivery_shard_sender.clone();
 
             let handle = fuse.spawn(async move {
                 Broker::submit_batch(
@@ -103,9 +83,9 @@ impl Broker {
                     &server,
                     connector,
                     verify_promise,
-                    Some(witness_shard_sender),
+                    witness_shard_sender,
                     witness_promise,
-                    Some(delivery_shard_sender),
+                    delivery_shard_sender,
                     settings,
                 )
                 .await
@@ -115,7 +95,7 @@ impl Broker {
         }
 
         let mut witness_collector =
-            WitnessCollector::new(membership.clone(), witness_shard_receivers);
+            WitnessCollector::new(membership.clone(), witness_shard_receiver);
 
         match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
             Ok(_) => {
@@ -138,7 +118,7 @@ impl Broker {
             .for_each(|solver| solver.solve(witness.clone()));
 
         let mut delivery_collector =
-            DeliveryCollector::new(batch, membership.clone(), delivery_shard_receivers);
+            DeliveryCollector::new(batch, membership.clone(), delivery_shard_receiver);
 
         delivery_collector.progress().await;
 
@@ -163,20 +143,18 @@ impl Broker {
 struct WitnessCollector {
     membership: Arc<Membership>,
     shards: Vec<(Identity, MultiSignature)>,
-    stream: FuturesUnordered<OneshotReceiver<(Identity, MultiSignature)>>,
+    receiver: MpscReceiver<(Identity, MultiSignature)>,
 }
 
 impl WitnessCollector {
     fn new(
         membership: Arc<Membership>,
-        receivers: Vec<OneshotReceiver<(Identity, MultiSignature)>>,
+        receiver: MpscReceiver<(Identity, MultiSignature)>,
     ) -> Self {
-        let stream = receivers.into_iter().collect::<FuturesUnordered<_>>();
-
         WitnessCollector {
             membership,
             shards: Vec::new(),
-            stream,
+            receiver,
         }
     }
 
@@ -188,9 +166,9 @@ impl WitnessCollector {
         while !self.succeeded() {
             // A copy of `update_inlet` is held by `orchestrate`.
             // As a result, `update_outlet.recv()` cannot return `None`.
-            match self.stream.next().await {
-                Some(Ok(shard)) => self.shards.push(shard),
-                Some(Err(_)) | None => unreachable!(), // Double check that this is indeed unreachable
+            match self.receiver.recv().await {
+                Some(shard) => self.shards.push(shard),
+                None => unreachable!(), // Double check that this is indeed unreachable
             }
         }
     }
@@ -208,17 +186,15 @@ struct DeliveryCollector<'a> {
     good_shards: Vec<(Identity, DeliveryShard)>,
     bad_shards: Vec<(Identity, DeliveryShard)>,
     counts: HashMap<(Vec<Amendment>, u64), usize>,
-    stream: FuturesUnordered<OneshotReceiver<(Identity, DeliveryShard)>>,
+    receiver: MpscReceiver<(Identity, DeliveryShard)>,
 }
 
 impl<'a> DeliveryCollector<'a> {
     fn new(
         batch: &'a mut Batch,
         membership: Arc<Membership>,
-        receivers: Vec<OneshotReceiver<(Identity, DeliveryShard)>>,
+        receiver: MpscReceiver<(Identity, DeliveryShard)>,
     ) -> Self {
-        let stream = receivers.into_iter().collect::<FuturesUnordered<_>>();
-
         DeliveryCollector {
             batch,
             batch_height: None,
@@ -227,7 +203,7 @@ impl<'a> DeliveryCollector<'a> {
             good_shards: Vec::new(),
             bad_shards: Vec::new(),
             counts: HashMap::new(),
-            stream,
+            receiver,
         }
     }
 
@@ -291,8 +267,8 @@ impl<'a> DeliveryCollector<'a> {
         while !self.succeeded() {
             // A copy of `update_inlet` is held by `orchestrate`.
             // As a result, `update_outlet.recv()` cannot return `None`.
-            match self.stream.next().await {
-                Some(Ok((identity, shard))) => {
+            match self.receiver.recv().await {
+                Some((identity, shard)) => {
                     *self
                         .counts
                         .entry((shard.amendments.clone(), shard.height))
@@ -303,7 +279,7 @@ impl<'a> DeliveryCollector<'a> {
                     self.try_amend_batch();
                     self.filter_new_shards();
                 }
-                Some(Err(_)) | None => unreachable!(), // Double check that this is indeed unreachable
+                None => unreachable!(), // Double check that this is indeed unreachable
             }
         }
     }

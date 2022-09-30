@@ -14,10 +14,10 @@ use talk::{
     net::SessionConnector,
     sync::promise::Promise,
 };
-use tokio::sync::oneshot::Sender as OneshotSender;
+use tokio::sync::mpsc::Sender as MpscSender;
 
-type MultiSignatureInlet = OneshotSender<(Identity, MultiSignature)>;
-type DeliveryShardInlet = OneshotSender<(Identity, DeliveryShard)>;
+type MultiSignatureInlet = MpscSender<(Identity, MultiSignature)>;
+type DeliveryShardInlet = MpscSender<(Identity, DeliveryShard)>;
 
 #[derive(Doom)]
 enum TrySubmitError {
@@ -38,12 +38,14 @@ impl Broker {
         server: &KeyCard,
         connector: Arc<SessionConnector>,
         mut verify: Promise<bool>,
-        mut witness_shard_inlet: Option<MultiSignatureInlet>,
+        witness_shard_inlet: MultiSignatureInlet,
         mut witness: Promise<Certificate>,
-        mut delivery_shard_inlet: Option<DeliveryShardInlet>,
+        delivery_shard_inlet: DeliveryShardInlet,
         settings: BrokerSettings,
     ) {
         let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+        let mut witness_shard_inlet = Some(witness_shard_inlet);
+        let mut delivery_shard_inlet = Some(delivery_shard_inlet);
 
         let mut agent = settings.submission_schedule.agent();
 
@@ -140,7 +142,9 @@ impl Broker {
                     )
                     .pot(TrySubmitError::InvalidWitnessShard, here!())?;
 
-                let _ = witness_shard_inlet.send((server.identity(), witness_shard));
+                let _ = witness_shard_inlet
+                    .send((server.identity(), witness_shard))
+                    .await;
             }
         } else {
             session
@@ -181,7 +185,8 @@ impl Broker {
         let _ = delivery_shard_inlet
             .take()
             .unwrap()
-            .send((server.identity(), delivery_shard));
+            .send((server.identity(), delivery_shard))
+            .await;
 
         session.end();
         Ok(())
