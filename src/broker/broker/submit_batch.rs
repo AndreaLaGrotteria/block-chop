@@ -45,7 +45,7 @@ impl Broker {
         let mut agent = settings.submission_schedule.agent();
 
         loop {
-            match Broker::try_submit(
+            match Broker::try_submit_batch(
                 compressed_batch,
                 worker,
                 sequence,
@@ -69,7 +69,7 @@ impl Broker {
         }
     }
 
-    async fn try_submit(
+    async fn try_submit_batch(
         compressed_batch: &CompressedBatch,
         worker: Identity,
         sequence: u64,
