@@ -8,7 +8,7 @@ use std::{
     cmp, iter,
     ops::{Bound, Range, RangeBounds},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use talk::sync::fuse::Fuse;
 use tokio::{
@@ -224,9 +224,7 @@ impl Deduplicator {
                         } else {
                             // `Deduplicator` has dropped. Idle waiting for task to be cancelled.
                             // (Note that `return`ing something meaningful is not possible)
-                            loop {
-                                time::sleep(Duration::from_secs(1)).await;
-                            }
+                            std::future::pending().await
                         }
                     },
                     _ = time::sleep(settings.burst_interval) => {}
@@ -371,9 +369,7 @@ impl Deduplicator {
                         loop {
                             // `Deduplicator` has dropped. Idle waiting for task to be cancelled.
                             // (Note that `return`ing something meaningful is not possible)
-                            loop {
-                                time::sleep(Duration::from_secs(1)).await;
-                            }
+                            std::future::pending().await
                         }
                     };
 
@@ -499,9 +495,8 @@ impl Deduplicator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use rand::seq::index;
-
+    use std::time::Duration;
     use zebra::vector::Vector;
 
     #[test]
