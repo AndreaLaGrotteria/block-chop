@@ -16,32 +16,41 @@ use talk::{
         Identity,
     },
     net::SessionConnector,
-    sync::{fuse::Fuse, promise::Promise},
+    sync::{board::Board, fuse::Fuse, promise::Promise},
 };
 use tokio::{
     sync::mpsc::{self, Receiver as MpscReceiver},
-    task,
-    time::{self, timeout},
+    task, time,
 };
+
+type MultiSignatureOutlet = MpscReceiver<(Identity, MultiSignature)>;
+
+struct WitnessCollector<'a> {
+    membership: &'a Membership,
+    shards: Vec<(Identity, MultiSignature)>,
+    outlet: MultiSignatureOutlet,
+}
 
 impl Broker {
     pub(in crate::broker::broker) async fn broadcast_batch(
-        batch: &mut Batch,
-        compressed_batch: CompressedBatch,
         worker: Identity,
         sequence: u64,
+        batch: &mut Batch,
+        compressed_batch: CompressedBatch,
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         settings: BrokerSettings,
     ) -> (u64, Certificate) {
-        let witness_root = batch.entries.root();
+        // Preprocess arguments
+
+        let compressed_batch = Arc::new(compressed_batch);
+
+        // Shuffle servers
 
         let mut servers = membership.servers().values().collect::<Vec<_>>();
         servers.shuffle(&mut thread_rng());
 
-        let compressed_batch = Arc::new(compressed_batch);
-
-        let fuse = Fuse::new();
+        // Setup channels, `Board`s and and `Fuse`
 
         let (witness_shard_sender, witness_shard_receiver) =
             mpsc::channel::<(Identity, MultiSignature)>(membership.servers().len());
@@ -49,9 +58,14 @@ impl Broker {
         let (delivery_shard_sender, mut delivery_shard_receiver) =
             mpsc::channel::<(Identity, DeliveryShard)>(membership.servers().len());
 
+        let (witness_board, witness_poster) = Board::blank();
+
+        let fuse = Fuse::new();
+
+        // Spawn submissions
+
         let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
-        let mut witness_solvers = Vec::with_capacity(membership.servers().len());
-        let mut submit_handles = Vec::with_capacity(membership.servers().len());
+        let mut submit_tasks = Vec::with_capacity(membership.servers().len());
 
         for (index, server) in servers.into_iter().enumerate() {
             let verify_promise = if index < membership.plurality() {
@@ -67,34 +81,29 @@ impl Broker {
                 Promise::solved(false)
             };
 
-            let (witness_promise, witness_solver) = Promise::pending();
-            witness_solvers.push(witness_solver);
-
             let settings = settings.clone();
             let connector = connector.clone();
             let server = server.clone();
             let compressed_batch = compressed_batch.clone();
             let witness_shard_sender = witness_shard_sender.clone();
             let delivery_shard_sender = delivery_shard_sender.clone();
+            let root = batch.entries.root();
 
-            let handle = fuse.spawn(async move {
-                Broker::submit_batch(
-                    worker,
-                    sequence,
-                    witness_root,
-                    &compressed_batch,
-                    &server,
-                    connector,
-                    verify_promise,
-                    witness_shard_sender,
-                    witness_promise,
-                    delivery_shard_sender,
-                    settings,
-                )
-                .await
-            });
+            let handle = fuse.spawn(Broker::submit_batch(
+                worker,
+                sequence,
+                root,
+                compressed_batch,
+                server,
+                connector,
+                verify_promise,
+                witness_shard_sender,
+                witness_board.clone(),
+                delivery_shard_sender,
+                settings,
+            ));
 
-            submit_handles.push(handle);
+            submit_tasks.push(handle);
         }
 
         let mut witness_collector =
@@ -116,10 +125,7 @@ impl Broker {
         }
 
         let witness = witness_collector.finalize();
-
-        witness_solvers
-            .into_iter()
-            .for_each(|solver| solver.solve(witness.clone()));
+        witness_poster.post(witness);
 
         let (batch_height, shards) =
             Self::collect_deliveries(batch, membership.as_ref(), &mut delivery_shard_receiver)
@@ -139,8 +145,8 @@ impl Broker {
         task::spawn(async move {
             let _fuse = fuse;
 
-            let submissions = join_all(submit_handles.into_iter());
-            match timeout(settings.totality_timeout, submissions).await {
+            let submissions = join_all(submit_tasks.into_iter());
+            match time::timeout(settings.totality_timeout, submissions).await {
                 Ok(_) => (),
                 Err(_) => warn!("Timeout! Could not finish submitting batch to all servers!"),
             }
@@ -238,18 +244,12 @@ impl Broker {
     }
 }
 
-struct WitnessCollector<'a> {
-    membership: &'a Membership,
-    shards: Vec<(Identity, MultiSignature)>,
-    receiver: MpscReceiver<(Identity, MultiSignature)>,
-}
-
 impl<'a> WitnessCollector<'a> {
     fn new(membership: &'a Membership, receiver: MpscReceiver<(Identity, MultiSignature)>) -> Self {
         WitnessCollector {
             membership,
             shards: Vec::new(),
-            receiver,
+            outlet: receiver,
         }
     }
 
@@ -261,7 +261,7 @@ impl<'a> WitnessCollector<'a> {
         while !self.succeeded() {
             // A copy of `update_inlet` is held by `orchestrate`.
             // As a result, `update_outlet.recv()` cannot return `None`.
-            match self.receiver.recv().await {
+            match self.outlet.recv().await {
                 Some(shard) => self.shards.push(shard),
                 None => unreachable!(), // Double check that this is indeed unreachable
             }
@@ -359,10 +359,10 @@ mod tests {
         let membership = Arc::new(membership);
 
         let (height, certificate) = Broker::broadcast_batch(
-            &mut batch,
-            compressed_batch,
             broker.keycard().identity(),
             0,
+            &mut batch,
+            compressed_batch,
             membership.clone(),
             session_connector,
             BrokerSettings {
@@ -430,10 +430,10 @@ mod tests {
         let membership = Arc::new(membership);
 
         let (height, certificate) = Broker::broadcast_batch(
-            &mut batch,
-            compressed_batch,
             broker.keycard().identity(),
             0,
+            &mut batch,
+            compressed_batch,
             membership.clone(),
             session_connector,
             BrokerSettings {

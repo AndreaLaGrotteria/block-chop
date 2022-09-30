@@ -12,7 +12,7 @@ use talk::{
         Identity, KeyCard,
     },
     net::SessionConnector,
-    sync::promise::Promise,
+    sync::{board::Board, promise::Promise},
 };
 use tokio::sync::mpsc::Sender as MpscSender;
 
@@ -34,16 +34,16 @@ impl Broker {
         worker: Identity,
         sequence: u64,
         root: Hash,
-        compressed_batch: &CompressedBatch,
-        server: &KeyCard,
+        compressed_batch: Arc<CompressedBatch>,
+        server: KeyCard,
         connector: Arc<SessionConnector>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
-        mut witness: Promise<Certificate>,
+        mut witness: Board<Certificate>,
         delivery_shard_inlet: DeliveryShardInlet,
         settings: BrokerSettings,
     ) {
-        let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+        let raw_batch = bincode::serialize(compressed_batch.as_ref()).unwrap();
         let mut witness_shard_inlet = Some(witness_shard_inlet);
         let mut delivery_shard_inlet = Some(delivery_shard_inlet);
 
@@ -77,7 +77,7 @@ impl Broker {
         connector: &SessionConnector,
         verify: &mut Promise<bool>,
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
-        witness: &mut Promise<Certificate>,
+        witness: &mut Board<Certificate>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
     ) -> Result<(), Top<TrySubmitError>> {
         debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
