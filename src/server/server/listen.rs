@@ -98,7 +98,7 @@ impl Server {
         // Receive broker request
 
         let (sequence, root) = session
-            .receive_plain::<(u64, Hash)>()
+            .receive::<(u64, Hash)>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -113,7 +113,7 @@ impl Server {
             .spot(here!())?;
 
         let verify = session
-            .receive_raw::<bool>()
+            .receive::<bool>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -217,7 +217,7 @@ impl Server {
         // Receive and verify the witness certificate
 
         let witness = session
-            .receive_raw::<Certificate>()
+            .receive::<Certificate>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -262,7 +262,7 @@ impl Server {
         // Send `delivery_shard` to the broker and end the session
 
         session
-            .send_plain::<DeliveryShard>(&delivery_shard)
+            .send::<DeliveryShard>(&delivery_shard)
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -319,9 +319,9 @@ mod tests {
         for (identity, session) in sessions[0..2].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            session.send_plain(&(0u64, root)).await.unwrap();
+            session.send(&(0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send_raw(&true).await.unwrap();
+            session.send(&true).await.unwrap();
 
             let response = session
                 .receive::<Option<MultiSignature>>()
@@ -335,9 +335,9 @@ mod tests {
         for (_, session) in sessions[2..].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            session.send_plain(&(0u64, root)).await.unwrap();
+            session.send(&(0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send_raw(&false).await.unwrap();
+            session.send(&false).await.unwrap();
 
             session.receive::<Option<MultiSignature>>().await.unwrap();
         }
@@ -358,12 +358,12 @@ mod tests {
         let certificate = Certificate::aggregate_plurality(&membership, responses);
 
         for (_, session) in sessions.iter_mut() {
-            session.send_raw(&certificate).await.unwrap();
+            session.send(&certificate).await.unwrap();
         }
 
         let mut responses = Vec::new();
         for (identity, session) in sessions.iter_mut() {
-            let response = session.receive_plain::<DeliveryShard>().await.unwrap();
+            let response = session.receive::<DeliveryShard>().await.unwrap();
 
             responses.push((*identity, response));
         }

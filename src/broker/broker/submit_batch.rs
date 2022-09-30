@@ -16,17 +16,17 @@ use talk::{
 };
 use tokio::sync::oneshot::Sender as OneshotSender;
 
+type MultiSignatureInlet = OneshotSender<(Identity, MultiSignature)>;
+type DeliveryShardInlet = OneshotSender<(Identity, DeliveryShard)>;
+
 #[derive(Doom)]
 enum TrySubmitError {
-    #[doom(description("Failed to connect."))]
+    #[doom(description("Failed to connect"))]
     ConnectFailed,
     #[doom(description("Connection error"))]
     ConnectionError,
-    #[doom(description("Failed to serialize: {}", source))]
-    #[doom(wrap(serialize_failed))]
-    SerializeFailed { source: bincode::Error },
-    #[doom(description("Witness error: server multisigned an unexpected batch root"))]
-    WitnessError,
+    #[doom(description("Witness shard invalid"))]
+    InvalidWitnessShard,
 }
 
 impl Broker {
@@ -38,34 +38,30 @@ impl Broker {
         server: &KeyCard,
         connector: Arc<SessionConnector>,
         mut verify: Promise<bool>,
-        mut witness_shard_sender: Option<OneshotSender<(Identity, MultiSignature)>>,
+        mut witness_shard_inlet: Option<MultiSignatureInlet>,
         mut witness: Promise<Certificate>,
-        mut delivery_shard_sender: Option<OneshotSender<(Identity, DeliveryShard)>>,
+        mut delivery_shard_inlet: Option<DeliveryShardInlet>,
         settings: BrokerSettings,
     ) {
+        let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+
         let mut agent = settings.submission_schedule.agent();
 
-        loop {
-            match Broker::try_submit_batch(
-                worker,
-                sequence,
-                root,
-                compressed_batch,
-                &server,
-                connector.as_ref(),
-                &mut verify,
-                &mut witness_shard_sender,
-                &mut witness,
-                &mut delivery_shard_sender,
-            )
-            .await
-            {
-                Ok(_) => break,
-                Err(error) => {
-                    warn!("{:?}", error);
-                }
-            }
-
+        while let Err(error) = Broker::try_submit_batch(
+            worker,
+            sequence,
+            root,
+            raw_batch.as_slice(),
+            &server,
+            connector.as_ref(),
+            &mut verify,
+            &mut witness_shard_inlet,
+            &mut witness,
+            &mut delivery_shard_inlet,
+        )
+        .await
+        {
+            warn!("{:?}", error);
             agent.step().await;
         }
     }
@@ -74,13 +70,13 @@ impl Broker {
         worker: Identity,
         sequence: u64,
         root: Hash,
-        compressed_batch: &CompressedBatch,
+        raw_batch: &[u8],
         server: &KeyCard,
         connector: &SessionConnector,
         verify: &mut Promise<bool>,
-        witness_shard_sender: &mut Option<OneshotSender<(Identity, MultiSignature)>>,
+        witness_shard_inlet: &mut Option<MultiSignatureInlet>,
         witness: &mut Promise<Certificate>,
-        delivery_shard_sender: &mut Option<OneshotSender<(Identity, DeliveryShard)>>,
+        delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
     ) -> Result<(), Top<TrySubmitError>> {
         debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
 
@@ -90,14 +86,9 @@ impl Broker {
             .pot(TrySubmitError::ConnectFailed, here!())?;
 
         session
-            .send_plain(&(sequence, root))
+            .send(&(sequence, root))
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
-
-        let raw_batch = bincode::serialize(&compressed_batch)
-            .map_err(TrySubmitError::serialize_failed)
-            .map_err(Doom::into_top)
-            .spot(here!())?;
 
         session
             .send_raw_bytes(&raw_batch)
@@ -112,12 +103,11 @@ impl Broker {
             std::future::pending().await
         };
 
-        if witness_shard_sender.is_some() && // Otherwise, either i) not even a verifier or backup verifier, or ii) have already verified and sent the witness shard
-            verify
-        // Otherwise, not needed to verify
+        if verify && witness_shard_inlet.is_some()
+        // Otherwise either i) not needed to verify, or ii) have already verified and sent the witness shard
         {
             session
-                .send_raw(&true)
+                .send(&true)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -126,7 +116,7 @@ impl Broker {
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
-            let witness_shard_sender = witness_shard_sender.take().unwrap();
+            let witness_shard_inlet = witness_shard_inlet.take().unwrap();
 
             if let Some(witness_shard) = witness_shard {
                 witness_shard
@@ -138,13 +128,13 @@ impl Broker {
                             root: &root,
                         },
                     )
-                    .pot(TrySubmitError::WitnessError, here!())?;
+                    .pot(TrySubmitError::InvalidWitnessShard, here!())?;
 
-                let _ = witness_shard_sender.send((server.identity(), witness_shard));
+                let _ = witness_shard_inlet.send((server.identity(), witness_shard));
             }
         } else {
             session
-                .send_raw(&false)
+                .send(&false)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -152,6 +142,8 @@ impl Broker {
                 .receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
+
+            witness_shard_inlet.take();
         }
 
         let witness = if let Some(witness) = witness.as_ref().await {
@@ -163,7 +155,7 @@ impl Broker {
         };
 
         session
-            .send_raw(witness)
+            .send(witness)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -175,11 +167,11 @@ impl Broker {
         // of amendments by looking for a plurality of equal elements (one of which must
         // come from a correct server)
         let delivery_shard = session
-            .receive_plain::<DeliveryShard>()
+            .receive::<DeliveryShard>()
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        let _ = delivery_shard_sender
+        let _ = delivery_shard_inlet
             .take()
             .unwrap()
             .send((server.identity(), delivery_shard));
