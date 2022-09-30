@@ -48,7 +48,7 @@ impl Broker {
 
         debug!("Got height and delivery certificate!");
 
-        Broker::deliver(batch, height, delivery_certificate, sender.as_ref()).await;
+        Broker::disseminate_deliveries(batch, height, delivery_certificate, sender.as_ref()).await;
     }
 }
 

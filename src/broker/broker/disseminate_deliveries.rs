@@ -6,7 +6,7 @@ use crate::{
 use talk::net::DatagramSender;
 
 impl Broker {
-    pub(in crate::broker::broker) async fn deliver(
+    pub(in crate::broker::broker) async fn disseminate_deliveries(
         batch: Batch,
         height: u64,
         certificate: Certificate,
@@ -14,7 +14,7 @@ impl Broker {
     ) {
         let root = batch.entries.root();
 
-        let responses = batch
+        let deliveries = batch
             .entries
             .items()
             .into_iter()
@@ -36,8 +36,8 @@ impl Broker {
                 (address, response)
             });
 
-        for (address, response) in responses {
-            sender.send(address, response).await;
+        for (address, delivery) in deliveries {
+            sender.send(address, delivery).await;
         }
     }
 }
