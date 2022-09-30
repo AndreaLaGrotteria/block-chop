@@ -33,7 +33,7 @@ impl Broker {
         let compressed_batch =
             Broker::reduce_batch(directory, &mut batch, reduction_outlet, &settings).await;
 
-        let (height, delivery_certificate) = Broker::broadcast(
+        let (height, delivery_certificate) = Broker::broadcast_batch(
             &mut batch,
             compressed_batch,
             worker,

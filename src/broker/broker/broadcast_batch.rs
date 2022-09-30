@@ -31,7 +31,7 @@ enum WitnessingRole {
 }
 
 impl Broker {
-    pub(in crate::broker::broker) async fn broadcast(
+    pub(in crate::broker::broker) async fn broadcast_batch(
         batch: &mut Batch,
         compressed_batch: CompressedBatch,
         worker: Identity,
@@ -423,7 +423,7 @@ mod tests {
 
         let membership = Arc::new(membership);
 
-        let (height, certificate) = Broker::broadcast(
+        let (height, certificate) = Broker::broadcast_batch(
             &mut batch,
             compressed_batch,
             broker.keycard().identity(),
@@ -492,7 +492,7 @@ mod tests {
 
         let membership = Arc::new(membership);
 
-        let (height, certificate) = Broker::broadcast(
+        let (height, certificate) = Broker::broadcast_batch(
             &mut batch,
             compressed_batch,
             broker.keycard().identity(),
