@@ -80,6 +80,8 @@ impl Broker {
     ) -> Result<(), Top<TrySubmitError>> {
         debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
 
+        // Send request
+
         let mut session = connector
             .connect(server.identity())
             .await
@@ -103,9 +105,13 @@ impl Broker {
             std::future::pending().await
         };
 
-        if verify && witness_shard_inlet.is_some()
-        // Otherwise either i) not needed to verify, or ii) have already verified and sent the witness shard
-        {
+        // Request and process witness shard
+
+        // Remark: if `witness_shard_inlet.is_none()`, then the batch was
+        // successfully conveyed to the server in a previous attempt: a
+        // (possibly invalid yet authentic) reply to the witness shard
+        // request has already been processed.
+        if verify && witness_shard_inlet.is_some() {
             session
                 .send(&true)
                 .await
@@ -118,6 +124,10 @@ impl Broker {
 
             let witness_shard_inlet = witness_shard_inlet.take().unwrap();
 
+            // Remark: `witness_shard` could be `None` even if `server`
+            // is correct. If so, `server` previously received a witness
+            // produced by the local broker. If so, no additional witness
+            // shard is required for the submission to succeed.
             if let Some(witness_shard) = witness_shard {
                 witness_shard
                     .verify(
@@ -146,6 +156,8 @@ impl Broker {
             witness_shard_inlet.take();
         }
 
+        // Send witness
+
         let witness = if let Some(witness) = witness.as_ref().await {
             witness
         } else {
@@ -159,13 +171,8 @@ impl Broker {
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        // Here we must authenticate. Alternatively we could apply the shard's amendments
-        // to the current batch, calculate the new root, and verify the multisignature
-        // against it. For this we would need to clone the batch entries (costly) as the
-        // amendments might be wrong (injected message). It's easier to just authenticate
-        // and let the aggregation method (Broker::broadcast) figure out the correct set
-        // of amendments by looking for a plurality of equal elements (one of which must
-        // come from a correct server)
+        // Collect delivery shard
+
         let delivery_shard = session
             .receive::<DeliveryShard>()
             .await
