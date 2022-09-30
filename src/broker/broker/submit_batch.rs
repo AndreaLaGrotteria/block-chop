@@ -14,7 +14,7 @@ use talk::{
     net::SessionConnector,
     sync::promise::Promise,
 };
-use tokio::sync::{oneshot::Sender as OneshotSender, watch::Receiver as WatchReceiver};
+use tokio::sync::oneshot::Sender as OneshotSender;
 
 #[derive(Doom)]
 enum TrySubmitError {
@@ -39,7 +39,7 @@ impl Broker {
         connector: Arc<SessionConnector>,
         mut verify: Promise<bool>,
         mut witness_shard_sender: Option<OneshotSender<(Identity, MultiSignature)>>,
-        witness_receiver: WatchReceiver<Option<Certificate>>,
+        mut witness: Promise<Certificate>,
         mut delivery_shard_sender: Option<OneshotSender<(Identity, DeliveryShard)>>,
         settings: BrokerSettings,
     ) {
@@ -55,7 +55,7 @@ impl Broker {
                 connector.as_ref(),
                 &mut verify,
                 &mut witness_shard_sender,
-                witness_receiver.clone(),
+                &mut witness,
                 &mut delivery_shard_sender,
             )
             .await
@@ -79,7 +79,7 @@ impl Broker {
         connector: &SessionConnector,
         verify: &mut Promise<bool>,
         witness_shard_sender: &mut Option<OneshotSender<(Identity, MultiSignature)>>,
-        mut witness_receiver: WatchReceiver<Option<Certificate>>,
+        witness: &mut Promise<Certificate>,
         delivery_shard_sender: &mut Option<OneshotSender<(Identity, DeliveryShard)>>,
     ) -> Result<(), Top<TrySubmitError>> {
         debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
@@ -154,18 +154,16 @@ impl Broker {
                 .pot(TrySubmitError::ConnectionError, here!())?;
         }
 
-        // If `changed()` returns an `Err`, this means that `witness_sender` was
-        // dropped. However, before being dropped, `witness_sender` always sends
-        // the witness, which means that `witness` will be available both if
-        // `witness_sender` returns `Ok` (the witness was sent and the sender
-        // is still alive) or `Err` (the witness was sent and the sender was
-        // dropped).
-        let _ = witness_receiver.changed().await;
-
-        let witness = witness_receiver.borrow().clone().unwrap();
+        let witness = if let Some(witness) = witness.as_ref().await {
+            witness
+        } else {
+            // `Broker` has dropped. Idle waiting for task to be cancelled.
+            // (Note that `return`ing something meaningful is not possible)
+            std::future::pending().await
+        };
 
         session
-            .send_raw(&witness)
+            .send_raw(witness)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 

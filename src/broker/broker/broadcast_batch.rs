@@ -16,10 +16,7 @@ use talk::{
     sync::{fuse::Fuse, promise::Promise},
 };
 use tokio::{
-    sync::{
-        oneshot::{self, Receiver as OneshotReceiver},
-        watch,
-    },
+    sync::oneshot::{self, Receiver as OneshotReceiver},
     task,
     time::{self, timeout},
 };
@@ -45,14 +42,13 @@ impl Broker {
         let mut servers = membership.servers().values().collect::<Vec<_>>();
         servers.shuffle(&mut thread_rng());
 
-        let (witness_sender, witness_receiver) = watch::channel::<Option<Certificate>>(None);
-
         let compressed_batch = Arc::new(compressed_batch);
 
         let fuse = Fuse::new();
 
         let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
         let mut witness_shard_receivers = Vec::with_capacity(membership.servers().len());
+        let mut witness_solvers = Vec::with_capacity(membership.servers().len());
         let mut delivery_shard_receivers = Vec::with_capacity(membership.servers().len());
         let mut submit_handles = Vec::with_capacity(membership.servers().len());
 
@@ -65,7 +61,7 @@ impl Broker {
                 WitnessingRole::Idle
             };
 
-            let promise = match role {
+            let verify_promise = match role {
                 WitnessingRole::Verifier => Promise::solved(true),
                 WitnessingRole::Idle => Promise::solved(false),
                 WitnessingRole::Backup => {
@@ -74,6 +70,9 @@ impl Broker {
                     promise
                 }
             };
+
+            let (witness_promise, witness_solver) = Promise::pending();
+            witness_solvers.push(witness_solver);
 
             let (witness_shard_sender, witness_shard_receiver) =
                 oneshot::channel::<(Identity, MultiSignature)>();
@@ -92,7 +91,6 @@ impl Broker {
 
             let settings = settings.clone();
             let connector = connector.clone();
-            let witness_receiver = witness_receiver.clone();
             let server = server.clone();
             let compressed_batch = compressed_batch.clone();
 
@@ -104,9 +102,9 @@ impl Broker {
                     &compressed_batch,
                     &server,
                     connector,
-                    promise,
+                    verify_promise,
                     Some(witness_shard_sender),
-                    witness_receiver,
+                    witness_promise,
                     Some(delivery_shard_sender),
                     settings,
                 )
@@ -135,7 +133,9 @@ impl Broker {
         }
 
         let witness = witness_collector.finalize();
-        let _ = witness_sender.send(Some(witness));
+        witness_solvers
+            .into_iter()
+            .for_each(|solver| solver.solve(witness.clone()));
 
         let mut delivery_collector =
             DeliveryCollector::new(batch, membership.clone(), delivery_shard_receivers);
