@@ -12,7 +12,7 @@ use talk::{
 use tokio::sync::{broadcast::Receiver as BroadcastReceiver, mpsc::Sender as MpscSender};
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
-type WorkerInlet = MpscSender<Identity>;
+type IdentityInlet = MpscSender<Identity>;
 
 impl Broker {
     pub(in crate::broker::broker) async fn manage_batch(
@@ -25,7 +25,7 @@ impl Broker {
         reduction_outlet: ReductionOutlet,
         sender: Arc<DatagramSender<Response>>,
         connector: Arc<SessionConnector>,
-        worker_inlet: WorkerInlet,
+        worker_recycler: IdentityInlet,
         settings: BrokerSettings,
     ) {
         let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
@@ -44,7 +44,7 @@ impl Broker {
         )
         .await;
 
-        worker_inlet.send(worker).await.unwrap();
+        worker_recycler.send(worker).await.unwrap();
 
         debug!("Got height and delivery certificate!");
 

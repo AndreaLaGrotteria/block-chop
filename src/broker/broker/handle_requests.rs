@@ -1,6 +1,6 @@
 use crate::{
     broadcast::Entry,
-    broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission},
+    broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission, Worker},
     crypto::records::Height as HeightRecord,
     debug, info,
     system::{Directory, Membership},
@@ -9,7 +9,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::sign::Signature, Identity},
-    net::{DatagramSender, SessionConnector},
+    net::DatagramSender,
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -31,25 +31,18 @@ enum FilterError {
 }
 
 impl Broker {
-    pub(in crate::broker::broker) async fn handle_requests<I>(
+    pub(in crate::broker::broker) async fn handle_requests(
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         mut handle_outlet: RequestOutlet,
         sender: Arc<DatagramSender<Response>>,
-        connectors: I,
+        mut workers: HashMap<Identity, Worker>,
         settings: BrokerSettings,
-    ) where
-        I: IntoIterator<Item = (Identity, SessionConnector)>,
-    {
-        let mut workers = connectors
-            .into_iter()
-            .map(|(identity, connector)| (identity, (Arc::new(connector), 0u64)))
-            .collect::<HashMap<_, _>>();
-
-        let (worker_inlet, mut worker_outlet) = mpsc::channel(workers.len());
+    ) {
+        let (worker_recycler, mut available_workers) = mpsc::channel(workers.len());
 
         for identity in workers.keys().copied() {
-            worker_inlet.send(identity).await.unwrap();
+            worker_recycler.send(identity).await.unwrap();
         }
 
         let mut top_record = None;
@@ -117,28 +110,29 @@ impl Broker {
             if pool.len() >= settings.pool_capacity
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
-                info!("Flushing pool into a batch ({} entries).", pool.len());
+                if let Ok(identity) = available_workers.try_recv() {
+                    info!("Flushing pool into a batch ({} entries).", pool.len());
 
-                next_flush = None;
+                    next_flush = None;
 
-                let identity = worker_outlet.recv().await.unwrap();
-                let (connector, sequence) = workers.get_mut(&identity).unwrap();
+                    let worker = workers.get_mut(&identity).unwrap();
 
-                fuse.spawn(Broker::manage_batch(
-                    identity,
-                    *sequence,
-                    membership.clone(),
-                    directory.clone(),
-                    mem::take(&mut pool),
-                    top_record.clone(),
-                    reduction_inlet.subscribe(),
-                    sender.clone(),
-                    connector.clone(),
-                    worker_inlet.clone(),
-                    settings.clone(),
-                ));
+                    fuse.spawn(Broker::manage_batch(
+                        identity,
+                        worker.next_sequence,
+                        membership.clone(),
+                        directory.clone(),
+                        mem::take(&mut pool),
+                        top_record.clone(),
+                        reduction_inlet.subscribe(),
+                        sender.clone(),
+                        worker.connector.clone(),
+                        worker_recycler.clone(),
+                        settings.clone(),
+                    ));
 
-                *sequence += 1;
+                    worker.next_sequence += 1;
+                }
             }
         }
     }

@@ -1,10 +1,10 @@
 use crate::{
-    broker::{BrokerSettings, Response},
+    broker::{BrokerSettings, Response, Worker},
     system::Membership,
     Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::{net::ToSocketAddrs, sync::Arc};
+use std::{collections::HashMap, net::ToSocketAddrs, sync::Arc};
 use talk::{
     crypto::Identity,
     net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
@@ -39,7 +39,21 @@ impl Broker {
 
         let membership = Arc::new(membership);
         let directory = Arc::new(directory);
-        let connectors = connectors.into_iter().collect::<Vec<_>>();
+
+        // Setup workers
+
+        let workers = connectors
+            .into_iter()
+            .map(|(identity, connector)| {
+                (
+                    identity,
+                    Worker {
+                        connector: Arc::new(connector),
+                        next_sequence: 0,
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         // Bind `DatagramDispatcher`
 
@@ -87,7 +101,7 @@ impl Broker {
             directory.clone(),
             handle_outlet,
             sender.clone(),
-            connectors,
+            workers,
             settings.clone(),
         ));
 
