@@ -85,7 +85,7 @@ impl Broker {
                 let compressed_batch = compressed_batch.clone();
 
                 let handle = fuse.spawn(async move {
-                    Broker::submit(
+                    Broker::submit_batch(
                         &compressed_batch,
                         worker,
                         sequence,

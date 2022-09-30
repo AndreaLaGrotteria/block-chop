@@ -29,7 +29,7 @@ enum TrySubmitError {
 }
 
 impl Broker {
-    pub(in crate::broker::broker) async fn submit(
+    pub(in crate::broker::broker) async fn submit_batch(
         compressed_batch: &CompressedBatch,
         worker: Identity,
         sequence: u64,
