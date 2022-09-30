@@ -13,7 +13,7 @@ use std::{collections::HashMap, sync::Arc};
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
     net::SessionConnector,
-    sync::fuse::Fuse,
+    sync::{fuse::Fuse, promise::Promise},
 };
 use tokio::{
     sync::{
@@ -51,101 +51,84 @@ impl Broker {
 
         let fuse = Fuse::new();
 
-        let (verify_senders, receivers): (Vec<_>, Vec<_>) = servers
-            .into_iter()
-            .enumerate()
-            .map(|(index, server)| {
-                if index < membership.plurality() {
-                    (server, WitnessingRole::Verifier)
-                } else if index < membership.quorum() {
-                    (server, WitnessingRole::Backup)
-                } else {
-                    (server, WitnessingRole::Idle)
+        let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
+        let mut witness_shard_receivers = Vec::with_capacity(membership.servers().len());
+        let mut delivery_shard_receivers = Vec::with_capacity(membership.servers().len());
+        let mut submit_handles = Vec::with_capacity(membership.servers().len());
+
+        for (index, server) in servers.into_iter().enumerate() {
+            let role = if index < membership.plurality() {
+                WitnessingRole::Verifier
+            } else if index < membership.quorum() {
+                WitnessingRole::Backup
+            } else {
+                WitnessingRole::Idle
+            };
+
+            let promise = match role {
+                WitnessingRole::Verifier => Promise::solved(true),
+                WitnessingRole::Idle => Promise::solved(false),
+                WitnessingRole::Backup => {
+                    let (promise, solver) = Promise::pending();
+                    backup_verifiers.push(solver);
+                    promise
                 }
-            })
-            .map(|(server, role)| {
-                let (verify_sender, verify_receiver) = watch::channel::<bool>(false);
+            };
 
-                let (witness_shard_sender, witness_shard_receiver) =
-                    oneshot::channel::<(Identity, MultiSignature)>();
-                let (witness_shard_sender, witness_shard_receiver) = match role {
-                    WitnessingRole::Verifier | WitnessingRole::Backup => {
-                        (Some(witness_shard_sender), Some(witness_shard_receiver))
-                    }
-                    WitnessingRole::Idle => (None, None),
-                };
+            let (witness_shard_sender, witness_shard_receiver) =
+                oneshot::channel::<(Identity, MultiSignature)>();
 
-                let (delivery_shard_sender, delivery_shard_receiver) =
-                    oneshot::channel::<(Identity, DeliveryShard)>();
+            match role {
+                WitnessingRole::Verifier | WitnessingRole::Backup => {
+                    witness_shard_receivers.push(witness_shard_receiver);
+                }
+                _ => (),
+            };
 
-                let settings = settings.clone();
-                let connector = connector.clone();
-                let witness_receiver = witness_receiver.clone();
-                let server = server.clone();
-                let compressed_batch = compressed_batch.clone();
+            let (delivery_shard_sender, delivery_shard_receiver) =
+                oneshot::channel::<(Identity, DeliveryShard)>();
 
-                let handle = fuse.spawn(async move {
-                    Broker::submit_batch(
-                        &compressed_batch,
-                        worker,
-                        sequence,
-                        witness_root,
-                        &server,
-                        connector,
-                        verify_receiver,
-                        witness_shard_sender,
-                        witness_receiver,
-                        Some(delivery_shard_sender),
-                        settings,
-                    )
-                    .await
-                });
+            delivery_shard_receivers.push(delivery_shard_receiver);
 
-                (
-                    (role, verify_sender),
-                    (witness_shard_receiver, delivery_shard_receiver, handle),
+            let settings = settings.clone();
+            let connector = connector.clone();
+            let witness_receiver = witness_receiver.clone();
+            let server = server.clone();
+            let compressed_batch = compressed_batch.clone();
+
+            let handle = fuse.spawn(async move {
+                Broker::submit_batch(
+                    worker,
+                    sequence,
+                    witness_root,
+                    &compressed_batch,
+                    &server,
+                    connector,
+                    promise,
+                    Some(witness_shard_sender),
+                    witness_receiver,
+                    Some(delivery_shard_sender),
+                    settings,
                 )
-            })
-            .unzip();
+                .await
+            });
 
-        let (receivers, handles): (Vec<_>, Vec<_>) =
-            receivers.into_iter().map(|(a, b, c)| ((a, b), c)).unzip();
-
-        let (witness_shard_receivers, delivery_shard_receivers): (Vec<_>, Vec<_>) =
-            receivers.into_iter().unzip();
-
-        let witness_shard_receivers = witness_shard_receivers
-            .into_iter()
-            .flat_map(|receiver| receiver)
-            .collect::<Vec<_>>();
+            submit_handles.push(handle);
+        }
 
         let mut witness_collector =
             WitnessCollector::new(membership.clone(), witness_shard_receivers);
 
-        verify_senders
-            .iter()
-            .for_each(|(role, verify_sender)| match role {
-                WitnessingRole::Verifier => verify_sender.send(true).unwrap(),
-                WitnessingRole::Idle => verify_sender.send(false).unwrap(),
-                _ => (),
-            });
-
         match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
             Ok(_) => {
-                verify_senders
-                    .iter()
-                    .for_each(|(role, verify_sender)| match role {
-                        WitnessingRole::Backup => verify_sender.send(false).unwrap(),
-                        _ => (),
-                    });
+                backup_verifiers
+                    .into_iter()
+                    .for_each(|solver| solver.solve(false));
             }
             Err(_) => {
-                verify_senders
-                    .iter()
-                    .for_each(|(role, verify_sender)| match role {
-                        WitnessingRole::Backup => verify_sender.send(true).unwrap(),
-                        _ => (),
-                    });
+                backup_verifiers
+                    .into_iter()
+                    .for_each(|solver| solver.solve(true));
 
                 witness_collector.progress().await
             }
@@ -166,7 +149,7 @@ impl Broker {
         task::spawn(async move {
             let _fuse = fuse;
 
-            let submissions = join_all(handles.into_iter());
+            let submissions = join_all(submit_handles.into_iter());
             match timeout(settings.totality_timeout, submissions).await {
                 Ok(_) => (),
                 Err(_) => warn!("Timeout! Could not finish submitting batch to all servers!"),

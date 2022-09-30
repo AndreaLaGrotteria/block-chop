@@ -12,6 +12,7 @@ use talk::{
         Identity, KeyCard,
     },
     net::SessionConnector,
+    sync::promise::Promise,
 };
 use tokio::sync::{oneshot::Sender as OneshotSender, watch::Receiver as WatchReceiver};
 
@@ -30,13 +31,13 @@ enum TrySubmitError {
 
 impl Broker {
     pub(in crate::broker::broker) async fn submit_batch(
-        compressed_batch: &CompressedBatch,
         worker: Identity,
         sequence: u64,
-        expected_root: Hash,
+        root: Hash,
+        compressed_batch: &CompressedBatch,
         server: &KeyCard,
         connector: Arc<SessionConnector>,
-        verify_receiver: WatchReceiver<bool>,
+        mut verify: Promise<bool>,
         mut witness_shard_sender: Option<OneshotSender<(Identity, MultiSignature)>>,
         witness_receiver: WatchReceiver<Option<Certificate>>,
         mut delivery_shard_sender: Option<OneshotSender<(Identity, DeliveryShard)>>,
@@ -46,23 +47,23 @@ impl Broker {
 
         loop {
             match Broker::try_submit_batch(
-                compressed_batch,
                 worker,
                 sequence,
-                expected_root,
+                root,
+                compressed_batch,
                 &server,
                 connector.as_ref(),
-                verify_receiver.clone(),
+                &mut verify,
                 &mut witness_shard_sender,
                 witness_receiver.clone(),
                 &mut delivery_shard_sender,
             )
             .await
             {
+                Ok(_) => break,
                 Err(error) => {
                     warn!("{:?}", error);
                 }
-                Ok(_) => break,
             }
 
             agent.step().await;
@@ -70,13 +71,13 @@ impl Broker {
     }
 
     async fn try_submit_batch(
-        compressed_batch: &CompressedBatch,
         worker: Identity,
         sequence: u64,
-        expected_root: Hash,
+        root: Hash,
+        compressed_batch: &CompressedBatch,
         server: &KeyCard,
         connector: &SessionConnector,
-        mut verify_receiver: WatchReceiver<bool>,
+        verify: &mut Promise<bool>,
         witness_shard_sender: &mut Option<OneshotSender<(Identity, MultiSignature)>>,
         mut witness_receiver: WatchReceiver<Option<Certificate>>,
         delivery_shard_sender: &mut Option<OneshotSender<(Identity, DeliveryShard)>>,
@@ -89,7 +90,7 @@ impl Broker {
             .pot(TrySubmitError::ConnectFailed, here!())?;
 
         session
-            .send_plain(&(sequence, expected_root))
+            .send_plain(&(sequence, root))
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -103,9 +104,16 @@ impl Broker {
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        if witness_shard_sender.is_some()  // Otherwise, either i) not even a verifier or backup verifier, or ii) have already verified and sent the witness shard
-            && verify_receiver.changed().await.is_ok()  // Otherwise, submission process is over but must still push the batch and its witness
-            && *verify_receiver.borrow()
+        let verify = if let Some(verify) = verify.as_ref().await {
+            *verify
+        } else {
+            // `Broker` has dropped. Idle waiting for task to be cancelled.
+            // (Note that `return`ing something meaningful is not possible)
+            std::future::pending().await
+        };
+
+        if witness_shard_sender.is_some() && // Otherwise, either i) not even a verifier or backup verifier, or ii) have already verified and sent the witness shard
+            verify
         // Otherwise, not needed to verify
         {
             session
@@ -127,7 +135,7 @@ impl Broker {
                         &BatchWitness {
                             broker: &worker,
                             sequence: &sequence,
-                            root: &expected_root,
+                            root: &root,
                         },
                     )
                     .pot(TrySubmitError::WitnessError, here!())?;
