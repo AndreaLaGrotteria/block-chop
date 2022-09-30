@@ -11,7 +11,10 @@ use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
 use std::{collections::HashMap, sync::Arc};
 use talk::{
-    crypto::{primitives::multi::Signature as MultiSignature, Identity},
+    crypto::{
+        primitives::{hash::Hash, multi::Signature as MultiSignature},
+        Identity,
+    },
     net::SessionConnector,
     sync::{fuse::Fuse, promise::Promise},
 };
@@ -43,7 +46,7 @@ impl Broker {
         let (witness_shard_sender, witness_shard_receiver) =
             mpsc::channel::<(Identity, MultiSignature)>(membership.servers().len());
 
-        let (delivery_shard_sender, delivery_shard_receiver) =
+        let (delivery_shard_sender, mut delivery_shard_receiver) =
             mpsc::channel::<(Identity, DeliveryShard)>(membership.servers().len());
 
         let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
@@ -95,7 +98,7 @@ impl Broker {
         }
 
         let mut witness_collector =
-            WitnessCollector::new(membership.clone(), witness_shard_receiver);
+            WitnessCollector::new(membership.as_ref(), witness_shard_receiver);
 
         match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
             Ok(_) => {
@@ -113,16 +116,23 @@ impl Broker {
         }
 
         let witness = witness_collector.finalize();
+
         witness_solvers
             .into_iter()
             .for_each(|solver| solver.solve(witness.clone()));
 
-        let mut delivery_collector =
-            DeliveryCollector::new(batch, membership.clone(), delivery_shard_receiver);
+        let (batch_height, shards) =
+            Self::collect_deliveries(batch, membership.as_ref(), &mut delivery_shard_receiver)
+                .await;
 
-        delivery_collector.progress().await;
-
-        let (batch_height, certificate) = delivery_collector.finalize();
+        let certificate = Self::aggregate_deliveries(
+            batch.entries.root(),
+            batch_height,
+            shards,
+            membership.as_ref(),
+            &mut delivery_shard_receiver,
+        )
+        .await;
 
         batch.status = BatchStatus::Delivered;
 
@@ -138,19 +148,104 @@ impl Broker {
 
         (batch_height, certificate)
     }
+
+    async fn collect_deliveries(
+        batch: &mut Batch,
+        membership: &Membership,
+        receiver: &mut MpscReceiver<(Identity, DeliveryShard)>,
+    ) -> (u64, Vec<(Identity, MultiSignature)>) {
+        let mut shards = HashMap::new();
+
+        loop {
+            let (identity, shard) = receiver.recv().await.unwrap();
+
+            let entry = shards
+                .entry((shard.amendments.clone(), shard.height))
+                .or_insert(Vec::new());
+
+            entry.push((identity, shard.multisignature));
+
+            if entry.len() >= membership.plurality() {
+                let shards = entry.clone();
+
+                for amendment in shard.amendments.iter() {
+                    match amendment {
+                        Amendment::Nudge { id, sequence } => {
+                            let index = batch
+                                .submissions
+                                .binary_search_by(|probe| probe.entry.id.cmp(id))
+                                .unwrap();
+
+                            let mut entry = batch.entries.items()[index].clone().unwrap();
+                            entry.sequence = *sequence;
+                            batch.entries.set(index, Some(entry)).unwrap();
+                        }
+                        Amendment::Drop { id } => {
+                            let index = batch
+                                .submissions
+                                .binary_search_by(|probe| probe.entry.id.cmp(id))
+                                .unwrap();
+
+                            batch.entries.set(index, None).unwrap();
+                        }
+                    }
+                }
+
+                let statement = BatchDelivery {
+                    height: &shard.height,
+                    root: &batch.entries.root(),
+                };
+
+                let shards = shards
+                    .into_iter()
+                    .flat_map(|(identity, signature)| {
+                        let keycard = membership.servers().get(&identity).unwrap();
+                        match shard.multisignature.verify([keycard], &statement) {
+                            Ok(_) => Some((identity, signature)),
+                            Err(_) => None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                return (shard.height, shards);
+            }
+        }
+    }
+
+    async fn aggregate_deliveries(
+        root: Hash,
+        height: u64,
+        mut shards: Vec<(Identity, MultiSignature)>,
+        membership: &Membership,
+        receiver: &mut MpscReceiver<(Identity, DeliveryShard)>,
+    ) -> Certificate {
+        let statement = BatchDelivery {
+            height: &height,
+            root: &root,
+        };
+
+        while shards.len() < membership.plurality() {
+            if let Some((identity, shard)) = receiver.recv().await {
+                let keycard = membership.servers().get(&identity).unwrap();
+
+                if shard.multisignature.verify([keycard], &statement).is_ok() {
+                    shards.push((identity, shard.multisignature));
+                }
+            }
+        }
+
+        Certificate::aggregate_plurality(&membership, shards)
+    }
 }
 
-struct WitnessCollector {
-    membership: Arc<Membership>,
+struct WitnessCollector<'a> {
+    membership: &'a Membership,
     shards: Vec<(Identity, MultiSignature)>,
     receiver: MpscReceiver<(Identity, MultiSignature)>,
 }
 
-impl WitnessCollector {
-    fn new(
-        membership: Arc<Membership>,
-        receiver: MpscReceiver<(Identity, MultiSignature)>,
-    ) -> Self {
+impl<'a> WitnessCollector<'a> {
+    fn new(membership: &'a Membership, receiver: MpscReceiver<(Identity, MultiSignature)>) -> Self {
         WitnessCollector {
             membership,
             shards: Vec::new(),
@@ -175,125 +270,6 @@ impl WitnessCollector {
 
     pub fn finalize(self) -> Certificate {
         Certificate::aggregate_plurality(&self.membership, self.shards.into_iter())
-    }
-}
-
-struct DeliveryCollector<'a> {
-    batch: &'a mut Batch,
-    batch_height: Option<u64>,
-    membership: Arc<Membership>,
-    new_shards: Vec<(Identity, DeliveryShard)>,
-    good_shards: Vec<(Identity, DeliveryShard)>,
-    bad_shards: Vec<(Identity, DeliveryShard)>,
-    counts: HashMap<(Vec<Amendment>, u64), usize>,
-    receiver: MpscReceiver<(Identity, DeliveryShard)>,
-}
-
-impl<'a> DeliveryCollector<'a> {
-    fn new(
-        batch: &'a mut Batch,
-        membership: Arc<Membership>,
-        receiver: MpscReceiver<(Identity, DeliveryShard)>,
-    ) -> Self {
-        DeliveryCollector {
-            batch,
-            batch_height: None,
-            membership,
-            new_shards: Vec::new(),
-            good_shards: Vec::new(),
-            bad_shards: Vec::new(),
-            counts: HashMap::new(),
-            receiver,
-        }
-    }
-
-    fn succeeded(&self) -> bool {
-        self.good_shards.len() >= self.membership.quorum()
-    }
-
-    fn try_amend_batch(&mut self) {
-        if self.batch_height.is_none() {
-            if self.new_shards.len() >= self.membership.quorum() {
-                let ((amendments, height), _) =
-                    self.counts.iter().max_by_key(|&(_, count)| count).unwrap();
-
-                for amendment in amendments.iter() {
-                    match amendment {
-                        Amendment::Nudge { id, sequence } => {
-                            let index = self
-                                .batch
-                                .submissions
-                                .binary_search_by(|probe| probe.entry.id.cmp(id))
-                                .unwrap();
-                            let mut entry = self.batch.entries.items()[index].clone().unwrap();
-                            entry.sequence = *sequence;
-                            self.batch.entries.set(index, Some(entry)).unwrap();
-                        }
-                        Amendment::Drop { id } => {
-                            let index = self
-                                .batch
-                                .submissions
-                                .binary_search_by(|probe| probe.entry.id.cmp(id))
-                                .unwrap();
-                            self.batch.entries.set(index, None).unwrap();
-                        }
-                    }
-                }
-
-                self.batch_height = Some(*height);
-            }
-        }
-    }
-
-    fn filter_new_shards(&mut self) {
-        if let Some(height) = self.batch_height {
-            while let Some((identity, shard)) = self.new_shards.pop() {
-                let statement = BatchDelivery {
-                    height: &height,
-                    root: &self.batch.entries.root(),
-                };
-
-                let keycard = self.membership.servers().get(&identity).unwrap();
-
-                match shard.multisignature.verify([keycard], &statement) {
-                    Ok(_) => self.good_shards.push((identity, shard)),
-                    Err(_) => self.bad_shards.push((identity, shard)),
-                }
-            }
-        }
-    }
-
-    async fn progress(&mut self) {
-        while !self.succeeded() {
-            // A copy of `update_inlet` is held by `orchestrate`.
-            // As a result, `update_outlet.recv()` cannot return `None`.
-            match self.receiver.recv().await {
-                Some((identity, shard)) => {
-                    *self
-                        .counts
-                        .entry((shard.amendments.clone(), shard.height))
-                        .or_insert(0) += 1;
-
-                    self.new_shards.push((identity, shard));
-
-                    self.try_amend_batch();
-                    self.filter_new_shards();
-                }
-                None => unreachable!(), // Double check that this is indeed unreachable
-            }
-        }
-    }
-
-    pub fn finalize(self) -> (u64, Certificate) {
-        (
-            self.batch_height.unwrap(),
-            Certificate::aggregate_plurality(
-                &self.membership,
-                self.good_shards
-                    .into_iter()
-                    .map(|(identity, shard)| (identity, shard.multisignature)),
-            ),
-        )
     }
 }
 
@@ -401,7 +377,9 @@ mod tests {
             root: &batch.entries.root(),
         };
 
-        certificate.verify_quorum(&membership, &statement).unwrap();
+        certificate
+            .verify_plurality(&membership, &statement)
+            .unwrap();
 
         time::sleep(Duration::from_millis(200)).await;
     }
@@ -470,7 +448,9 @@ mod tests {
             root: &batch.entries.root(),
         };
 
-        certificate.verify_quorum(&membership, &statement).unwrap();
+        certificate
+            .verify_plurality(&membership, &statement)
+            .unwrap();
 
         time::sleep(Duration::from_millis(200)).await;
     }
