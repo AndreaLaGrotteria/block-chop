@@ -24,11 +24,12 @@ use tokio::{
 };
 
 type MultiSignatureOutlet = MpscReceiver<(Identity, MultiSignature)>;
+type DeliveryShardOutlet = MpscReceiver<(Identity, DeliveryShard)>;
 
 struct WitnessCollector<'a> {
     membership: &'a Membership,
-    shards: Vec<(Identity, MultiSignature)>,
-    outlet: MultiSignatureOutlet,
+    witness_shards: Vec<(Identity, MultiSignature)>,
+    witness_shard_outlet: MultiSignatureOutlet,
 }
 
 impl Broker {
@@ -50,73 +51,74 @@ impl Broker {
         let mut servers = membership.servers().values().collect::<Vec<_>>();
         servers.shuffle(&mut thread_rng());
 
-        // Setup channels, `Board`s and and `Fuse`
+        // Setup channels, `Board`s and `Fuse`
 
-        let (witness_shard_sender, witness_shard_receiver) =
-            mpsc::channel::<(Identity, MultiSignature)>(membership.servers().len());
+        let (witness_shard_inlet, witness_shard_outlet) = mpsc::channel(membership.servers().len());
 
-        let (delivery_shard_sender, mut delivery_shard_receiver) =
-            mpsc::channel::<(Identity, DeliveryShard)>(membership.servers().len());
+        let (delivery_shard_inlet, mut delivery_shard_outlet) =
+            mpsc::channel(membership.servers().len());
 
         let (witness_board, witness_poster) = Board::blank();
 
         let fuse = Fuse::new();
 
-        // Spawn submissions
+        // Spawn submissions:
+        //  - (f + 1) verifiers get their `verify` argument immediately set to `true`.
+        //  - (f) backup verifiers have their `verify` argument set later, depending
+        //    on the responsiveness of the (f + 1) verifiers.
+        //  - (f) idlers get their `verify` argument immediately set to `false`.
 
-        let mut backup_verifiers = Vec::with_capacity(membership.plurality() - 1);
+        let mut backup_verify_solvers = Vec::with_capacity(membership.plurality() - 1);
         let mut submit_tasks = Vec::with_capacity(membership.servers().len());
 
         for (index, server) in servers.into_iter().enumerate() {
-            let verify_promise = if index < membership.plurality() {
-                // Server witnessing role: Verifier
-                Promise::solved(true)
+            let verify = if index < membership.plurality() {
+                Promise::solved(true) // Verifier
             } else if index < membership.quorum() {
-                // Server witnessing role: Backup verifier
-                let (promise, solver) = Promise::pending();
-                backup_verifiers.push(solver);
+                let (promise, solver) = Promise::pending(); // Backup verifier
+                backup_verify_solvers.push(solver);
                 promise
             } else {
-                // Server witnessing role: Idle
-                Promise::solved(false)
+                Promise::solved(false) // Idler
             };
 
-            let settings = settings.clone();
-            let connector = connector.clone();
-            let server = server.clone();
-            let compressed_batch = compressed_batch.clone();
-            let witness_shard_sender = witness_shard_sender.clone();
-            let delivery_shard_sender = delivery_shard_sender.clone();
             let root = batch.entries.root();
 
             let handle = fuse.spawn(Broker::submit_batch(
                 worker,
                 sequence,
                 root,
-                compressed_batch,
-                server,
-                connector,
-                verify_promise,
-                witness_shard_sender,
+                compressed_batch.clone(),
+                server.clone(),
+                connector.clone(),
+                verify,
+                witness_shard_inlet.clone(),
                 witness_board.clone(),
-                delivery_shard_sender,
-                settings,
+                delivery_shard_inlet.clone(),
+                settings.clone(),
             ));
 
             submit_tasks.push(handle);
         }
 
+        // Collect and aggregate and post (f + 1) witness shards:
+        //  - Collect witness shards from `witness_shard_outlet` until
+        //    (f + 1) shards are collected or a timeout expires.
+        //  - If the timeout expires, signal all backup verifiers to
+        //    request a witness shard, then collect the missing
+        //    witness shards from `witness_shard_outlet`.
+
         let mut witness_collector =
-            WitnessCollector::new(membership.as_ref(), witness_shard_receiver);
+            WitnessCollector::new(membership.as_ref(), witness_shard_outlet);
 
         match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
             Ok(_) => {
-                backup_verifiers
+                backup_verify_solvers
                     .into_iter()
                     .for_each(|solver| solver.solve(false));
             }
             Err(_) => {
-                backup_verifiers
+                backup_verify_solvers
                     .into_iter()
                     .for_each(|solver| solver.solve(true));
 
@@ -127,20 +129,41 @@ impl Broker {
         let witness = witness_collector.finalize();
         witness_poster.post(witness);
 
+        // Collect and aggregate (f + 1) `DeliveryShard`s:
+        //  - Collect `DeliveryShard`s until the same set of `Amendment`s
+        //    is received (f + 1) times: that is necessarily the correct set
+        //    of amendments. Apply the correct set of `Amendment`s to `batch`.
+        //  - Keep collecting `DeliveryShards` until (f + 1) `MultiSignature`s
+        //    are collected for `batch`'s amended root.
+        //
+        //  Remark: because each delivery shard signs the root of `batch` after
+        //  the corresponding `Amendment`s are applied, it is impossible to verify
+        //  a `DeliverySnard`'s `MultiSignature` without applying its (possibly
+        //  spurious) `Amendments` to `batch`. To avoid doing so (`batch`
+        //  is large and would need to be cloned), `DeliveryShard`
+        // `MultiSignature`s are verified only when the correct set of
+        // `Amendment`s is determined and applied to `batch`. Because Byzantine
+        //  processes could have spuriously signed the correctly amended root,
+        //  additional `DeliveryShard`s might be required to assemble a delivery
+        //  certificate for `batch`.
+
         let (batch_height, shards) =
-            Self::collect_deliveries(batch, membership.as_ref(), &mut delivery_shard_receiver)
+            Self::collect_delivery_shards(batch, membership.as_ref(), &mut delivery_shard_outlet)
                 .await;
 
-        let certificate = Self::aggregate_deliveries(
+        let certificate = Self::aggregate_delivery_shards(
             batch.entries.root(),
             batch_height,
             shards,
             membership.as_ref(),
-            &mut delivery_shard_receiver,
+            &mut delivery_shard_outlet,
         )
         .await;
 
         batch.status = BatchStatus::Delivered;
+
+        // Move `fuse` to a long-lived task, submitting `batch`
+        // to straggler servers until a timeout expires
 
         task::spawn(async move {
             let _fuse = fuse;
@@ -148,33 +171,40 @@ impl Broker {
             let submissions = join_all(submit_tasks.into_iter());
             match time::timeout(settings.totality_timeout, submissions).await {
                 Ok(_) => (),
-                Err(_) => warn!("Timeout! Could not finish submitting batch to all servers!"),
+                Err(_) => warn!("Timeout: could not finish submitting batch to all servers."),
             }
         });
 
         (batch_height, certificate)
     }
 
-    async fn collect_deliveries(
+    async fn collect_delivery_shards(
         batch: &mut Batch,
         membership: &Membership,
-        receiver: &mut MpscReceiver<(Identity, DeliveryShard)>,
+        delivery_shard_outlet: &mut DeliveryShardOutlet,
     ) -> (u64, Vec<(Identity, MultiSignature)>) {
-        let mut shards = HashMap::new();
+        let mut signature_shards = HashMap::new();
 
         loop {
-            let (identity, shard) = receiver.recv().await.unwrap();
+            let (identity, delivery_shard) = delivery_shard_outlet.recv().await.unwrap();
 
-            let entry = shards
-                .entry((shard.amendments.clone(), shard.height))
+            let entry = signature_shards
+                .entry((delivery_shard.amendments.clone(), delivery_shard.height))
                 .or_insert(Vec::new());
 
-            entry.push((identity, shard.multisignature));
+            entry.push((identity, delivery_shard.multisignature));
 
             if entry.len() >= membership.plurality() {
-                let shards = entry.clone();
+                // `delivery_shard`'s `Amendment`s and height have collected (f + 1)
+                // (possibly incorrect) `MultiSignature`s: apply `delivery_sahrd.amendments`
+                // to `batch` and return `delivery_shard.height` with the correct
+                // `MultiSignature`s in `entry`.
 
-                for amendment in shard.amendments.iter() {
+                let signature_shards = entry.clone();
+
+                // Apply `delivery_shard.amendments` to `batch`
+
+                for amendment in delivery_shard.amendments.iter() {
                     match amendment {
                         Amendment::Nudge { id, sequence } => {
                             let index = batch
@@ -182,6 +212,7 @@ impl Broker {
                                 .binary_search_by(|probe| probe.entry.id.cmp(id))
                                 .unwrap();
 
+                            // TODO: Streamline the following code when `Vector` supports in-place updates
                             let mut entry = batch.entries.items()[index].clone().unwrap();
                             entry.sequence = *sequence;
                             batch.entries.set(index, Some(entry)).unwrap();
@@ -197,33 +228,36 @@ impl Broker {
                     }
                 }
 
+                // Filter out invalid `signature_shards`
+
                 let statement = BatchDelivery {
-                    height: &shard.height,
+                    height: &delivery_shard.height,
                     root: &batch.entries.root(),
                 };
 
-                let shards = shards
+                let signature_shards = signature_shards
                     .into_iter()
                     .flat_map(|(identity, signature)| {
                         let keycard = membership.servers().get(&identity).unwrap();
-                        match shard.multisignature.verify([keycard], &statement) {
+
+                        match delivery_shard.multisignature.verify([keycard], &statement) {
                             Ok(_) => Some((identity, signature)),
                             Err(_) => None,
                         }
                     })
                     .collect::<Vec<_>>();
 
-                return (shard.height, shards);
+                return (delivery_shard.height, signature_shards);
             }
         }
     }
 
-    async fn aggregate_deliveries(
+    async fn aggregate_delivery_shards(
         root: Hash,
         height: u64,
         mut shards: Vec<(Identity, MultiSignature)>,
         membership: &Membership,
-        receiver: &mut MpscReceiver<(Identity, DeliveryShard)>,
+        delivery_shard_outlet: &mut DeliveryShardOutlet,
     ) -> Certificate {
         let statement = BatchDelivery {
             height: &height,
@@ -231,7 +265,7 @@ impl Broker {
         };
 
         while shards.len() < membership.plurality() {
-            if let Some((identity, shard)) = receiver.recv().await {
+            if let Some((identity, shard)) = delivery_shard_outlet.recv().await {
                 let keycard = membership.servers().get(&identity).unwrap();
 
                 if shard.multisignature.verify([keycard], &statement).is_ok() {
@@ -245,31 +279,31 @@ impl Broker {
 }
 
 impl<'a> WitnessCollector<'a> {
-    fn new(membership: &'a Membership, receiver: MpscReceiver<(Identity, MultiSignature)>) -> Self {
+    fn new(membership: &'a Membership, witness_shard_outlet: MultiSignatureOutlet) -> Self {
         WitnessCollector {
             membership,
-            shards: Vec::new(),
-            outlet: receiver,
+            witness_shards: Vec::new(),
+            witness_shard_outlet,
         }
     }
 
     fn succeeded(&self) -> bool {
-        self.shards.len() >= self.membership.plurality()
+        self.witness_shards.len() >= self.membership.plurality()
     }
 
     async fn progress(&mut self) {
         while !self.succeeded() {
-            // A copy of `update_inlet` is held by `orchestrate`.
-            // As a result, `update_outlet.recv()` cannot return `None`.
-            match self.outlet.recv().await {
-                Some(shard) => self.shards.push(shard),
+            // A copy of `delivery_shard_inlet` is held by `Broker::broadcast_batch`.
+            // As a result, `delivery_shard_outlet.recv()` cannot return `None`.
+            match self.witness_shard_outlet.recv().await {
+                Some(shard) => self.witness_shards.push(shard),
                 None => unreachable!(), // Double check that this is indeed unreachable
             }
         }
     }
 
     pub fn finalize(self) -> Certificate {
-        Certificate::aggregate_plurality(&self.membership, self.shards.into_iter())
+        Certificate::aggregate_plurality(&self.membership, self.witness_shards.into_iter())
     }
 }
 
