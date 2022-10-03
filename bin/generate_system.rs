@@ -1,7 +1,9 @@
 use chop_chop::{Directory, Membership, Passepartout};
+use rayon::{iter::ParallelIterator, prelude::IntoParallelIterator};
 use std::{
     io::{self, prelude::*},
     iter,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 use talk::crypto::KeyChain;
 
@@ -9,7 +11,7 @@ fn main() {
     let args = lapp::parse_args(
         "
         Welcome to `chop-chop`'s system-generation utility.
-        
+
         Required arguments:
           <servers> (integer) number of servers in the system
           <clients> (integer) number of clients in the system
@@ -40,20 +42,41 @@ fn main() {
             keycard
         },
     ));
+
     println!(" .. done!");
 
-    println!("\nGenerating `Directory`..");
+    println!("\nGenerating keypairs..");
+
+    let counter = AtomicUsize::new(0);
+
+    let keypairs = (0..clients)
+        .into_par_iter()
+        .map(|_| {
+            let index = counter.fetch_add(1, Ordering::Relaxed);
+
+            if index % 1000 == 0 {
+                print!("\r  -> Generating keypair {}", (index as u64));
+                io::stdout().flush().unwrap();
+            }
+
+            let keychain = KeyChain::random();
+            let keycard = keychain.keycard();
+
+            (keychain, keycard)
+        })
+        .collect::<Vec<_>>();
+
+    println!("\r .. done!                             ");
+
+    println!("\nBuilding `Passepartout` and `Directory`..");
 
     let mut directory = Directory::new();
 
-    for index in 0..clients {
-        if index % 100 == 0 {
-            print!("\r  -> Generating id {}", (index as u64));
+    for (index, (keychain, keycard)) in keypairs.into_iter().enumerate() {
+        if index % 1000 == 0 {
+            print!("\r  -> Inserting id {}", (index as u64));
             io::stdout().flush().unwrap();
         }
-
-        let keychain = KeyChain::random();
-        let keycard = keychain.keycard();
 
         passepartout.insert(keycard.identity(), keychain).unwrap();
         directory.insert(index as u64, keycard);
@@ -61,8 +84,9 @@ fn main() {
 
     println!("\r .. done!                    ");
 
-    println!("\nSaving `Membership` and `Directory`..");
+    println!("\nSaving `Passepartout`, `Membership` and `Directory`..");
 
+    passepartout.flush().unwrap();
     membership.save(membership_path).unwrap();
     directory.save(directory_path).unwrap();
 

@@ -76,6 +76,10 @@ impl Passepartout {
             .map_err(PassepartoutError::into_top)
             .spot(here!())?;
 
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), Top<PassepartoutError>> {
         self.database
             .flush()
             .map_err(PassepartoutError::flush_failed)
