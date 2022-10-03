@@ -17,6 +17,8 @@ all = [ "benchmark" ]
 benchmark = []
 
 [dependencies]
+message_derive = { path = "./message_derive" }
+
 doomstack = { git = "https://github.com/distributed-epfl/doomstack" }
 talk = { git = "https://github.com/distributed-epfl/talk", features = ["test_utilities"] }
 zebra = { git = "https://github.com/distributed-epfl/zebra" }

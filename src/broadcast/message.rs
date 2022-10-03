@@ -1,3 +1,3 @@
-pub const MESSAGE_SIZE: usize = 8;
+use message_derive::message;
 
-pub type Message = [u8; MESSAGE_SIZE];
+message!();

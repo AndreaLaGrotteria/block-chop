@@ -56,7 +56,7 @@ impl Broker {
 mod tests {
     use super::*;
 
-    use crate::{system::test::generate_system, Client, MESSAGE_SIZE};
+    use crate::{broadcast::MESSAGE_SIZE, client::Client, system::test::generate_system};
 
     use std::time::Duration;
 
