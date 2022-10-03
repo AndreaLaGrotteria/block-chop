@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::Entry,
+    broadcast::{Entry, Message},
     broker::{Request, Response},
     crypto::statements::{
         Broadcast as BroadcastStatement, Reduction as ReductionStatement,
@@ -111,10 +111,13 @@ pub async fn load<A>(
         .map(|(index, keychain)| {
             let id = range.start + (index as u64);
 
+            let mut message = Message::default();
+            message[0..8].copy_from_slice(id.to_be_bytes().as_slice());
+
             let entry = Entry {
                 id,
                 sequence: 0,
-                message: id.to_be_bytes(),
+                message,
             };
 
             let statement = BroadcastStatement {
