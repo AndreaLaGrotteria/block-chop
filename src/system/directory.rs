@@ -1,11 +1,24 @@
 use doomstack::{here, Doom, ResultExt, Top};
+#[cfg(feature = "benchmark")]
+use memmap::{Mmap, MmapMut, MmapOptions};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::path::Path;
+#[cfg(feature = "benchmark")]
+use std::{
+    fs::{File, OpenOptions},
+    slice,
+};
+#[cfg(feature = "benchmark")]
+use std::{io::Write, mem};
 use talk::crypto::KeyCard;
 
-#[derive(Clone)]
+#[cfg(feature = "benchmark")]
+const ENTRY_SIZE: usize = mem::size_of::<Option<KeyCard>>();
+
 pub struct Directory {
     keycards: Vec<Option<KeyCard>>,
+    #[cfg(feature = "benchmark")]
+    mmap: Option<Mmap>,
 }
 
 #[derive(Doom)]
@@ -104,11 +117,39 @@ impl Directory {
             *keycards.get_mut(id as usize).unwrap() = Some(keycard);
         }
 
-        Ok(Directory { keycards })
+        Ok(Directory {
+            keycards,
+            #[cfg(feature = "benchmark")]
+            mmap: None,
+        })
+    }
+
+    #[cfg(feature = "benchmark")]
+    pub unsafe fn load_raw<P>(path: P) -> Self
+    where
+        P: AsRef<Path>,
+    {
+        let mmap = MmapOptions::new().map(&File::open(&path).unwrap()).unwrap();
+
+        if mmap.len() % ENTRY_SIZE != 0 {
+            panic!("Called `Directory::load_raw` on a non-aligned file");
+        }
+
+        let pointer = mmap.as_ptr() as *mut Option<KeyCard>;
+        let capacity = mmap.len() / ENTRY_SIZE;
+
+        Directory {
+            keycards: Vec::from_raw_parts(pointer, capacity, capacity),
+            mmap: Some(mmap),
+        }
     }
 
     pub(crate) fn from_keycards(keycards: Vec<Option<KeyCard>>) -> Self {
-        Directory { keycards }
+        Directory {
+            keycards,
+            #[cfg(feature = "benchmark")]
+            mmap: None,
+        }
     }
 
     pub fn capacity(&self) -> usize {
@@ -120,6 +161,11 @@ impl Directory {
     }
 
     pub fn insert(&mut self, id: u64, keycard: KeyCard) {
+        #[cfg(feature = "benchmark")]
+        if self.mmap.is_some() {
+            panic!("Called `Directory::insert` on an `memmap`ed `Directory`");
+        }
+
         if self.keycards.len() <= (id as usize) {
             self.keycards.resize((id as usize) + 1, None);
         }
@@ -162,5 +208,83 @@ impl Directory {
             .spot(here!())?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "benchmark")]
+    pub unsafe fn save_raw<P>(&self, path: P)
+    where
+        P: AsRef<Path>,
+    {
+        let pointer = self.keycards.as_ptr() as *const u8;
+        let bytes = self.keycards.len() * ENTRY_SIZE;
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .unwrap();
+
+        file.set_len(bytes as u64).unwrap();
+
+        let mut mmap = MmapMut::map_mut(&file).unwrap();
+
+        (&mut mmap[..])
+            .write_all(slice::from_raw_parts(pointer, bytes))
+            .unwrap();
+
+        mmap.flush().unwrap();
+    }
+}
+
+impl Clone for Directory {
+    fn clone(&self) -> Self {
+        Directory {
+            keycards: self.keycards.clone(),
+            #[cfg(feature = "benchmark")]
+            mmap: None,
+        }
+    }
+}
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        if self.mmap.is_some() {
+            mem::forget(mem::take(&mut self.keycards));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, iter};
+    use talk::crypto::KeyChain;
+
+    #[test]
+    fn raw_save_load() {
+        let keycards = iter::repeat_with(|| Some(KeyChain::random().keycard()))
+            .take(1024)
+            .collect::<Vec<_>>();
+
+        let directory = Directory::from_keycards(keycards);
+
+        let before = (0..1024)
+            .map(|id| directory.get(id).unwrap().identity())
+            .collect::<Vec<_>>();
+
+        let mut path = env::temp_dir();
+        path.push("test_directory.bin");
+
+        let directory = unsafe {
+            directory.save_raw(path.clone());
+            Directory::load_raw(path)
+        };
+
+        let after = (0..1024)
+            .map(|id| directory.get(id).unwrap().identity())
+            .collect::<Vec<_>>();
+
+        assert_eq!(before, after);
     }
 }

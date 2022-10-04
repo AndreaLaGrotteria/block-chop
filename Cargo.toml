@@ -14,7 +14,7 @@ required-features = [ "benchmark" ]
 
 [features]
 all = [ "benchmark" ]
-benchmark = []
+benchmark = [ "dep:memmap" ]
 
 [dependencies]
 message_derive = { path = "./message_derive" }
@@ -38,6 +38,7 @@ oh-snap = { version = "0.0.5" }
 sha-1 = { version = "0.10.0" }
 
 sled = { version = "0.34.7" }
+memmap = { version = "0.7.0", optional = true }
 
 lapp = { version = "0.4.0" }
 log = { version = "0.4.17" }
