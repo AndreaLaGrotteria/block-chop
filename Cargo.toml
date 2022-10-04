@@ -12,6 +12,11 @@ name = "generate_system"
 path = "bin/generate_system.rs"
 required-features = [ "benchmark" ]
 
+[[bin]]
+name = "raw_directory"
+path = "bin/raw_directory.rs"
+required-features = [ "benchmark" ]
+
 [features]
 all = [ "benchmark" ]
 benchmark = [ "dep:memmap" ]
