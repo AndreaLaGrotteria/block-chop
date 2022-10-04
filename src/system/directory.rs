@@ -249,6 +249,7 @@ impl Clone for Directory {
 
 impl Drop for Directory {
     fn drop(&mut self) {
+        #[cfg(feature = "benchmark")]
         if self.mmap.is_some() {
             mem::forget(mem::take(&mut self.keycards));
         }
@@ -256,6 +257,7 @@ impl Drop for Directory {
 }
 
 #[cfg(test)]
+#[cfg(feature = "benchmark")]
 mod tests {
     use super::*;
     use std::{env, iter};

@@ -9,7 +9,6 @@ use crate::{
 use rand::seq::IteratorRandom;
 #[cfg(feature = "benchmark")]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-#[cfg(feature = "benchmark")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "benchmark")]
 use std::iter;

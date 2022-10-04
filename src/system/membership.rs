@@ -83,6 +83,7 @@ impl Membership {
         Ok(Membership { servers })
     }
 
+    #[cfg(feature = "benchmark")]
     pub fn load_exact<P>(path: P, size: usize) -> Result<Self, Top<MembershipError>>
     where
         P: AsRef<Path>,
