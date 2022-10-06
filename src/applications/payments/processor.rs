@@ -14,14 +14,22 @@ type BatchInlet = Sender<Vec<Payment>>;
 type BatchOutlet = Receiver<Vec<Payment>>;
 
 // TODO: Refactor `const`s into settings
-const PROCESS_CHANNEL_CAPACITY: usize = 8192;
+const SHARDS: usize = 8;
+
 const ACCOUNTS: u64 = 258000000;
 const INITIAL_BALANCE: u64 = 1000000000;
-const SHARDS: usize = 8;
+
+const PROCESS_CHANNEL_CAPACITY: usize = 8192;
 
 pub struct Processor {
     process_inlet: BatchInlet,
     _fuse: Fuse,
+}
+
+#[derive(Clone)]
+struct Deposit {
+    to: u64,
+    amount: u64,
 }
 
 impl Processor {
@@ -41,10 +49,7 @@ impl Processor {
     where
         I: Iterator<Item = Entry>,
     {
-        let batch = batch
-            .into_iter()
-            .map(Payment::from_entry)
-            .collect::<Vec<_>>();
+        let batch = batch.map(Payment::from_entry).collect::<Vec<_>>();
 
         // A copy of `process_outlet` is held by `Processor::process`,
         // whose `Fuse` is held by `self`, so `process_inlet.send()`
@@ -53,11 +58,11 @@ impl Processor {
     }
 
     async fn process(mut process_outlet: BatchOutlet) {
-        // Each shard has `ceil(ACCOUNTS / TASKS)` accounts
+        // Each shard is relevant to `ceil(ACCOUNTS / SHARDS)` accounts
         // (TODO: replace with `div_ceil` when `int_roundings` is stabilized)
-        let shard_size = (ACCOUNTS + (SHARDS as u64) - 1) / (SHARDS as u64);
+        let shard_span = (ACCOUNTS + (SHARDS as u64) - 1) / (SHARDS as u64);
 
-        let mut balances = vec![vec![INITIAL_BALANCE; shard_size as usize]; SHARDS];
+        let mut balance_shards = vec![vec![INITIAL_BALANCE; shard_span as usize]; SHARDS];
 
         loop {
             let batch = if let Some(batch) = process_outlet.recv().await {
@@ -69,52 +74,63 @@ impl Processor {
 
             let batch = Arc::new(batch);
 
-            balances = {
-                let withdraw_tasks = balances
+            balance_shards = {
+                // Spawn and join withdraw tasks
+
+                let withdraw_tasks = balance_shards
                     .into_iter()
                     .enumerate()
-                    .map(|(shard, balances)| {
+                    .map(|(shard, balance_shard)| {
                         let batch = batch.clone();
 
                         task::spawn_blocking(move || {
-                            Processor::withdraw(batch, shard as u64, shard_size, balances)
+                            Processor::withdraw(batch, shard as u64, shard_span, balance_shard)
                         })
                     })
                     .collect::<FuturesOrdered<_>>();
 
-                let results = withdraw_tasks
+                let withdraw_results = withdraw_tasks
                     .map(|task| task.unwrap())
                     .collect::<Vec<_>>()
                     .await;
 
-                let mut balances = Vec::with_capacity(SHARDS);
-                let mut deposits = vec![Vec::with_capacity(batch.len()); SHARDS];
+                // Rebuild balance shards, transpose deposit matrix
 
-                for (balance, deposit) in results {
-                    balances.push(balance);
+                let mut balance_shards = Vec::with_capacity(SHARDS);
+                let mut deposit_columns = vec![Vec::with_capacity(SHARDS); SHARDS];
 
-                    for (rd, dd) in deposit.into_iter().zip(deposits.iter_mut()) {
-                        dd.extend(rd);
+                for (balance_shard, deposit_row) in withdraw_results {
+                    balance_shards.push(balance_shard);
+
+                    for (deposit_column, bucket) in deposit_columns.iter_mut().zip(deposit_row) {
+                        deposit_column.push(bucket);
                     }
                 }
 
-                let deposit_tasks = deposits
+                // Spawn and join deposit tasks
+
+                let deposit_tasks = deposit_columns
                     .into_iter()
-                    .zip(balances)
+                    .zip(balance_shards)
                     .enumerate()
-                    .map(|(shard, (deposits, balances))| {
+                    .map(|(shard, (deposit_column, balance_shard))| {
                         task::spawn_blocking(move || {
-                            Processor::deposit(deposits, shard as u64, shard_size, balances)
+                            Processor::deposit(
+                                deposit_column,
+                                shard as u64,
+                                shard_span,
+                                balance_shard,
+                            )
                         })
                     })
                     .collect::<FuturesOrdered<_>>();
 
-                let balances = deposit_tasks
+                let balance_shards = deposit_tasks
                     .map(|task| task.unwrap())
                     .collect::<Vec<_>>()
                     .await;
 
-                balances
+                balance_shards
             };
         }
     }
@@ -122,41 +138,49 @@ impl Processor {
     fn withdraw(
         batch: Arc<Vec<Payment>>,
         shard: u64,
-        shard_size: u64,
-        mut balances: Vec<u64>,
-    ) -> (Vec<u64>, Vec<Vec<Payment>>) {
-        let offset = shard * shard_size;
-        let range = offset..(offset + shard_size);
+        shard_span: u64,
+        mut balance_shard: Vec<u64>,
+    ) -> (Vec<u64>, Vec<Vec<Deposit>>) {
+        let offset = shard * shard_span;
+        let range = offset..(offset + shard_span);
 
         let payments = Processor::crop(batch.as_slice(), range);
-        let mut deposits =
-            vec![Vec::<Payment>::with_capacity(shard_size as usize); SHARDS as usize];
+
+        let mut deposit_row = vec![Vec::with_capacity(payments.len()); SHARDS as usize];
 
         for payment in payments {
-            let balance = balances.get_mut((payment.from - offset) as usize).unwrap();
+            let balance = balance_shard
+                .get_mut((payment.from - offset) as usize)
+                .unwrap();
 
             if *balance >= payment.amount {
                 *balance -= payment.amount;
-                deposits[(payment.to / shard_size) as usize].push(payment.clone());
+
+                deposit_row[(payment.to / shard_span) as usize].push(Deposit {
+                    to: payment.to,
+                    amount: payment.amount,
+                });
             }
         }
 
-        (balances, deposits)
+        (balance_shard, deposit_row)
     }
 
     fn deposit(
-        deposits: Vec<Payment>,
+        deposit_column: Vec<Vec<Deposit>>,
         shard: u64,
-        shard_size: u64,
-        mut balances: Vec<u64>,
+        shard_span: u64,
+        mut balance_shard: Vec<u64>,
     ) -> Vec<u64> {
-        let offset = shard * shard_size;
+        let offset = shard * shard_span;
 
-        for deposit in deposits {
-            balances[(deposit.to - offset) as usize] += deposit.amount;
+        for bucket in deposit_column {
+            for deposit in bucket {
+                balance_shard[(deposit.to - offset) as usize] += deposit.amount;
+            }
         }
 
-        balances
+        balance_shard
     }
 
     fn crop<R>(payments: &[Payment], range: R) -> &[Payment]
