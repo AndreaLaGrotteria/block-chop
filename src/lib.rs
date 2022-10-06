@@ -1,3 +1,5 @@
+#[cfg(feature = "benchmark")]
+pub mod applications;
 pub mod client;
 
 mod broadcast;
