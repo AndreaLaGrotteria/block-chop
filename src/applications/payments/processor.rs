@@ -1,4 +1,7 @@
-use crate::{applications::payments::Payment, broadcast::Entry};
+use crate::{
+    applications::payments::{Payment, ProcessorSettings},
+    broadcast::Entry,
+};
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::{
     ops::{Bound, RangeBounds},
@@ -13,14 +16,6 @@ use tokio::{
 type BatchInlet = Sender<Vec<Payment>>;
 type BatchOutlet = Receiver<Vec<Payment>>;
 
-// TODO: Refactor `const`s into settings
-const SHARDS: usize = 8;
-
-const ACCOUNTS: u64 = 258000000;
-const INITIAL_BALANCE: u64 = 1000000000;
-
-const PROCESS_CHANNEL_CAPACITY: usize = 8192;
-
 pub struct Processor {
     process_inlet: BatchInlet,
     _fuse: Fuse,
@@ -33,11 +28,16 @@ struct Deposit {
 }
 
 impl Processor {
-    pub fn new() -> Self {
-        let (process_inlet, process_outlet) = mpsc::channel(PROCESS_CHANNEL_CAPACITY);
+    pub fn new(accounts: u64, initial_balance: u64, settings: ProcessorSettings) -> Self {
+        let (process_inlet, process_outlet) = mpsc::channel(settings.process_channel_capacity);
         let fuse = Fuse::new();
 
-        fuse.spawn(Processor::process(process_outlet));
+        fuse.spawn(Processor::process(
+            accounts,
+            initial_balance,
+            process_outlet,
+            settings,
+        ));
 
         Processor {
             process_inlet,
@@ -57,20 +57,31 @@ impl Processor {
         self.process_inlet.send(batch).await.unwrap();
     }
 
-    async fn process(mut process_outlet: BatchOutlet) {
-        // Each shard is relevant to `ceil(ACCOUNTS / SHARDS)` accounts
-        // (TODO: replace with `div_ceil` when `int_roundings` is stabilized)
-        let shard_span = (ACCOUNTS + (SHARDS as u64) - 1) / (SHARDS as u64);
+    async fn process(
+        accounts: u64,
+        initial_balance: u64,
+        mut process_outlet: BatchOutlet,
+        settings: ProcessorSettings,
+    ) {
+        // Initialize balance shards
 
-        let mut balance_shards = vec![vec![INITIAL_BALANCE; shard_span as usize]; SHARDS];
+        // Each shard is relevant to `ceil(accounts / settings.shards)` accounts
+        // (TODO: replace with `div_ceil` when `int_roundings` is stabilized)
+        let shard_span = (accounts + (settings.shards as u64) - 1) / (settings.shards as u64);
+
+        let mut balance_shards = vec![vec![initial_balance; shard_span as usize]; settings.shards];
 
         loop {
+            // Receive next batch
+
             let batch = if let Some(batch) = process_outlet.recv().await {
                 batch
             } else {
                 // `Processor` has dropped, shutdown
                 return;
             };
+
+            // Apply `batch` to `balance_shards`
 
             let batch = Arc::new(batch);
 
@@ -82,9 +93,16 @@ impl Processor {
                     .enumerate()
                     .map(|(shard, balance_shard)| {
                         let batch = batch.clone();
+                        let settings = settings.clone();
 
                         task::spawn_blocking(move || {
-                            Processor::withdraw(batch, shard as u64, shard_span, balance_shard)
+                            Processor::withdraw(
+                                batch,
+                                shard as u64,
+                                shard_span,
+                                balance_shard,
+                                settings,
+                            )
                         })
                     })
                     .collect::<FuturesOrdered<_>>();
@@ -96,8 +114,9 @@ impl Processor {
 
                 // Rebuild balance shards, transpose deposit matrix
 
-                let mut balance_shards = Vec::with_capacity(SHARDS);
-                let mut deposit_columns = vec![Vec::with_capacity(SHARDS); SHARDS];
+                let mut balance_shards = Vec::with_capacity(settings.shards);
+                let mut deposit_columns =
+                    vec![Vec::with_capacity(settings.shards); settings.shards];
 
                 for (balance_shard, deposit_row) in withdraw_results {
                     balance_shards.push(balance_shard);
@@ -140,13 +159,14 @@ impl Processor {
         shard: u64,
         shard_span: u64,
         mut balance_shard: Vec<u64>,
+        settings: ProcessorSettings,
     ) -> (Vec<u64>, Vec<Vec<Deposit>>) {
         let offset = shard * shard_span;
         let range = offset..(offset + shard_span);
 
         let payments = Processor::crop(batch.as_slice(), range);
 
-        let mut deposit_row = vec![Vec::with_capacity(payments.len()); SHARDS as usize];
+        let mut deposit_row = vec![Vec::with_capacity(payments.len()); settings.shards];
 
         for payment in payments {
             let balance = balance_shard
