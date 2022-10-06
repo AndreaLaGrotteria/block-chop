@@ -156,10 +156,8 @@ impl Processor {
         settings: ProcessorSettings,
     ) -> (Vec<u64>, Vec<Vec<Deposit>>) {
         let offset = shard * shard_span;
-        let range = offset..(offset + shard_span);
 
-        let payments = Processor::crop(batch.as_slice(), range);
-
+        let payments = Processor::crop(batch.as_slice(), offset..(offset + shard_span));
         let mut deposit_row = vec![Vec::with_capacity(payments.len()); settings.shards];
 
         for payment in payments {
