@@ -1,7 +1,7 @@
 use doomstack::{here, Doom, ResultExt, Top};
 #[cfg(feature = "benchmark")]
 use memmap::{Mmap, MmapMut, MmapOptions};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use std::path::Path;
 #[cfg(feature = "benchmark")]
 use std::{
@@ -78,8 +78,6 @@ impl Directory {
             0
         };
 
-        let mut keycards = vec![None; capacity];
-
         let entries = database
             .iter()
             .map(|entry| -> Result<_, Top<_>> {
@@ -93,7 +91,7 @@ impl Directory {
             .collect::<Result<Vec<_>, _>>()?;
 
         let entries = entries
-            .into_par_iter()
+            .par_iter()
             .map(|(key, value)| -> Result<_, Top<_>> {
                 let id = if key.len() == 8 {
                     let mut buffer = [0u8; 8];
@@ -111,6 +109,8 @@ impl Directory {
                 Ok((id, keycard))
             })
             .collect::<Vec<_>>();
+
+        let mut keycards = vec![None; capacity];
 
         for entry in entries {
             let (id, keycard) = entry?;
