@@ -1,3 +1,4 @@
+mod deposit;
 mod payment;
 mod processor;
 mod processor_settings;
@@ -5,3 +6,5 @@ mod processor_settings;
 pub use payment::Payment;
 pub use processor::Processor;
 pub use processor_settings::ProcessorSettings;
+
+use deposit::Deposit;

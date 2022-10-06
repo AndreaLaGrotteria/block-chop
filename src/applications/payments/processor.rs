@@ -1,5 +1,5 @@
 use crate::{
-    applications::payments::{Payment, ProcessorSettings},
+    applications::payments::{Deposit, Payment, ProcessorSettings},
     broadcast::Entry,
 };
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -19,12 +19,6 @@ type BatchOutlet = Receiver<Vec<Payment>>;
 pub struct Processor {
     process_inlet: BatchInlet,
     _fuse: Fuse,
-}
-
-#[derive(Clone)]
-struct Deposit {
-    to: u64,
-    amount: u64,
 }
 
 impl Processor {
@@ -175,11 +169,7 @@ impl Processor {
 
             if *balance >= payment.amount {
                 *balance -= payment.amount;
-
-                deposit_row[(payment.to / shard_span) as usize].push(Deposit {
-                    to: payment.to,
-                    amount: payment.amount,
-                });
+                deposit_row[(payment.to / shard_span) as usize].push(payment.deposit());
             }
         }
 

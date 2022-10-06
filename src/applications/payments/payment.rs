@@ -1,4 +1,4 @@
-use crate::broadcast::Entry;
+use crate::{applications::payments::Deposit, broadcast::Entry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
@@ -15,6 +15,13 @@ impl Payment {
             from: entry.id,
             to: message >> 32,
             amount: message & ((1 << 32) - 1),
+        }
+    }
+
+    pub(in crate::applications::payments) fn deposit(&self) -> Deposit {
+        Deposit {
+            to: self.to,
+            amount: self.amount,
         }
     }
 
