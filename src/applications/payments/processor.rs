@@ -41,9 +41,12 @@ impl Processor {
 
     pub async fn push<I>(&self, batch: I)
     where
-        I: Iterator<Item = Entry>,
+        I: IntoIterator<Item = Entry>,
     {
-        let batch = batch.map(Payment::from_entry).collect::<Vec<_>>();
+        let batch = batch
+            .into_iter()
+            .map(Payment::from_entry)
+            .collect::<Vec<_>>();
 
         // A copy of `process_outlet` is held by `Processor::process`,
         // whose `Fuse` is held by `self`, so `process_inlet.send()`
