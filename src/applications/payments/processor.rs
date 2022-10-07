@@ -66,18 +66,24 @@ impl Processor {
         let mut balance_shards = vec![vec![initial_balance; shard_span as usize]; settings.shards];
 
         loop {
-            // Receive next batch
+            // Collect next batch burst
 
-            let batch = if let Some(batch) = process_outlet.recv().await {
-                batch
-            } else {
-                // `Processor` has dropped, shutdown
-                return;
-            };
+            let mut batch_burst = Vec::with_capacity(settings.batch_burst_size);
 
-            // Apply `batch` to `balance_shards`
+            for _ in 0..settings.batch_burst_size {
+                let batch = if let Some(batch) = process_outlet.recv().await {
+                    batch
+                } else {
+                    // `Processor` has dropped, shutdown
+                    return;
+                };
 
-            let batch = Arc::new(batch);
+                batch_burst.push(batch);
+            }
+
+            // Apply `batch_burst` to `balance_shards`
+
+            let batch_burst = Arc::new(batch_burst);
 
             balance_shards = {
                 // Spawn and join withdraw tasks
@@ -86,12 +92,12 @@ impl Processor {
                     .into_iter()
                     .enumerate()
                     .map(|(shard, balance_shard)| {
-                        let batch = batch.clone();
+                        let batch_burst = batch_burst.clone();
                         let settings = settings.clone();
 
                         task::spawn_blocking(move || {
                             Processor::withdraw(
-                                batch,
+                                batch_burst,
                                 shard as u64,
                                 shard_span,
                                 balance_shard,
@@ -109,6 +115,7 @@ impl Processor {
                 // Rebuild balance shards, transpose deposit matrix
 
                 let mut balance_shards = Vec::with_capacity(settings.shards);
+
                 let mut deposit_columns =
                     vec![Vec::with_capacity(settings.shards); settings.shards];
 
@@ -149,7 +156,7 @@ impl Processor {
     }
 
     fn withdraw(
-        batch: Arc<Vec<Payment>>,
+        batch_burst: Arc<Vec<Vec<Payment>>>,
         shard: u64,
         shard_span: u64,
         mut balance_shard: Vec<u64>,
@@ -157,17 +164,21 @@ impl Processor {
     ) -> (Vec<u64>, Vec<Vec<Deposit>>) {
         let offset = shard * shard_span;
 
-        let payments = Processor::crop(batch.as_slice(), offset..(offset + shard_span));
-        let mut deposit_row = vec![Vec::with_capacity(payments.len()); settings.shards];
+        let mut deposit_row =
+            vec![Vec::with_capacity(settings.deposit_bucket_capacity); settings.shards];
 
-        for payment in payments {
-            let balance = balance_shard
-                .get_mut((payment.from - offset) as usize)
-                .unwrap();
+        for batch in batch_burst.iter() {
+            let payments = Processor::crop(batch.as_slice(), offset..(offset + shard_span));
 
-            if *balance >= payment.amount {
-                *balance -= payment.amount;
-                deposit_row[(payment.to / shard_span) as usize].push(payment.deposit());
+            for payment in payments {
+                let balance = balance_shard
+                    .get_mut((payment.from - offset) as usize)
+                    .unwrap();
+
+                if *balance >= payment.amount {
+                    *balance -= payment.amount;
+                    deposit_row[(payment.to / shard_span) as usize].push(payment.deposit());
+                }
             }
         }
 
