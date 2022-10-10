@@ -1,5 +1,6 @@
 use crate::Entry;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Bid { bidder: u64, token: u64, offer: u64 },
     Take { owner: u64, token: u64 },
@@ -51,6 +52,41 @@ impl Request {
 
                 (*owner, message)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inversion() {
+        for _ in 0..1024 {
+            let original = if rand::random::<bool>() {
+                Request::Bid {
+                    bidder: rand::random::<u64>(),
+                    token: rand::random::<u64>() % (1 << 31),
+                    offer: rand::random::<u64>() % (1 << 32),
+                }
+            } else {
+                Request::Take {
+                    owner: rand::random::<u64>(),
+                    token: rand::random::<u64>() % (1 << 31),
+                }
+            };
+
+            let (id, message) = original.to_message();
+
+            let entry = Entry {
+                id,
+                sequence: 0,
+                message,
+            };
+
+            let parsed = Request::from_entry(entry);
+
+            assert_eq!(parsed, original);
         }
     }
 }
