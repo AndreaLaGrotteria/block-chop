@@ -14,16 +14,25 @@ pub struct Paint {
 
 impl Paint {
     pub fn random(painter: u64) -> Self {
+        let entropy = rand::random::<u64>();
+
+        let x = (entropy >> (64 - 16)) % (CANVAS_EDGE as u64);
+        let y = ((entropy >> (64 - 32)) & ((1 << 16) - 1)) % (CANVAS_EDGE as u64);
+
+        let red = (entropy >> (64 - 40)) & ((1 << 8) - 1);
+        let green = (entropy >> (64 - 48)) & ((1 << 8) - 1);
+        let blue = (entropy >> (64 - 56)) & ((1 << 8) - 1);
+
         Paint {
             painter,
             coordinates: Coordinates {
-                x: rand::random::<u16>() % (CANVAS_EDGE as u16),
-                y: rand::random::<u16>() % (CANVAS_EDGE as u16),
+                x: x as u16,
+                y: y as u16,
             },
             color: Color {
-                red: rand::random::<u8>(),
-                green: rand::random::<u8>(),
-                blue: rand::random::<u8>(),
+                red: red as u8,
+                green: green as u8,
+                blue: blue as u8,
             },
             throttle: AtomicBool::new(false),
         }
