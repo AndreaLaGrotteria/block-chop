@@ -3,7 +3,7 @@ use crate::Entry;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Bid { bidder: u64, token: u64, offer: u64 },
-    Take { owner: u64, token: u64 },
+    Take { taker: u64, token: u64 },
 }
 
 impl Request {
@@ -15,7 +15,7 @@ impl Request {
 
         if is_take {
             Request::Take {
-                owner: entry.id,
+                taker: entry.id,
                 token,
             }
         } else {
@@ -44,13 +44,13 @@ impl Request {
 
                 (*bidder, message)
             }
-            Request::Take { owner, token } => {
+            Request::Take { taker, token } => {
                 debug_assert!(*token < (1 << 31));
 
                 let message = (1 << 63) | (token << 32);
                 let message = message.to_le_bytes();
 
-                (*owner, message)
+                (*taker, message)
             }
         }
     }
@@ -71,7 +71,7 @@ mod tests {
                 }
             } else {
                 Request::Take {
-                    owner: rand::random::<u64>(),
+                    taker: rand::random::<u64>(),
                     token: rand::random::<u64>() % (1 << 31),
                 }
             };
