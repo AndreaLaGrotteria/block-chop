@@ -36,7 +36,7 @@ pub struct Processor {
 
 impl Processor {
     pub fn new(accounts: u64, throttle_period: u64, settings: ProcessorSettings) -> Self {
-        let (process_inlet, process_outlet) = mpsc::channel(settings.process_channel_capacity);
+        let (process_inlet, process_outlet) = mpsc::channel(settings.pipeline);
         let fuse = Fuse::new();
 
         fuse.spawn(Processor::process(
@@ -70,7 +70,7 @@ impl Processor {
         mut process_outlet: BatchOutlet,
         settings: ProcessorSettings,
     ) {
-        let (burst_inlet, burst_outlet) = mpsc::channel(settings.apply_channel_capacity);
+        let (burst_inlet, burst_outlet) = mpsc::channel(settings.pipeline);
 
         let _task = task::spawn_blocking(move || {
             Processor::apply(burst_outlet);
