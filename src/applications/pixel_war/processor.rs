@@ -5,7 +5,10 @@ use crate::{
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::{
     ops::{Bound, RangeBounds},
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use talk::sync::fuse::Fuse;
 use tokio::{
@@ -26,6 +29,7 @@ type BurstOutlet = MpscReceiver<Arc<Vec<Vec<Paint>>>>;
 
 pub struct Processor {
     process_inlet: BatchInlet,
+    operations_applied: Arc<AtomicU64>,
     _fuse: Fuse,
 }
 
@@ -39,17 +43,25 @@ impl Processor {
         let (process_inlet, process_outlet) = mpsc::channel(settings.pipeline);
         let fuse = Fuse::new();
 
+        let operations_applied = Arc::new(AtomicU64::new(0));
+
         fuse.spawn(Processor::process(
             accounts,
             cooldown_period,
             process_outlet,
+            operations_applied.clone(),
             settings,
         ));
 
         Processor {
             process_inlet,
+            operations_applied,
             _fuse: fuse,
         }
+    }
+
+    pub fn operations_applied(&self) -> u64 {
+        self.operations_applied.load(Ordering::Relaxed)
     }
 
     pub async fn push<I>(&self, batch: I)
@@ -68,6 +80,7 @@ impl Processor {
         accounts: u64,
         cooldown_period: u64,
         mut process_outlet: BatchOutlet,
+        operations_applied: Arc<AtomicU64>,
         settings: ProcessorSettings,
     ) {
         // Spawn filter tasks
@@ -94,7 +107,7 @@ impl Processor {
             mpsc::channel(settings.pipeline / settings.batch_burst_size);
 
         task::spawn_blocking(move || {
-            Processor::apply(apply_outlet);
+            Processor::apply(apply_outlet, operations_applied);
         });
 
         loop {
@@ -187,7 +200,7 @@ impl Processor {
         }
     }
 
-    fn apply(mut apply_outlet: BurstOutlet) {
+    fn apply(mut apply_outlet: BurstOutlet, operations_applied: Arc<AtomicU64>) {
         let mut canvas = [[Color::default(); CANVAS_EDGE]; CANVAS_EDGE];
 
         loop {
@@ -198,6 +211,8 @@ impl Processor {
                 return;
             };
 
+            let burst_operation_count = burst.iter().map(Vec::len).sum::<usize>() as u64;
+
             let paints = burst
                 .iter()
                 .flatten()
@@ -206,6 +221,8 @@ impl Processor {
             for paint in paints {
                 canvas[paint.coordinates.x as usize][paint.coordinates.y as usize] = paint.color;
             }
+
+            operations_applied.fetch_add(burst_operation_count, Ordering::Relaxed);
         }
     }
 
