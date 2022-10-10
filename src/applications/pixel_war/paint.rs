@@ -73,8 +73,8 @@ mod tests {
             let original = Paint {
                 painter: rand::random::<u32>() as u64,
                 coordinates: Coordinates {
-                    x: rand::random::<u16>() % CANVAS_EDGE,
-                    y: rand::random::<u16>() % CANVAS_EDGE,
+                    x: rand::random::<u16>() % CANVAS_EDGE as u16,
+                    y: rand::random::<u16>() % CANVAS_EDGE as u16,
                 },
                 color: Color {
                     red: rand::random::<u8>(),
