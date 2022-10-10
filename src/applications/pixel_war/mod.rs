@@ -1,9 +1,13 @@
+mod color;
+mod coordinates;
 mod paint;
 mod processor;
 mod processor_settings;
 
+pub use color::Color;
+pub use coordinates::Coordinates;
+pub use paint::Paint;
 pub use processor::Processor;
 pub use processor_settings::ProcessorSettings;
 
-pub type Color = (u8, u8, u8);
-use paint::Paint;
+pub const CANVAS_EDGE: u16 = 2048;
