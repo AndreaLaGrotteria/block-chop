@@ -1,5 +1,5 @@
 use crate::{
-    applications::pixel_war::{Color, Coordinates},
+    applications::pixel_war::{Color, Coordinates, CANVAS_EDGE},
     broadcast::Entry,
 };
 use std::sync::atomic::AtomicBool;
@@ -13,6 +13,22 @@ pub struct Paint {
 }
 
 impl Paint {
+    pub fn random(painter: u64) -> Self {
+        Paint {
+            painter,
+            coordinates: Coordinates {
+                x: rand::random::<u16>() % (CANVAS_EDGE as u16),
+                y: rand::random::<u16>() % (CANVAS_EDGE as u16),
+            },
+            color: Color {
+                red: rand::random::<u8>(),
+                green: rand::random::<u8>(),
+                blue: rand::random::<u8>(),
+            },
+            throttle: AtomicBool::new(false),
+        }
+    }
+
     pub fn from_entry(entry: Entry) -> Self {
         let message = u64::from_le_bytes(entry.message);
 
