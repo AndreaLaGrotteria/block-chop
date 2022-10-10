@@ -1,5 +1,5 @@
 use crate::{
-    applications::pixel_war::{Color, Paint, ProcessorSettings},
+    applications::pixel_war::{Color, Coordinates, Paint, ProcessorSettings, CANVAS_EDGE},
     broadcast::Entry,
 };
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -141,11 +141,15 @@ impl Processor {
     }
 
     fn apply(mut receiver: BurstOutlet) {
-        let mut canvas: [[Color; 2048]; 2048] = [[(0, 0, 0); 2048]; 2048];
+        let mut canvas = [[Color::default(); CANVAS_EDGE as usize]; CANVAS_EDGE as usize];
 
         loop {
             if let Some(burst) = receiver.blocking_recv() {
-                for Paint { x, y, color, .. } in burst
+                for Paint {
+                    coordinates: Coordinates { x, y },
+                    color,
+                    ..
+                } in burst
                     .iter()
                     .flatten()
                     .filter(|paint| !paint.throttle.load(Ordering::Relaxed))
