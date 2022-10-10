@@ -86,6 +86,8 @@ impl Processor {
             .collect::<Vec<_>>();
 
         loop {
+            // Receive next batch
+
             let batch = if let Some(batch) = process_outlet.blocking_recv() {
                 batch
             } else {
@@ -94,6 +96,8 @@ impl Processor {
             };
 
             let batch_operation_count = batch.len() as u64;
+
+            // Fulfill `batch`'s `Request`s
 
             for request in batch {
                 match request {
@@ -107,6 +111,7 @@ impl Processor {
                         if *bidder_balance >= offer {
                             *bidder_balance -= offer;
                         } else {
+                            // Not enough balance to place the bid
                             continue;
                         }
 
@@ -115,12 +120,15 @@ impl Processor {
                         let token = if let Some(token) = tokens.get_mut(token as usize) {
                             token
                         } else {
+                            // `Token` does not exist
                             continue;
                         };
 
                         let refund_bid = if bid.outbids(&token.best_bid) {
+                            // `bid` outbids the old `Bid`: refund the old `Bid`
                             token.best_bid.replace(bid)
                         } else {
+                            // `bid` does not outbid the old `Bid`: refund `bid`
                             Some(bid)
                         };
 
@@ -132,10 +140,12 @@ impl Processor {
                         let token = if let Some(token) = tokens.get_mut(token as usize) {
                             token
                         } else {
+                            // `Token` does not exist
                             continue;
                         };
 
                         if taker != token.owner {
+                            // `taker` is not the owner of `token`
                             continue;
                         }
 
@@ -146,6 +156,8 @@ impl Processor {
                     }
                 }
             }
+
+            // // Increment `operations_processed`
 
             operations_processed.fetch_add(batch_operation_count, Ordering::Relaxed);
         }
