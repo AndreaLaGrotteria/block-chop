@@ -5,7 +5,10 @@ use crate::{
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::{
     ops::{Bound, RangeBounds},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use talk::sync::fuse::Fuse;
 use tokio::{
@@ -26,6 +29,7 @@ type EmptyInlet = OneShotSender<()>;
 
 pub struct Processor {
     process_inlet: BatchInlet,
+    operations_processed: Arc<AtomicU64>,
     _fuse: Fuse,
 }
 
@@ -45,17 +49,25 @@ impl Processor {
         let (process_inlet, process_outlet) = mpsc::channel(settings.pipeline);
         let fuse = Fuse::new();
 
+        let operations_processed = Arc::new(AtomicU64::new(0));
+
         fuse.spawn(Processor::process(
             accounts,
             initial_balance,
             process_outlet,
+            operations_processed.clone(),
             settings,
         ));
 
         Processor {
             process_inlet,
+            operations_processed,
             _fuse: fuse,
         }
+    }
+
+    pub fn operations_processed(&self) -> u64 {
+        self.operations_processed.load(Ordering::Relaxed)
     }
 
     pub async fn push<I>(&self, batch: I)
@@ -77,6 +89,7 @@ impl Processor {
         accounts: u64,
         initial_balance: u64,
         mut process_outlet: BatchOutlet,
+        operations_processed: Arc<AtomicU64>,
         settings: ProcessorSettings,
     ) {
         // Spawn shard tasks
@@ -122,6 +135,7 @@ impl Processor {
             }
 
             let batch_burst = Arc::new(batch_burst);
+            let burst_operation_count = batch_burst.iter().map(Vec::len).sum::<usize>() as u64;
 
             // Perform withdraws to obtain deposit rows
 
@@ -183,6 +197,10 @@ impl Processor {
                 .map(|return_outlet| return_outlet.unwrap())
                 .collect::<()>()
                 .await;
+
+            // Increment `operations_processed`
+
+            operations_processed.fetch_add(burst_operation_count, Ordering::Relaxed);
         }
     }
 
