@@ -204,16 +204,16 @@ impl Processor {
         let mut canvas = [[Color::default(); CANVAS_EDGE]; CANVAS_EDGE];
 
         loop {
-            let burst = if let Some(burst) = apply_outlet.blocking_recv() {
-                burst
+            let batch_burst = if let Some(batch_burst) = apply_outlet.blocking_recv() {
+                batch_burst
             } else {
                 // `Processor` has dropped, shutdown
                 return;
             };
 
-            let burst_operation_count = burst.iter().map(Vec::len).sum::<usize>() as u64;
+            let burst_operation_count = batch_burst.iter().map(Vec::len).sum::<usize>() as u64;
 
-            let paints = burst
+            let paints = batch_burst
                 .iter()
                 .flatten()
                 .filter(|paint| !paint.throttle.load(Ordering::Relaxed));
