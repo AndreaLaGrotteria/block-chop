@@ -42,7 +42,7 @@ enum Task {
 
 impl Processor {
     pub fn new(accounts: u64, initial_balance: u64, settings: ProcessorSettings) -> Self {
-        let (process_inlet, process_outlet) = mpsc::channel(settings.process_channel_capacity);
+        let (process_inlet, process_outlet) = mpsc::channel(settings.pipeline);
         let fuse = Fuse::new();
 
         fuse.spawn(Processor::process(
