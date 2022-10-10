@@ -29,7 +29,7 @@ type BurstOutlet = MpscReceiver<Arc<Vec<Vec<Paint>>>>;
 
 pub struct Processor {
     process_inlet: BatchInlet,
-    operations_applied: Arc<AtomicU64>,
+    operations_processed: Arc<AtomicU64>,
     _fuse: Fuse,
 }
 
@@ -43,25 +43,25 @@ impl Processor {
         let (process_inlet, process_outlet) = mpsc::channel(settings.pipeline);
         let fuse = Fuse::new();
 
-        let operations_applied = Arc::new(AtomicU64::new(0));
+        let operations_processed = Arc::new(AtomicU64::new(0));
 
         fuse.spawn(Processor::process(
             accounts,
             cooldown_period,
             process_outlet,
-            operations_applied.clone(),
+            operations_processed.clone(),
             settings,
         ));
 
         Processor {
             process_inlet,
-            operations_applied,
+            operations_processed,
             _fuse: fuse,
         }
     }
 
-    pub fn operations_applied(&self) -> u64 {
-        self.operations_applied.load(Ordering::Relaxed)
+    pub fn operations_processed(&self) -> u64 {
+        self.operations_processed.load(Ordering::Relaxed)
     }
 
     pub async fn push<I>(&self, batch: I)
@@ -80,7 +80,7 @@ impl Processor {
         accounts: u64,
         cooldown_period: u64,
         mut process_outlet: BatchOutlet,
-        operations_applied: Arc<AtomicU64>,
+        operations_processed: Arc<AtomicU64>,
         settings: ProcessorSettings,
     ) {
         // Spawn filter tasks
@@ -107,7 +107,7 @@ impl Processor {
             mpsc::channel(settings.pipeline / settings.batch_burst_size);
 
         task::spawn_blocking(move || {
-            Processor::apply(apply_outlet, operations_applied);
+            Processor::apply(apply_outlet, operations_processed);
         });
 
         loop {
@@ -200,7 +200,7 @@ impl Processor {
         }
     }
 
-    fn apply(mut apply_outlet: BurstOutlet, operations_applied: Arc<AtomicU64>) {
+    fn apply(mut apply_outlet: BurstOutlet, operations_processed: Arc<AtomicU64>) {
         let mut canvas = [[Color::default(); CANVAS_EDGE]; CANVAS_EDGE];
 
         loop {
@@ -222,7 +222,7 @@ impl Processor {
                 canvas[paint.coordinates.x as usize][paint.coordinates.y as usize] = paint.color;
             }
 
-            operations_applied.fetch_add(burst_operation_count, Ordering::Relaxed);
+            operations_processed.fetch_add(burst_operation_count, Ordering::Relaxed);
         }
     }
 
