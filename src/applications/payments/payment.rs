@@ -26,8 +26,8 @@ impl Payment {
     }
 
     pub fn to_message(&self) -> (u64, [u8; 8]) {
-        assert!(self.to <= (u32::MAX as u64));
-        assert!(self.amount <= (u32::MAX as u64));
+        debug_assert!(self.to < (1 << 32));
+        debug_assert!(self.amount < (1 << 32));
 
         let message = (self.to << 32) | self.amount;
         (self.from, message.to_le_bytes())

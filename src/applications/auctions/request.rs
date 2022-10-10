@@ -36,8 +36,8 @@ impl Request {
                 token,
                 offer,
             } => {
-                assert!(*token < (1 << 31));
-                assert!(*offer < (1 << 32));
+                debug_assert!(*token < (1 << 31));
+                debug_assert!(*offer < (1 << 32));
 
                 let message = (token << 32) | offer;
                 let message = message.to_le_bytes();
@@ -45,7 +45,7 @@ impl Request {
                 (*bidder, message)
             }
             Request::Take { owner, token } => {
-                assert!(*token < (1 << 31));
+                debug_assert!(*token < (1 << 31));
 
                 let message = (1 << 63) | (token << 32);
                 let message = message.to_le_bytes();
