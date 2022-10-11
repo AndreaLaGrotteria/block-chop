@@ -166,7 +166,7 @@ mod tests {
     async fn expand_verify() {
         let (_, _, directory, _, keychains) = generate_system(1024, 0).await;
 
-        let requests = index::sample(&mut rand::thread_rng(), 1024, 256)
+        let mut requests = index::sample(&mut rand::thread_rng(), 1024, 256)
             .into_iter()
             .map(|id| {
                 let entry = Entry {
@@ -179,11 +179,31 @@ mod tests {
                 let reduce = rand::random::<bool>();
 
                 (entry, keychain, reduce)
-            });
+            })
+            .collect::<Vec<_>>();
 
-        let (root, compressed_batch) = CompressedBatch::assemble(requests);
-        let server_batch = ServerBatch::expand_verified(&directory, compressed_batch).unwrap();
+        let (root, compressed_batch) = CompressedBatch::assemble(requests.clone());
+
+        let server_batch =
+            ServerBatch::expand_verified(&directory, compressed_batch.clone()).unwrap();
 
         assert_eq!(server_batch.root(), root);
+
+        requests.sort_unstable_by_key(|(entry, ..)| entry.id);
+
+        for ((mut reference, _, reduce), expanded) in requests.into_iter().zip(
+            server_batch
+                .entries
+                .items()
+                .iter()
+                .cloned()
+                .map(Option::unwrap),
+        ) {
+            if reduce {
+                reference.sequence = compressed_batch.raise;
+            }
+
+            assert_eq!(reference, expanded);
+        }
     }
 }
