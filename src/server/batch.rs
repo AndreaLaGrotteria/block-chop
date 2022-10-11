@@ -8,12 +8,12 @@ use talk::crypto::primitives::{hash::Hash, sign::Signature};
 use zebra::vector::Vector;
 
 #[derive(Clone)]
-pub(in crate::server) struct Batch {
+pub(crate) struct Batch {
     pub entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
-pub(in crate::server) enum BatchError {
+pub(crate) enum BatchError {
     #[doom(description("Malformed ids (invalid `VarCram`)"))]
     MalformedIds,
     #[doom(description("Empty batch"))]
@@ -211,10 +211,15 @@ impl Batch {
 }
 
 #[cfg(test)]
-pub(crate) fn expanded_batch_entries(
-    compressed_batch: CompressedBatch,
-) -> Vector<Option<Entry>, PACKING> {
-    let Batch { entries } = Batch::expand_unverified(compressed_batch).unwrap();
+mod tests {
+    use super::*;
 
-    entries
+    impl Batch {
+        pub(crate) fn expanded_batch_entries(
+            compressed_batch: CompressedBatch,
+        ) -> Vector<Option<Entry>, PACKING> {
+            let Batch { entries } = Batch::expand_unverified(compressed_batch).unwrap();
+            entries
+        }
+    }
 }

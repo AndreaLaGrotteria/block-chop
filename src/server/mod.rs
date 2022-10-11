@@ -8,7 +8,6 @@ mod server_settings;
 mod totality_manager;
 mod totality_manager_settings;
 
-use batch::Batch;
 use broker_slot::BrokerSlot;
 use deduplicator::Deduplicator;
 use deduplicator_settings::DeduplicatorSettings;
@@ -16,8 +15,7 @@ use duplicate::Duplicate;
 use totality_manager::TotalityManager;
 use totality_manager_settings::TotalityManagerSettings;
 
-#[cfg(test)]
-pub(crate) use batch::expanded_batch_entries;
+pub(crate) use batch::Batch;
 
 pub use server::Server;
 pub use server_settings::ServerSettings;
