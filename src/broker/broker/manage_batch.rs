@@ -88,8 +88,7 @@ mod tests {
                 totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
-        )
-        .await;
+        );
 
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
@@ -120,8 +119,7 @@ mod tests {
                 totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
-        )
-        .await;
+        );
 
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
@@ -156,8 +154,7 @@ mod tests {
                 totality_timeout: Duration::from_millis(100),
                 ..Default::default()
             },
-        )
-        .await;
+        );
 
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");

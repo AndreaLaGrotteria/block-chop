@@ -24,7 +24,7 @@ pub enum BrokerError {
 }
 
 impl Broker {
-    pub async fn new<A, I>(
+    pub fn new<A, I>(
         membership: Membership,
         directory: Directory,
         bind: A,
