@@ -2,19 +2,17 @@ use crate::broadcast::{Message, Straggler};
 #[cfg(feature = "benchmark")]
 use crate::{
     broadcast::{Entry, PACKING},
-    crypto::statements::Reduction as ReductionStatement,
+    crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     system::{Directory, Passepartout},
 };
 #[cfg(feature = "benchmark")]
-use rand::seq::IteratorRandom;
+use rand::seq::index;
 #[cfg(feature = "benchmark")]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "benchmark")]
-use std::iter;
-#[cfg(feature = "benchmark")]
-use talk::crypto::primitives::hash::Hash;
 use talk::crypto::primitives::multi::Signature as MultiSignature;
+#[cfg(feature = "benchmark")]
+use talk::crypto::{primitives::hash::Hash, KeyChain};
 use varcram::VarCram;
 
 #[cfg(feature = "benchmark")]
@@ -30,69 +28,130 @@ pub struct CompressedBatch {
 }
 
 impl CompressedBatch {
-    #[allow(dead_code)]
     #[cfg(feature = "benchmark")]
-    pub fn random_fully_reduced(
-        directory: &Directory,
-        passepartout: &Passepartout,
-        size: usize,
-    ) -> (Hash, CompressedBatch) {
-        let mut ids = (0..(directory.capacity() as u64))
-            .into_iter()
-            .choose_multiple(&mut rand::thread_rng(), size);
+    pub fn assemble<R>(requests: R) -> (Hash, CompressedBatch)
+    where
+        R: IntoIterator<Item = (Entry, KeyChain, bool)>,
+    {
+        // Sort `requests` by id
 
-        ids.sort_unstable();
+        let mut requests = requests.into_iter().collect::<Vec<_>>();
+        requests.sort_unstable_by_key(|(entry, ..)| entry.id);
 
-        let messages = iter::repeat_with(rand::random)
-            .take(size)
-            .collect::<Vec<_>>();
+        // Compute raise, extract ids and messages, produce raised `Entry`ies, generate `Straggler`s
 
-        let raise = 0;
-
-        let entries = ids
+        let raise = requests
             .iter()
-            .copied()
-            .zip(messages.iter().cloned())
-            .map(|(id, message)| {
-                Some(Entry {
-                    id,
-                    sequence: raise,
-                    message,
-                })
-            })
-            .collect::<Vec<_>>();
+            .map(|(entry, ..)| entry.sequence)
+            .max()
+            .unwrap();
 
-        let entries = Vector::<_, PACKING>::new(entries).unwrap();
-        let root = entries.root();
+        let mut ids = Vec::with_capacity(requests.len());
+        let mut messages = Vec::with_capacity(requests.len());
 
-        let statement = ReductionStatement {
+        let mut entries = Vec::with_capacity(requests.len());
+        let mut stragglers = Vec::new();
+
+        for (entry, keychain, reduce) in requests.iter() {
+            ids.push(entry.id);
+            messages.push(entry.message.clone());
+
+            entries.push(Some(Entry {
+                id: entry.id,
+                sequence: raise,
+                message: entry.message.clone(),
+            }));
+
+            if !reduce {
+                let broadcast_statement = BroadcastStatement {
+                    sequence: &entry.sequence,
+                    message: &entry.message,
+                };
+
+                let signature = keychain.sign(&broadcast_statement).unwrap();
+
+                stragglers.push(Straggler {
+                    id: entry.id,
+                    sequence: entry.sequence,
+                    signature,
+                });
+            }
+        }
+
+        let ids = VarCram::cram(ids.as_slice());
+        let mut entries = Vector::<_, PACKING>::new(entries).unwrap();
+
+        // Compute reduction `MultiSignature`
+
+        let reduction_statement = ReductionStatement {
             root: &entries.root(),
         };
 
-        let multisignatures = ids
+        let multisignatures = requests
             .par_iter()
-            .copied()
-            .map(|id| {
-                let keycard = directory.get(id).unwrap();
-                let identity = keycard.identity();
-                let keychain = passepartout.get(identity).unwrap();
-
-                keychain.multisign(&statement).unwrap()
+            .filter_map(|(_, keychain, reduce)| {
+                if *reduce {
+                    Some(keychain.multisign(&reduction_statement).unwrap())
+                } else {
+                    None
+                }
             })
             .collect::<Vec<_>>();
 
-        let multisignature = Some(MultiSignature::aggregate(multisignatures).unwrap());
+        let multisignature = if !multisignatures.is_empty() {
+            Some(MultiSignature::aggregate(multisignatures).unwrap())
+        } else {
+            None
+        };
 
-        let ids = VarCram::cram(ids.as_slice());
+        // Reset straggler sequences in `entries`
+
+        for straggler in stragglers.iter() {
+            let index = entries
+                .items()
+                .binary_search_by_key(&straggler.id, |entry| entry.as_ref().unwrap().id)
+                .unwrap();
+
+            let mut entry = entries.items().get(index).cloned().unwrap().unwrap();
+            entry.sequence = straggler.sequence;
+
+            entries.set(index, Some(entry)).unwrap();
+        }
 
         let compressed_batch = CompressedBatch {
             ids,
             messages,
             raise,
             multisignature,
-            stragglers: Vec::new(),
+            stragglers,
         };
 
-        (root, compressed_batch)
+        (entries.root(), compressed_batch)
+    }
+
+    #[cfg(feature = "benchmark")]
+    pub fn random_fully_reduced(
+        directory: &Directory,
+        passepartout: &Passepartout,
+        size: usize,
+    ) -> (Hash, CompressedBatch) {
+        let requests = index::sample(&mut rand::thread_rng(), directory.capacity(), size)
+            .into_iter()
+            .map(|id| {
+                let id = id as u64;
+
+                let identity = directory.get(id).unwrap().identity();
+                let keychain = passepartout.get(identity).unwrap();
+
+                let entry = Entry {
+                    id: id as u64,
+                    sequence: 0,
+                    message: rand::random(),
+                };
+
+                (entry, keychain, true)
+            });
+
+        CompressedBatch::assemble(requests)
     }
 }
