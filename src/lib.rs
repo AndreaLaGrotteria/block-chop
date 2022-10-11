@@ -24,4 +24,6 @@ pub use server::Server;
 pub use system::{Directory, Membership};
 
 #[cfg(feature = "benchmark")]
+pub use broker::{LoadBroker, LoadBrokerSettings};
+#[cfg(feature = "benchmark")]
 pub use system::Passepartout;

@@ -2,6 +2,8 @@ mod batch;
 mod broker;
 mod broker_settings;
 #[cfg(feature = "benchmark")]
+mod load_broker;
+#[cfg(feature = "benchmark")]
 mod load_broker_settings;
 mod reduction;
 mod request;
@@ -11,6 +13,8 @@ mod worker;
 
 pub use broker::Broker;
 pub use broker_settings::BrokerSettings;
+#[cfg(feature = "benchmark")]
+pub use load_broker::LoadBroker;
 #[cfg(feature = "benchmark")]
 pub use load_broker_settings::LoadBrokerSettings;
 

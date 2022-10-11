@@ -20,7 +20,7 @@ type MultiSignatureInlet = MpscSender<(Identity, MultiSignature)>;
 type DeliveryShardInlet = MpscSender<(Identity, DeliveryShard)>;
 
 #[derive(Doom)]
-enum TrySubmitError {
+pub(in crate::broker) enum TrySubmitError {
     #[doom(description("Failed to connect"))]
     ConnectFailed,
     #[doom(description("Connection error"))]
@@ -68,7 +68,7 @@ impl Broker {
         }
     }
 
-    async fn try_submit_batch(
+    pub(in crate::broker) async fn try_submit_batch(
         worker: Identity,
         sequence: u64,
         root: Hash,
