@@ -144,7 +144,7 @@ impl CompressedBatch {
                 let keychain = passepartout.get(identity).unwrap();
 
                 let entry = Entry {
-                    id: id as u64,
+                    id,
                     sequence: 0,
                     message: rand::random(),
                 };
@@ -153,5 +153,37 @@ impl CompressedBatch {
             });
 
         CompressedBatch::assemble(requests)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{server::Batch as ServerBatch, system::test::generate_system};
+
+    #[tokio::test]
+    #[cfg(feature = "benchmark")]
+    async fn expand_verify() {
+        let (_, _, directory, _, keychains) = generate_system(1024, 0).await;
+
+        let requests = index::sample(&mut rand::thread_rng(), 1024, 256)
+            .into_iter()
+            .map(|id| {
+                let entry = Entry {
+                    id: id as u64,
+                    sequence: rand::random::<u64>() % 65534,
+                    message: rand::random(),
+                };
+
+                let keychain = keychains.get(id).unwrap().clone();
+                let reduce = rand::random::<bool>();
+
+                (entry, keychain, reduce)
+            });
+
+        let (root, compressed_batch) = CompressedBatch::assemble(requests);
+        let server_batch = ServerBatch::expand_verified(&directory, compressed_batch).unwrap();
+
+        assert_eq!(server_batch.root(), root);
     }
 }
