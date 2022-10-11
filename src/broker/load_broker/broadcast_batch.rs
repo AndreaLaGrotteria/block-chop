@@ -134,7 +134,7 @@ impl LoadBroker {
         // Move `fuse` to a long-lived task, submitting `batch`
         // to straggler servers until a timeout expires
 
-        task::spawn(async move {
+        let handle = task::spawn(async move {
             let _fuse = fuse;
 
             let submissions = join_all(submit_tasks.into_iter());
@@ -143,6 +143,8 @@ impl LoadBroker {
                 Err(_) => warn!("Timeout: could not finish submitting batch to all servers."),
             }
         });
+        
+        handle.await.unwrap();
     }
 }
 
