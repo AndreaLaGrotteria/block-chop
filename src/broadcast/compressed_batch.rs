@@ -21,7 +21,7 @@ use varcram::VarCram;
 use zebra::vector::Vector;
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct CompressedBatch {
+pub struct CompressedBatch {
     pub ids: VarCram,
     pub messages: Vec<Message>,
     pub raise: u64,
