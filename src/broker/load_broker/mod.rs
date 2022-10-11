@@ -64,20 +64,18 @@ mod broadcast_batch;
 mod broadcast_batches;
 mod submit_batch;
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::{broadcast::{test::null_batch, CompressedBatch}, system::test::generate_system};
-
+    use crate::{
+        broadcast::{test::null_batch, CompressedBatch},
+        system::test::generate_system,
+    };
     use std::time::Duration;
-
     use talk::{
         crypto::KeyChain,
         net::{test::TestConnector, SessionConnector},
     };
-
     use tokio::time;
 
     fn to_raw(val: (Hash, CompressedBatch)) -> (Hash, Vec<u8>) {

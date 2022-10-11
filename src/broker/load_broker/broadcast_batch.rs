@@ -143,7 +143,7 @@ impl LoadBroker {
                 Err(_) => warn!("Timeout: could not finish submitting batch to all servers."),
             }
         });
-        
+
         handle.await.unwrap();
     }
 }
