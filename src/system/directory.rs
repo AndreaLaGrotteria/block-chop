@@ -118,7 +118,7 @@ impl Directory {
 
             // Deserialize `blocks` in parallel
 
-            let mut entries = blocks
+            let mut chunk = blocks
                 .into_par_iter()
                 .map(|block| {
                     if block[0] == 0 {
@@ -132,9 +132,9 @@ impl Directory {
                 .map_err(DirectoryError::into_top)
                 .spot(here!())?;
 
-            // Flush `entries` into `keycards`
+            // Flush `chunk` into `keycards`
 
-            keycards.append(&mut entries);
+            keycards.append(&mut chunk);
         }
 
         Ok(Directory {
@@ -209,8 +209,8 @@ impl Directory {
 
             let blocks = chunk
                 .into_par_iter()
-                .map(|entry| {
-                    if let Some(keycard) = entry {
+                .map(|keycard| {
+                    if let Some(keycard) = keycard {
                         let mut block = [0u8; BLOCK_SIZE];
                         bincode::serialize_into(&mut block[1..], &keycard).unwrap();
                         block

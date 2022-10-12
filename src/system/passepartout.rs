@@ -106,7 +106,7 @@ impl Passepartout {
 
             // Deserialize `blocks` in parallel
 
-            let entries = blocks
+            let chunk = blocks
                 .into_par_iter()
                 .map(|block| bincode::deserialize::<(Identity, KeyChain)>(block.as_slice()))
                 .collect::<Result<Vec<_>, _>>()
@@ -114,9 +114,9 @@ impl Passepartout {
                 .map_err(PassepartoutError::into_top)
                 .spot(here!())?;
 
-            // Flush `entries` into `keychains`
+            // Flush `chunk` into `keychains`
 
-            for (identity, keychain) in entries {
+            for (identity, keychain) in chunk {
                 keychains.insert(identity, keychain);
             }
         }
