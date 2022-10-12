@@ -1,5 +1,5 @@
 use doomstack::{here, Doom, ResultExt, Top};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -78,7 +78,7 @@ impl Passepartout {
             let mut blocks = Vec::with_capacity(CHUNK_SIZE);
 
             for _ in 0..CHUNK_SIZE {
-                let mut block = [0u8; 240];
+                let mut block = [0u8; BLOCK_SIZE];
 
                 match file.read_exact(block.as_mut_slice()) {
                     Ok(()) => Ok(()),
