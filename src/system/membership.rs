@@ -3,6 +3,8 @@ use rand::{seq::SliceRandom, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 use std::{
     collections::{BTreeMap, HashSet},
+    fs::File,
+    io::{self, BufReader, BufWriter, Write},
     path::Path,
 };
 use talk::crypto::{primitives::hash::Hash, Identity, KeyCard};
@@ -14,24 +16,18 @@ pub struct Membership {
 
 #[derive(Doom)]
 pub enum MembershipError {
-    #[doom(description("Failed to open database: {:?}", source))]
+    #[doom(description("Failed to open file: {:?}", source))]
     #[doom(wrap(open_failed))]
-    OpenFailed { source: sled::Error },
-    #[doom(description("Failed to load entry: {:?}", source))]
-    #[doom(wrap(load_failed))]
-    LoadFailed { source: sled::Error },
-    #[doom(description("Failed to deserialize entry: {:?}", source))]
+    OpenFailed { source: io::Error },
+    #[doom(description("Failed to deserialize: {}", source))]
     #[doom(wrap(deserialize_failed))]
-    DeserializeFailed { source: bincode::Error },
-    #[doom(description("Failed to clear database: {:?}", source))]
-    #[doom(wrap(clear_failed))]
-    ClearFailed { source: sled::Error },
-    #[doom(description("Failed to save entry: {:?}", source))]
-    #[doom(wrap(save_failed))]
-    SaveFailed { source: sled::Error },
-    #[doom(description("Failed to flush database: {:?}", source))]
+    DeserializeFailed { source: Box<bincode::ErrorKind> },
+    #[doom(description("Failed to serialize: {}", source))]
+    #[doom(wrap(serialize_failed))]
+    SerializeFailed { source: Box<bincode::ErrorKind> },
+    #[doom(description("Failed to flush file: {:?}", source))]
     #[doom(wrap(flush_failed))]
-    FlushFailed { source: sled::Error },
+    FlushFailed { source: io::Error },
     #[doom(description("Insufficient number of servers in database: {:?}"))]
     LoadExactFailed,
 }
@@ -53,32 +49,17 @@ impl Membership {
     where
         P: AsRef<Path>,
     {
-        let database = sled::open(path)
+        let file = File::open(path)
             .map_err(MembershipError::open_failed)
             .map_err(MembershipError::into_top)
             .spot(here!())?;
 
-        let servers = database
-            .iter()
-            .map(|entry| {
-                let (key, value) = entry
-                    .map_err(MembershipError::load_failed)
-                    .map_err(MembershipError::into_top)
-                    .spot(here!())?;
+        let mut file = BufReader::new(file);
 
-                let identity = bincode::deserialize::<Identity>(key.as_ref())
-                    .map_err(MembershipError::deserialize_failed)
-                    .map_err(MembershipError::into_top)
-                    .spot(here!())?;
-
-                let keycard = bincode::deserialize::<KeyCard>(value.as_ref())
-                    .map_err(MembershipError::deserialize_failed)
-                    .map_err(MembershipError::into_top)
-                    .spot(here!())?;
-
-                Ok((identity, keycard))
-            })
-            .collect::<Result<BTreeMap<_, _>, Top<MembershipError>>>()?;
+        let servers = bincode::deserialize_from(&mut file)
+            .map_err(MembershipError::deserialize_failed)
+            .map_err(MembershipError::into_top)
+            .spot(here!())?;
 
         Ok(Membership { servers })
     }
@@ -127,30 +108,19 @@ impl Membership {
     where
         P: AsRef<Path>,
     {
-        let database = sled::open(path)
+        let file = File::create(path)
             .map_err(MembershipError::open_failed)
             .map_err(MembershipError::into_top)
             .spot(here!())?;
 
-        database
-            .clear()
-            .map_err(MembershipError::clear_failed)
+        let mut file = BufWriter::new(file);
+
+        bincode::serialize_into(&mut file, &self.servers)
+            .map_err(MembershipError::serialize_failed)
             .map_err(MembershipError::into_top)
             .spot(here!())?;
 
-        for (identity, keycard) in self.servers.iter() {
-            let key = bincode::serialize(identity).unwrap();
-            let value = bincode::serialize(keycard).unwrap();
-
-            database
-                .insert(key, value)
-                .map_err(MembershipError::save_failed)
-                .map_err(MembershipError::into_top)
-                .spot(here!())?;
-        }
-
-        database
-            .flush()
+        file.flush()
             .map_err(MembershipError::flush_failed)
             .map_err(MembershipError::into_top)
             .spot(here!())?;
