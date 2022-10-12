@@ -3,6 +3,7 @@ use rand::{
     distributions::{Distribution, WeightedIndex},
     seq::SliceRandom,
 };
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -10,6 +11,7 @@ use std::{
     io::{self, prelude::*},
     iter,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
 };
 use talk::crypto::KeyChain;
 
@@ -58,6 +60,8 @@ fn main() {
     let reduction_probability = args.get_float("reduction_probability") as f64;
     let output_path = PathBuf::from(args.get_string("output_path"));
 
+    let total_batches = flows * batches_per_flow;
+
     // Load `Passepartout` and `Directory`
 
     println!("Loading `Passepartout` and `Directory`..");
@@ -92,135 +96,137 @@ fn main() {
 
     // Generate flows
 
-    for (flow_index, flow) in flows.into_iter().enumerate() {
-        println!("\nGenerating flow {flow_index}..");
+    println!("\nGenerating flows..");
 
-        // Setup output folder
+    let batch_count = AtomicU64::new(0);
 
-        let mut flow_path = output_path.clone();
-        flow_path.push(format!("flow-{flow_index:02}"));
+    flows
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(flow_index, flow)| {
+            // Setup output folder
 
-        fs::create_dir_all(flow_path.as_path()).unwrap();
+            let mut flow_path = output_path.clone();
+            flow_path.push(format!("flow-{flow_index:02}"));
 
-        // Setup `Client`s
+            fs::create_dir_all(flow_path.as_path()).unwrap();
 
-        println!("    Setting up `Client`s..");
+            // Setup `Client`s
 
-        let clients = flow
-            .iter()
-            .copied()
-            .map(|id| {
-                let identity = directory.get(id).unwrap().identity();
-                let keychain = passepartout.get(identity).unwrap();
-
-                let state = State {
-                    next_sequence: 0,
-                    last_broadcast: None,
-                };
-
-                Client {
-                    id,
-                    keychain,
-                    state: RefCell::new(state),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        println!("     .. done!");
-
-        // Generate `CompressedBatch`es
-
-        println!("    Generating `CompressedBatch`es..");
-
-        for batch_index in 0..batches_per_flow {
-            print!("\r     -> Generating batch {batch_index}");
-            io::stdout().flush().unwrap();
-
-            // Select broadcasters
-
-            let mut broadcasters = HashMap::new();
-
-            while broadcasters.len() < batch_size {
-                let client = clients.choose(&mut rand::thread_rng()).unwrap();
-
-                if broadcasters.contains_key(&client.id) {
-                    continue;
-                }
-
-                if let Some(last_broadcast) = client.state.borrow().last_broadcast {
-                    if batch_index - last_broadcast < cooldown {
-                        continue;
-                    }
-                }
-
-                broadcasters.insert(client.id, client);
-            }
-
-            let broadcasters = broadcasters.into_values().collect::<Vec<_>>();
-
-            // Generate entries
-
-            let entries = broadcasters
+            let clients = flow
                 .iter()
-                .map(|broadcaster| Entry {
-                    id: broadcaster.id,
-                    sequence: broadcaster.state.borrow().next_sequence,
-                    message: rand::random(),
+                .copied()
+                .map(|id| {
+                    let identity = directory.get(id).unwrap().identity();
+                    let keychain = passepartout.get(identity).unwrap();
+
+                    let state = State {
+                        next_sequence: 0,
+                        last_broadcast: None,
+                    };
+
+                    Client {
+                        id,
+                        keychain,
+                        state: RefCell::new(state),
+                    }
                 })
                 .collect::<Vec<_>>();
 
-            // Randomize reductions
+            // Generate `CompressedBatch`es
 
-            let choices = [true, false];
-            let weights = [reduction_probability, (1. - reduction_probability)];
+            for batch_index in 0..batches_per_flow {
+                // Select broadcasters
 
-            let distribution = WeightedIndex::new(&weights).unwrap();
+                let mut broadcasters = HashMap::new();
 
-            let reductions =
-                iter::repeat_with(|| choices[distribution.sample(&mut rand::thread_rng())])
-                    .take(broadcasters.len())
+                while broadcasters.len() < batch_size {
+                    let client = clients.choose(&mut rand::thread_rng()).unwrap();
+
+                    if broadcasters.contains_key(&client.id) {
+                        continue;
+                    }
+
+                    if let Some(last_broadcast) = client.state.borrow().last_broadcast {
+                        if batch_index - last_broadcast < cooldown {
+                            continue;
+                        }
+                    }
+
+                    broadcasters.insert(client.id, client);
+                }
+
+                let broadcasters = broadcasters.into_values().collect::<Vec<_>>();
+
+                // Generate entries
+
+                let entries = broadcasters
+                    .iter()
+                    .map(|broadcaster| Entry {
+                        id: broadcaster.id,
+                        sequence: broadcaster.state.borrow().next_sequence,
+                        message: rand::random(),
+                    })
                     .collect::<Vec<_>>();
 
-            // Assemble `CompressedBatch`
+                // Randomize reductions
 
-            let requests = broadcasters
-                .iter()
-                .zip(entries)
-                .zip(reductions.iter().copied())
-                .map(|((broadcaster, entry), reduce)| {
-                    (entry, broadcaster.keychain.clone(), reduce)
-                });
+                let choices = [true, false];
+                let weights = [reduction_probability, (1. - reduction_probability)];
 
-            let (root, compressed_batch) = CompressedBatch::assemble(requests);
+                let distribution = WeightedIndex::new(&weights).unwrap();
 
-            // Update `next_sequence`s in `broadcasters`
+                let reductions =
+                    iter::repeat_with(|| choices[distribution.sample(&mut rand::thread_rng())])
+                        .take(broadcasters.len())
+                        .collect::<Vec<_>>();
 
-            for (broadcaster, reduced) in broadcasters.into_iter().zip(reductions) {
-                let mut state = broadcaster.state.borrow_mut();
-                state.last_broadcast = Some(batch_index);
+                // Assemble `CompressedBatch`
 
-                state.next_sequence = if reduced {
-                    compressed_batch.raise + 1
-                } else {
-                    state.next_sequence + 1
-                };
+                let requests = broadcasters
+                    .iter()
+                    .zip(entries)
+                    .zip(reductions.iter().copied())
+                    .map(|((broadcaster, entry), reduce)| {
+                        (entry, broadcaster.keychain.clone(), reduce)
+                    });
+
+                let (root, compressed_batch) = CompressedBatch::assemble(requests);
+
+                // Update `next_sequence`s in `broadcasters`
+
+                for (broadcaster, reduced) in broadcasters.into_iter().zip(reductions) {
+                    let mut state = broadcaster.state.borrow_mut();
+                    state.last_broadcast = Some(batch_index);
+
+                    state.next_sequence = if reduced {
+                        compressed_batch.raise + 1
+                    } else {
+                        state.next_sequence + 1
+                    };
+                }
+
+                // Save `root` and `compressed_batch`
+
+                let mut batch_path = flow_path.clone();
+                batch_path.push(format!("batch-{batch_index:05}.raw"));
+
+                let root = root.to_bytes();
+                let compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+
+                let mut file = File::create(batch_path).unwrap();
+                file.write_all(root.as_slice()).unwrap();
+                file.write_all(compressed_batch.as_slice()).unwrap();
+
+                // Log progress
+
+                let batch_count = batch_count.fetch_add(1, Ordering::Relaxed);
+
+                print!("\r    Generated {batch_count} / {total_batches} batches");
+                io::stdout().flush().unwrap();
             }
+        });
 
-            // Save `root` and `compressed_batch`
-
-            let mut batch_path = flow_path.clone();
-            batch_path.push(format!("batch-{batch_index:05}.raw"));
-
-            let root = root.to_bytes();
-            let compressed_batch = bincode::serialize(&compressed_batch).unwrap();
-
-            let mut file = File::create(batch_path).unwrap();
-            file.write_all(root.as_slice()).unwrap();
-            file.write_all(compressed_batch.as_slice()).unwrap();
-        }
-
-        println!("     .. done!                         ");
-    }
-
+    println!(" .. done!                                           \n");
     println!("All done! Chop CHOP!");
 }
