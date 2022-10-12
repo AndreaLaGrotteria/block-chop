@@ -62,7 +62,7 @@ fn main() {
 
     println!("Loading `Passepartout` and `Directory`..");
 
-    let passepartout = Passepartout::open(passepartout_path).unwrap();
+    let passepartout = Passepartout::load(passepartout_path).unwrap();
 
     let directory = if raw_directory {
         unsafe { Directory::load_raw(directory_path) }

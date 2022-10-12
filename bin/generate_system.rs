@@ -30,14 +30,14 @@ fn main() {
 
     println!("Initializing `Passepartout`..");
 
-    let passepartout = Passepartout::open(passepartout_path).unwrap();
+    let mut passepartout = Passepartout::new();
 
     println!("\nGenerating `Membership`..");
 
     let membership = Membership::new(iter::repeat_with(KeyChain::random).take(servers).map(
         |keychain| {
             let keycard = keychain.keycard();
-            passepartout.insert(keycard.identity(), keychain).unwrap();
+            passepartout.insert(keycard.identity(), keychain);
 
             keycard
         },
@@ -78,7 +78,7 @@ fn main() {
             io::stdout().flush().unwrap();
         }
 
-        passepartout.insert(keycard.identity(), keychain).unwrap();
+        passepartout.insert(keycard.identity(), keychain);
         directory.insert(index as u64, keycard);
     }
 
@@ -86,7 +86,7 @@ fn main() {
 
     println!("\nSaving `Passepartout`, `Membership` and `Directory`..");
 
-    passepartout.flush().unwrap();
+    passepartout.save(passepartout_path).unwrap();
     membership.save(membership_path).unwrap();
     directory.save(directory_path).unwrap();
 
