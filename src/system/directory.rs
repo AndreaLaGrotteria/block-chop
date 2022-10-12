@@ -1,16 +1,25 @@
 use doomstack::{here, Doom, ResultExt, Top};
 #[cfg(feature = "benchmark")]
 use memmap::{Mmap, MmapMut, MmapOptions};
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
-use std::path::Path;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[cfg(feature = "benchmark")]
 use std::{
     fs::{File, OpenOptions},
     slice,
 };
+use std::{
+    io::{self, BufReader, BufWriter},
+    path::Path,
+};
 #[cfg(feature = "benchmark")]
-use std::{io::Write, mem};
+use std::{
+    io::{Read, Write},
+    mem,
+};
 use talk::crypto::KeyCard;
+
+const BLOCK_SIZE: usize = 145;
+const CHUNK_SIZE: usize = 16 * 1048576;
 
 #[cfg(feature = "benchmark")]
 const ENTRY_SIZE: usize = mem::size_of::<Option<KeyCard>>();
@@ -23,26 +32,29 @@ pub struct Directory {
 
 #[derive(Doom)]
 pub enum DirectoryError {
-    #[doom(description("Failed to open database: {:?}", source))]
+    #[doom(description("Failed to open file: {:?}", source))]
     #[doom(wrap(open_failed))]
-    OpenFailed { source: sled::Error },
-    #[doom(description("Failed to load entry: {:?}", source))]
-    #[doom(wrap(load_failed))]
-    LoadFailed { source: sled::Error },
-    #[doom(description("Failed to deserialize id"))]
-    DeserializeIdFailed,
-    #[doom(description("Failed to deserialize keycard: {:?}", source))]
-    #[doom(wrap(deserialize_keycard_failed))]
-    DeserializeKeyCardFailed { source: bincode::Error },
-    #[doom(description("Failed to clear database: {:?}", source))]
-    #[doom(wrap(clear_failed))]
-    ClearFailed { source: sled::Error },
-    #[doom(description("Failed to save entry: {:?}", source))]
-    #[doom(wrap(save_failed))]
-    SaveFailed { source: sled::Error },
-    #[doom(description("Failed to flush database: {:?}", source))]
+    OpenFailed { source: io::Error },
+    #[doom(description("Failed to obtain metadata: {:?}", source))]
+    #[doom(wrap(metadata_unavailable))]
+    MetadataUnavailable { source: io::Error },
+    #[doom(description("Unexpected file size (not a multiple of `BLOCK_SIZE`)"))]
+    UnexpectedFileSize,
+    #[doom(description("Failed to read block: {:?}", source))]
+    #[doom(wrap(read_failed))]
+    ReadFailed { source: io::Error },
+    #[doom(description("Failed to deserialize: {}", source))]
+    #[doom(wrap(deserialize_failed))]
+    DeserializeFailed { source: Box<bincode::ErrorKind> },
+    #[doom(description("Failed to write block: {:?}", source))]
+    #[doom(wrap(write_failed))]
+    WriteFailed { source: io::Error },
+    #[doom(description("Failed to seek to block: {:?}", source))]
+    #[doom(wrap(seek_failed))]
+    SeekFailed { source: io::Error },
+    #[doom(description("Failed to flush file: {:?}", source))]
     #[doom(wrap(flush_failed))]
-    FlushFailed { source: sled::Error },
+    FlushFailed { source: io::Error },
 }
 
 impl Directory {
@@ -54,67 +66,75 @@ impl Directory {
     where
         P: AsRef<Path>,
     {
-        let database = sled::open(path)
+        let file = File::open(path)
             .map_err(DirectoryError::open_failed)
             .map_err(DirectoryError::into_top)
             .spot(here!())?;
 
-        let capacity = if let Some(entry) = database.iter().next_back() {
-            let (key, _) = entry
-                .map_err(DirectoryError::load_failed)
+        let metadata = file
+            .metadata()
+            .map_err(DirectoryError::metadata_unavailable)
+            .map_err(DirectoryError::into_top)
+            .spot(here!())?;
+
+        if metadata.len() % (BLOCK_SIZE as u64) != 0 {
+            return DirectoryError::UnexpectedFileSize.fail().spot(here!());
+        }
+
+        let mut keycards = Vec::with_capacity((metadata.len() / (BLOCK_SIZE as u64)) as usize);
+        let mut file = BufReader::new(file);
+
+        loop {
+            // Load up to `CHUNK_SIZE` blocks from `file`
+
+            let mut blocks = Vec::with_capacity(CHUNK_SIZE);
+
+            for _ in 0..CHUNK_SIZE {
+                let mut block = [0u8; BLOCK_SIZE];
+
+                match file.read_exact(block.as_mut_slice()) {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        if error.kind() == io::ErrorKind::UnexpectedEof {
+                            // End of file is not actually unexpected: `file`' size
+                            // is guaranteed to be a multiple of `BLOCK_SIZE`, but
+                            // not a multiple of `BLOCK_SIZE * CHUNK_SIZE`
+                            break;
+                        } else {
+                            Err(error)
+                        }
+                    }
+                }
+                .map_err(DirectoryError::read_failed)
                 .map_err(DirectoryError::into_top)
                 .spot(here!())?;
 
-            let id = if key.len() == 8 {
-                let mut buffer = [0u8; 8];
-                buffer.clone_from_slice(key.as_ref());
-                u64::from_be_bytes(buffer)
-            } else {
-                return DirectoryError::DeserializeIdFailed.fail().spot(here!());
-            };
+                blocks.push(block);
+            }
 
-            (id as usize) + 1
-        } else {
-            0
-        };
+            if blocks.is_empty() {
+                break;
+            }
 
-        let entries = database
-            .iter()
-            .map(|entry| -> Result<_, Top<_>> {
-                let (key, value) = entry
-                    .map_err(DirectoryError::load_failed)
-                    .map_err(DirectoryError::into_top)
-                    .spot(here!())?;
+            // Deserialize `blocks` in parallel
 
-                Ok((key, value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            let mut entries = blocks
+                .into_par_iter()
+                .map(|block| {
+                    if block[0] == 0 {
+                        bincode::deserialize::<KeyCard>(&block[1..]).map(|keycard| Some(keycard))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(DirectoryError::deserialize_failed)
+                .map_err(DirectoryError::into_top)
+                .spot(here!())?;
 
-        let entries = entries
-            .par_iter()
-            .map(|(key, value)| -> Result<_, Top<_>> {
-                let id = if key.len() == 8 {
-                    let mut buffer = [0u8; 8];
-                    buffer.clone_from_slice(key.as_ref());
-                    u64::from_be_bytes(buffer)
-                } else {
-                    return DirectoryError::DeserializeIdFailed.fail().spot(here!());
-                };
+            // Flush `entries` into `keycards`
 
-                let keycard = bincode::deserialize::<KeyCard>(value.as_ref())
-                    .map_err(DirectoryError::deserialize_keycard_failed)
-                    .map_err(DirectoryError::into_top)
-                    .spot(here!())?;
-
-                Ok((id, keycard))
-            })
-            .collect::<Vec<_>>();
-
-        let mut keycards = vec![None; capacity];
-
-        for entry in entries {
-            let (id, keycard) = entry?;
-            *keycards.get_mut(id as usize).unwrap() = Some(keycard);
+            keycards.append(&mut entries);
         }
 
         Ok(Directory {
@@ -177,32 +197,40 @@ impl Directory {
     where
         P: AsRef<Path>,
     {
-        let database = sled::open(path)
+        let file = File::create(path)
             .map_err(DirectoryError::open_failed)
             .map_err(DirectoryError::into_top)
             .spot(here!())?;
 
-        database
-            .clear()
-            .map_err(DirectoryError::clear_failed)
-            .map_err(DirectoryError::into_top)
-            .spot(here!())?;
+        let mut file = BufWriter::new(file);
 
-        for (index, keycard) in self.keycards.iter().enumerate() {
-            if let Some(keycard) = keycard {
-                let key = (index as u64).to_be_bytes();
-                let value = bincode::serialize(&keycard).unwrap();
+        for chunk in self.keycards.chunks(CHUNK_SIZE) {
+            // Serialize `chunk` in parallel
 
-                database
-                    .insert(key, value)
-                    .map_err(DirectoryError::save_failed)
+            let blocks = chunk
+                .into_par_iter()
+                .map(|entry| {
+                    if let Some(keycard) = entry {
+                        let mut block = [0u8; BLOCK_SIZE];
+                        bincode::serialize_into(&mut block[1..], &keycard).unwrap();
+                        block
+                    } else {
+                        [u8::MAX; BLOCK_SIZE]
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            // Flush `chunk` to `file`
+
+            for block in blocks {
+                file.write_all(block.as_slice())
+                    .map_err(DirectoryError::write_failed)
                     .map_err(DirectoryError::into_top)
                     .spot(here!())?;
             }
         }
 
-        database
-            .flush()
+        file.flush()
             .map_err(DirectoryError::flush_failed)
             .map_err(DirectoryError::into_top)
             .spot(here!())?;
