@@ -317,7 +317,7 @@ mod tests {
         broadcast::{test::null_batch, Straggler},
         broker::submission::Submission,
         crypto::statements::BatchWitness,
-        server::expanded_batch_entries,
+        server::Batch as ServerBatch,
         system::test::generate_system,
     };
 
@@ -362,7 +362,7 @@ mod tests {
         let session_connector = Arc::new(SessionConnector::new(connector));
 
         let (_, compressed_batch) = null_batch(&clients_keychains, 1);
-        let entries = expanded_batch_entries(compressed_batch.clone());
+        let entries = ServerBatch::expanded_batch_entries(compressed_batch.clone());
 
         let fake_signature = clients_keychains[0]
             .sign(&BatchWitness {
@@ -433,7 +433,7 @@ mod tests {
         let session_connector = Arc::new(SessionConnector::new(connector));
 
         let (_, compressed_batch) = null_batch(&clients, 1);
-        let entries = expanded_batch_entries(compressed_batch.clone());
+        let entries = ServerBatch::expanded_batch_entries(compressed_batch.clone());
 
         let fake_signature = clients[0]
             .sign(&BatchWitness {
