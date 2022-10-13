@@ -2,13 +2,21 @@ use crate::{
     broker::{LoadBroker, LoadBrokerSettings, Worker},
     info,
     system::Membership,
+    warn,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     sync::fuse::Fuse,
 };
-use tokio::sync::mpsc::{self};
+use tokio::{
+    sync::mpsc::{self},
+    time::{self},
+};
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batches(
@@ -25,10 +33,25 @@ impl LoadBroker {
 
         let fuse = Fuse::new();
 
-        for (batch_root, compressed_batch) in batches {
+        let mut start = Instant::now();
+        for (index, (batch_root, compressed_batch)) in batches.into_iter().enumerate() {
             let identity = available_workers.recv().await.unwrap();
 
-            info!("Sending batch.");
+            let remaining_period =
+                Duration::from_secs_f64(1. / settings.rate).saturating_sub(start.elapsed());
+
+            if remaining_period.is_zero() {
+                warn!(
+                    "Broker unable to keep up with rate! Estimated appropriate rate: {} B/s",
+                    1. / start.elapsed().as_secs_f64()
+                );
+            }
+
+            time::sleep(remaining_period).await;
+
+            start = Instant::now();
+
+            info!("Sending batch {}.", index);
 
             let worker = workers.get_mut(&identity).unwrap();
 
@@ -56,6 +79,11 @@ impl LoadBroker {
             }
 
             worker.next_sequence += 1;
+        }
+
+        // Wait for all workers to be done
+        for _ in 0..workers.len() {
+            let _ = available_workers.recv().await.unwrap();
         }
     }
 }

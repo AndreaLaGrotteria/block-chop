@@ -3,6 +3,7 @@ use talk::time::{sleep_schedules::CappedExponential, SleepSchedule};
 
 #[derive(Debug, Clone)]
 pub struct LoadBrokerSettings {
+    pub rate: f64,
     pub submission_schedule: Arc<dyn SleepSchedule>,
     pub witnessing_timeout: Duration,
     pub totality_timeout: Duration,
@@ -11,6 +12,7 @@ pub struct LoadBrokerSettings {
 impl Default for LoadBrokerSettings {
     fn default() -> Self {
         LoadBrokerSettings {
+            rate: 1.,
             submission_schedule: Arc::new(CappedExponential::new(
                 Duration::from_secs(1),
                 2.,

@@ -43,8 +43,6 @@ impl LoadBroker {
             })
             .collect::<HashMap<_, _>>();
 
-        // Load batches from disk
-
         // Spawn tasks
 
         let fuse = Fuse::new();
@@ -99,11 +97,12 @@ mod tests {
             [(broker_identity, session_connector)],
             batches,
             LoadBrokerSettings {
-                totality_timeout: Duration::from_secs(10),
+                rate: 16.,
+                totality_timeout: Duration::from_secs(1),
                 ..Default::default()
             },
         );
 
-        time::sleep(Duration::from_secs(100)).await;
+        time::sleep(Duration::from_secs(20)).await;
     }
 }
