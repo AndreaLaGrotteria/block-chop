@@ -44,6 +44,7 @@ impl Broker {
         settings: BrokerSettings,
     ) {
         let raw_batch = bincode::serialize(compressed_batch.as_ref()).unwrap();
+
         let mut witness_shard_inlet = Some(witness_shard_inlet);
         let mut delivery_shard_inlet = Some(delivery_shard_inlet);
 

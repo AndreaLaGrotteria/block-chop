@@ -18,8 +18,8 @@ impl Default for LoadBrokerSettings {
                 2.,
                 Duration::from_secs(60),
             )),
-            witnessing_timeout: Duration::from_secs(1),
-            totality_timeout: Duration::from_secs(30),
+            witnessing_timeout: Duration::from_secs(15),
+            totality_timeout: Duration::from_secs(60),
         }
     }
 }

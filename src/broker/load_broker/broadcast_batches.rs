@@ -34,6 +34,7 @@ impl LoadBroker {
         let fuse = Fuse::new();
 
         let mut start = Instant::now();
+
         for (index, (batch_root, compressed_batch)) in batches.into_iter().enumerate() {
             let identity = available_workers.recv().await.unwrap();
 
