@@ -22,6 +22,11 @@ name = "generate_batches"
 path = "bin/generate_batches.rs"
 required-features = [ "benchmark" ]
 
+[[bin]]
+name = "rendezvous"
+path = "bin/rendezvous.rs"
+required-features = [ "benchmark" ]
+
 [features]
 all = [ "benchmark" ]
 benchmark = [ "dep:memmap" ]
