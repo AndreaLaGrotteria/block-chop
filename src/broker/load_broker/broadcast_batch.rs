@@ -113,6 +113,8 @@ impl LoadBroker {
                     .for_each(|solver| solver.solve(false));
             }
             Err(_) => {
+                warn!("Timeout: could not collect witness without backup verifiers.");
+
                 backup_verify_solvers
                     .into_iter()
                     .for_each(|solver| solver.solve(true));
