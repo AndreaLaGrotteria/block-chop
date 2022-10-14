@@ -189,6 +189,24 @@ impl Passepartout {
         return Ok(None);
     }
 
+    pub fn export<I>(&self, identities: I) -> Passepartout
+    where
+        I: IntoIterator<Item = Identity>,
+    {
+        let export = identities
+            .into_iter()
+            .filter_map(|identity| {
+                if let Some(keychain) = self.keychains.get(&identity) {
+                    Some((identity, keychain.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        Passepartout { keychains: export }
+    }
+
     pub fn save<P>(&self, path: P) -> Result<(), Top<PassepartoutError>>
     where
         P: AsRef<Path>,
