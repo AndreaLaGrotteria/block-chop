@@ -27,6 +27,11 @@ name = "rendezvous"
 path = "bin/rendezvous.rs"
 required-features = [ "benchmark" ]
 
+[[bin]]
+name = "load_broker"
+path = "bin/load_broker.rs"
+required-features = [ "benchmark" ]
+
 [features]
 all = [ "benchmark" ]
 benchmark = [ "dep:memmap" ]

@@ -1,11 +1,14 @@
-use std::{future, io, io::Write};
+use std::{
+    future,
+    io::{self, Write},
+};
 use talk::link::rendezvous::{Server, ServerSettings};
 
 #[tokio::main]
 async fn main() {
     let args = lapp::parse_args(
         "
-        Welcome to `chop-chop`'s `Rendezvous` server.
+        Welcome to `chop-chop`'s `Rendezvous` server bootstrapper.
 
         Required arguments:
           <port> (integer) port to which to bind the `Rendezvous` server
@@ -27,7 +30,7 @@ async fn main() {
     .await
     .unwrap();
 
-    println!(" .. done!");
+    println!(" .. done! `Rendezvous` server running!");
 
     print!("\n    [Hit Ctrl + C to stop this daemon]  ");
     io::stdout().flush().unwrap();
