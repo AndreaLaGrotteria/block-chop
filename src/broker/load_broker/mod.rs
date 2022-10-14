@@ -14,15 +14,15 @@ pub struct LoadBroker {
 }
 
 impl LoadBroker {
-    pub fn new<I1, I2>(
+    pub fn new<C, B>(
         membership: Membership,
-        connectors: I1,
-        batches: I2,
+        connectors: C,
+        batches: B,
         settings: LoadBrokerSettings,
     ) -> Self
     where
-        I1: IntoIterator<Item = (Identity, SessionConnector)>,
-        I2: IntoIterator<Item = (Hash, Vec<u8>)>,
+        C: IntoIterator<Item = (Identity, SessionConnector)>,
+        B: IntoIterator<Item = (Hash, Vec<u8>)>,
     {
         // Build `Arc`s
 
@@ -90,7 +90,7 @@ mod tests {
         let connector = TestConnector::new(keychain, connector_map.clone());
         let session_connector = SessionConnector::new(connector);
 
-        let batches = std::iter::repeat(to_raw(null_batch(&client_keychains, 100))).take(100);
+        let batches = std::iter::repeat(to_raw(null_batch(&client_keychains, 30))).take(50);
 
         let _load_broker = LoadBroker::new(
             membership.clone(),
@@ -103,6 +103,6 @@ mod tests {
             },
         );
 
-        time::sleep(Duration::from_secs(20)).await;
+        time::sleep(Duration::from_secs(10)).await;
     }
 }

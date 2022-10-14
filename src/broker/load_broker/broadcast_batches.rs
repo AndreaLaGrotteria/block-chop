@@ -4,11 +4,7 @@ use crate::{
     system::Membership,
     warn,
 };
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{cmp, collections::HashMap, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     sync::fuse::Fuse,
@@ -25,64 +21,87 @@ impl LoadBroker {
         batches: Vec<(Hash, Vec<u8>)>,
         settings: LoadBrokerSettings,
     ) {
+        // Setup worker recycling
+
         let (worker_recycler, mut available_workers) = mpsc::channel(workers.len());
 
         for identity in workers.keys().copied() {
             worker_recycler.send(identity).await.unwrap();
         }
 
+        // Execute submission loop
+
+        let mut submissions = batches.into_iter().enumerate();
+        let mut last_tick = Instant::now();
+
         let fuse = Fuse::new();
 
-        let mut start = Instant::now();
+        'submission: loop {
+            let sleep_time = settings
+                .minimum_rate_window
+                .saturating_sub(last_tick.elapsed());
 
-        for (index, (batch_root, compressed_batch)) in batches.into_iter().enumerate() {
-            let identity = available_workers.recv().await.unwrap();
-
-            let remaining_period =
-                Duration::from_secs_f64(1. / settings.rate).saturating_sub(start.elapsed());
-
-            if remaining_period.is_zero() {
+            if !sleep_time.is_zero() {
+                time::sleep(sleep_time).await;
+            } else {
                 warn!(
-                    "Broker unable to keep up with rate! Estimated appropriate rate: {} B/s",
-                    1. / start.elapsed().as_secs_f64()
+                    "Submission lagged by {:?}.",
+                    last_tick
+                        .elapsed()
+                        .saturating_sub(settings.minimum_rate_window)
                 );
             }
 
-            time::sleep(remaining_period).await;
+            let window = last_tick.elapsed();
+            last_tick = Instant::now();
 
-            start = Instant::now();
+            let submission_allowance = (cmp::min(window, settings.maximum_rate_window)
+                .as_secs_f64()
+                * settings.rate) as usize;
 
-            info!("Sending batch {}.", index);
+            for _ in 0..submission_allowance {
+                let (index, (batch_root, compressed_batch)) =
+                    if let Some(submission) = submissions.next() {
+                        submission
+                    } else {
+                        // All batches submitted
+                        break 'submission;
+                    };
 
-            let worker = workers.get_mut(&identity).unwrap();
+                let worker_identity = available_workers.recv().await.unwrap();
+                let worker = workers.get_mut(&worker_identity).unwrap();
 
-            {
-                let membership = membership.clone();
-                let sequence = worker.next_sequence;
-                let connector = worker.connector.clone();
-                let worker_recycler = worker_recycler.clone();
-                let settings = settings.clone();
+                info!("Sending batch {}.", index);
 
-                fuse.spawn(async move {
-                    LoadBroker::broadcast_batch(
-                        identity,
-                        sequence,
-                        batch_root,
-                        compressed_batch,
-                        membership,
-                        connector,
-                        settings,
-                    )
-                    .await;
+                {
+                    let membership = membership.clone();
+                    let sequence = worker.next_sequence;
+                    let connector = worker.connector.clone();
+                    let worker_recycler = worker_recycler.clone();
+                    let settings = settings.clone();
 
-                    worker_recycler.send(identity).await.unwrap();
-                });
+                    fuse.spawn(async move {
+                        LoadBroker::broadcast_batch(
+                            worker_identity,
+                            sequence,
+                            batch_root,
+                            compressed_batch,
+                            membership,
+                            connector,
+                            settings,
+                        )
+                        .await;
+
+                        worker_recycler.send(worker_identity).await.unwrap();
+                    });
+                }
+
+                worker.next_sequence += 1;
             }
-
-            worker.next_sequence += 1;
         }
 
-        // Wait for all workers to be done
+        // Wait for all workers to be returned
+
         for _ in 0..workers.len() {
             let _ = available_workers.recv().await.unwrap();
         }

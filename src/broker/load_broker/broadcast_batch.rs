@@ -16,7 +16,7 @@ use talk::{
 };
 use tokio::{
     sync::mpsc::{self, Receiver as MpscReceiver},
-    task, time,
+    time,
 };
 
 type MultiSignatureOutlet = MpscReceiver<(Identity, MultiSignature)>;
@@ -32,14 +32,14 @@ impl LoadBroker {
         worker: Identity,
         sequence: u64,
         root: Hash,
-        compressed_batch: Vec<u8>,
+        raw_batch: Vec<u8>,
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         settings: LoadBrokerSettings,
     ) {
         // Preprocess arguments
 
-        let compressed_batch = Arc::new(compressed_batch);
+        let raw_batch = Arc::new(raw_batch);
 
         // Shuffle servers
 
@@ -81,7 +81,7 @@ impl LoadBroker {
                 worker,
                 sequence,
                 root,
-                compressed_batch.clone(),
+                raw_batch.clone(),
                 server.clone(),
                 connector.clone(),
                 verify,
@@ -122,29 +122,26 @@ impl LoadBroker {
         let witness = witness_collector.finalize();
         witness_poster.post(witness);
 
-        // Wait until f+1 processes have replied with a delivery shard,
+        // Wait until (f + 1) processes have replied with a delivery shard,
         // ensuring at least one correct process has delivered
 
         let mut counter = 0;
+
         while counter < membership.plurality() {
             let _ = delivery_shard_outlet.recv().await.unwrap();
             counter += 1;
         }
 
-        // Move `fuse` to a long-lived task, submitting `batch`
-        // to straggler servers until a timeout expires
+        // Wait until all `submit_tasks` are completed, or a timeout expires
 
-        let handle = task::spawn(async move {
-            let _fuse = fuse;
+        let submissions = join_all(submit_tasks.into_iter());
 
-            let submissions = join_all(submit_tasks.into_iter());
-            match time::timeout(settings.totality_timeout, submissions).await {
-                Ok(_) => (),
-                Err(_) => warn!("Timeout: could not finish submitting batch to all servers."),
-            }
-        });
-
-        handle.await.unwrap();
+        if time::timeout(settings.totality_timeout, submissions)
+            .await
+            .is_err()
+        {
+            warn!("Timeout: could not finish submitting batch to all servers.");
+        }
     }
 }
 
