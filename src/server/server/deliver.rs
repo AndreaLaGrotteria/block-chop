@@ -36,7 +36,7 @@ impl Server {
         keychain: KeyChain,
         membership: Membership,
         broadcast: Arc<dyn Order>,
-        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
+        broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
         mut totality_manager: TotalityManager,
         mut deduplicator: Deduplicator,
         mut next_batch_inlet: BurstInlet,
@@ -50,7 +50,7 @@ impl Server {
                 submission = broadcast.deliver() => {
                     // Parse `submission` to obtain broker identity and batch root
 
-                    if let Ok((broker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref()) {
+                    if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref()) {
                         // Retrieve broker sequence number, expected batch, and delivery shard inlet
 
                         let (sequence, expected_batch, delivery_shard_inlet) = {
@@ -58,7 +58,7 @@ impl Server {
 
                             // Because parsing was successful, a broker slot is
                             // guaranteed to exist, and the `unwrap()` never fails
-                            let broker = guard.get_mut(&broker).unwrap();
+                            let broker = guard.get_mut(&(broker, worker)).unwrap();
 
                             let sequence = broker.next_sequence;
                             let expected_batch = broker.expected_batch.take();
@@ -125,10 +125,10 @@ impl Server {
     fn parse_submission(
         submission: &[u8],
         membership: &Membership,
-        broker_slots: &Mutex<HashMap<Identity, BrokerSlot>>,
-    ) -> Result<(Identity, Hash), Top<ParseSubmissionError>> {
-        let (broker, root, witness) =
-            bincode::deserialize::<(Identity, Hash, Certificate)>(submission)
+        broker_slots: &Mutex<HashMap<(Identity, u16), BrokerSlot>>,
+    ) -> Result<(Identity, u16, Hash), Top<ParseSubmissionError>> {
+        let (broker, worker, root, witness) =
+            bincode::deserialize::<(Identity, u16, Hash, Certificate)>(submission)
                 .map_err(ParseSubmissionError::deserialize_failed)
                 .map_err(ParseSubmissionError::into_top)
                 .spot(here!())?;
@@ -136,7 +136,7 @@ impl Server {
         let sequence = broker_slots
             .lock()
             .unwrap()
-            .entry(broker)
+            .entry((broker, worker))
             .or_default()
             .next_sequence;
 
@@ -145,13 +145,14 @@ impl Server {
                 &membership,
                 &BatchWitnessStatement {
                     broker: &broker,
+                    worker: &worker,
                     sequence: &sequence,
                     root: &root,
                 },
             )
             .pot(ParseSubmissionError::WitnessInvalid, here!())?;
 
-        Ok((broker, root))
+        Ok((broker, worker, root))
     }
 
     async fn burst_batch(

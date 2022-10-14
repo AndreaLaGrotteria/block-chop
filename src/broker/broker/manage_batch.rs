@@ -12,11 +12,12 @@ use talk::{
 use tokio::sync::{broadcast::Receiver as BroadcastReceiver, mpsc::Sender as MpscSender};
 
 type ReductionOutlet = BroadcastReceiver<Reduction>;
-type IdentityInlet = MpscSender<Identity>;
+type IndexInlet = MpscSender<u16>;
 
 impl Broker {
     pub(in crate::broker::broker) async fn manage_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
@@ -25,7 +26,7 @@ impl Broker {
         reduction_outlet: ReductionOutlet,
         sender: Arc<DatagramSender<Response>>,
         connector: Arc<SessionConnector>,
-        worker_recycler: IdentityInlet,
+        worker_recycler: IndexInlet,
         settings: BrokerSettings,
     ) {
         let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
@@ -34,7 +35,8 @@ impl Broker {
             Broker::reduce_batch(directory, &mut batch, reduction_outlet, &settings).await;
 
         let (height, delivery_certificate) = Broker::broadcast_batch(
-            worker,
+            broker_identity,
+            worker_index,
             sequence,
             &mut batch,
             compressed_batch,
@@ -44,7 +46,7 @@ impl Broker {
         )
         .await;
 
-        worker_recycler.send(worker).await.unwrap();
+        worker_recycler.send(worker_index).await.unwrap();
 
         debug!("Got height and delivery certificate!");
 
@@ -78,7 +80,8 @@ mod tests {
             membership.clone(),
             directory,
             broker_address,
-            [(broker_identity, session_connector)],
+            broker_identity,
+            session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -109,7 +112,8 @@ mod tests {
             membership.clone(),
             directory,
             broker_address,
-            [(broker_identity, session_connector)],
+            broker_identity,
+            session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -144,7 +148,8 @@ mod tests {
             membership.clone(),
             directory,
             broker_address,
-            [(broker_identity, session_connector)],
+            broker_identity,
+            session_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),

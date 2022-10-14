@@ -5,6 +5,7 @@ use talk::crypto::{primitives::hash::Hash, Identity, Statement};
 #[derive(Serialize)]
 pub(crate) struct BatchWitness<'a> {
     pub broker: &'a Identity,
+    pub worker: &'a u16,
     pub root: &'a Hash,
     pub sequence: &'a u64,
 }

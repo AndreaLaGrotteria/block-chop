@@ -44,7 +44,7 @@ impl Server {
         membership: Membership,
         directory: Directory,
         broadcast: Arc<dyn Order>,
-        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
+        broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
         mut listener: SessionListener,
         settings: ServerSettings,
     ) {
@@ -92,13 +92,13 @@ impl Server {
         membership: Arc<Membership>,
         directory: Arc<Directory>,
         broadcast: Arc<dyn Order>,
-        broker_slots: Arc<Mutex<HashMap<Identity, BrokerSlot>>>,
+        broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
         semaphore: Arc<Semaphore>,
     ) -> Result<(), Top<ServeError>> {
         // Receive broker request
 
-        let (sequence, root) = session
-            .receive::<(u64, Hash)>()
+        let (worker, sequence, root) = session
+            .receive::<(u16, u64, Hash)>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -122,7 +122,7 @@ impl Server {
         let next_sequence = broker_slots
             .lock()
             .unwrap()
-            .entry(broker.clone())
+            .entry((broker, worker))
             .or_default()
             .next_sequence;
 
@@ -171,7 +171,7 @@ impl Server {
 
         let store = {
             let mut broker_slots = broker_slots.lock().unwrap();
-            let mut broker_slot = broker_slots.entry(broker).or_default();
+            let mut broker_slot = broker_slots.entry((broker, worker)).or_default();
             last_delivery_shard = broker_slot.last_delivery_shard.subscribe();
 
             if sequence == broker_slot.next_sequence {
@@ -199,6 +199,7 @@ impl Server {
             let witness_shard = keychain
                 .multisign(&BatchWitnessStatement {
                     broker: &broker,
+                    worker: &worker,
                     sequence: &sequence,
                     root: &root,
                 })
@@ -226,6 +227,7 @@ impl Server {
                 membership.as_ref(),
                 &BatchWitnessStatement {
                     broker: &broker,
+                    worker: &worker,
                     sequence: &sequence,
                     root: &root,
                 },
@@ -236,7 +238,7 @@ impl Server {
 
         // Submit the batch for ordering by Total-Order Broadcast (TOB)
 
-        let submission = bincode::serialize(&(broker, root, witness)).unwrap();
+        let submission = bincode::serialize(&(broker, worker, root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
         // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
@@ -319,7 +321,7 @@ mod tests {
         for (identity, session) in sessions[0..2].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            session.send(&(0u64, root)).await.unwrap();
+            session.send(&(0u16, 0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
             session.send(&true).await.unwrap();
 
@@ -335,7 +337,7 @@ mod tests {
         for (_, session) in sessions[2..].iter_mut() {
             let raw_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            session.send(&(0u64, root)).await.unwrap();
+            session.send(&(0u16, 0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
             session.send(&false).await.unwrap();
 
@@ -347,6 +349,7 @@ mod tests {
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitnessStatement {
                 broker: &broker.keycard().identity(),
+                worker: &0,
                 sequence: &0,
                 root: &root,
             };

@@ -29,7 +29,8 @@ struct WitnessCollector<'a> {
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         root: Hash,
         raw_batch: Vec<u8>,
@@ -78,7 +79,8 @@ impl LoadBroker {
             };
 
             let handle = fuse.spawn(LoadBroker::submit_batch(
-                worker,
+                broker_identity,
+                worker_index,
                 sequence,
                 root,
                 raw_batch.clone(),

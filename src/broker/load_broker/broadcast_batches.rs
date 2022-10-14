@@ -1,12 +1,13 @@
 use crate::{
-    broker::{LoadBroker, LoadBrokerSettings, Worker},
+    broker::{LoadBroker, LoadBrokerSettings},
     info,
     system::Membership,
     warn,
 };
-use std::{cmp, collections::HashMap, sync::Arc, time::Instant};
+use std::{cmp, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
+    net::SessionConnector,
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -17,16 +18,20 @@ use tokio::{
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batches(
         membership: Arc<Membership>,
-        mut workers: HashMap<Identity, Worker>,
+        broker_identity: Identity,
+        connector: SessionConnector,
         batches: Vec<(Hash, Vec<u8>)>,
         settings: LoadBrokerSettings,
     ) {
         // Setup worker recycling
 
-        let (worker_recycler, mut available_workers) = mpsc::channel(workers.len());
+        let connector = Arc::new(connector);
 
-        for identity in workers.keys().copied() {
-            worker_recycler.send(identity).await.unwrap();
+        let mut worker_sequences = vec![0; settings.workers as usize];
+        let (worker_recycler, mut available_workers) = mpsc::channel(worker_sequences.len());
+
+        for worker_index in 0..settings.workers {
+            worker_recycler.send(worker_index).await.unwrap();
         }
 
         // Execute submission loop
@@ -60,49 +65,50 @@ impl LoadBroker {
                 * settings.rate) as usize;
 
             for _ in 0..submission_allowance {
-                let (index, (batch_root, compressed_batch)) =
-                    if let Some(submission) = submissions.next() {
-                        submission
-                    } else {
-                        // All batches submitted
-                        break 'submission;
-                    };
+                let (index, (batch_root, raw_batch)) = if let Some(submission) = submissions.next()
+                {
+                    submission
+                } else {
+                    // All batches submitted
+                    break 'submission;
+                };
 
-                let worker_identity = available_workers.recv().await.unwrap();
-                let worker = workers.get_mut(&worker_identity).unwrap();
+                let worker_index = available_workers.recv().await.unwrap();
+                let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
                 info!("Sending batch {}.", index);
 
                 {
                     let membership = membership.clone();
-                    let sequence = worker.next_sequence;
-                    let connector = worker.connector.clone();
+                    let connector = connector.clone();
+                    let sequence = *next_sequence;
                     let worker_recycler = worker_recycler.clone();
                     let settings = settings.clone();
 
                     fuse.spawn(async move {
                         LoadBroker::broadcast_batch(
-                            worker_identity,
+                            broker_identity,
+                            worker_index,
                             sequence,
                             batch_root,
-                            compressed_batch,
+                            raw_batch,
                             membership,
                             connector,
                             settings,
                         )
                         .await;
 
-                        worker_recycler.send(worker_identity).await.unwrap();
+                        worker_recycler.send(worker_index).await.unwrap();
                     });
                 }
 
-                worker.next_sequence += 1;
+                *next_sequence += 1;
             }
         }
 
         // Wait for all workers to be returned
 
-        for _ in 0..workers.len() {
+        for _ in 0..worker_sequences.len() {
             let _ = available_workers.recv().await.unwrap();
         }
     }

@@ -1,10 +1,10 @@
 use crate::{
-    broker::{BrokerSettings, Response, Worker},
+    broker::{BrokerSettings, Response},
     system::Membership,
     Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::{collections::HashMap, net::ToSocketAddrs, sync::Arc};
+use std::{net::ToSocketAddrs, sync::Arc};
 use talk::{
     crypto::Identity,
     net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
@@ -24,36 +24,21 @@ pub enum BrokerError {
 }
 
 impl Broker {
-    pub fn new<A, I>(
+    pub fn new<A>(
         membership: Membership,
         directory: Directory,
         bind: A,
-        connectors: I,
+        broker_identity: Identity,
+        connector: SessionConnector,
         settings: BrokerSettings,
     ) -> Result<Self, Top<BrokerError>>
     where
         A: Clone + ToSocketAddrs,
-        I: IntoIterator<Item = (Identity, SessionConnector)>,
     {
         // Build `Arc`s
 
         let membership = Arc::new(membership);
         let directory = Arc::new(directory);
-
-        // Setup workers
-
-        let workers = connectors
-            .into_iter()
-            .map(|(identity, connector)| {
-                (
-                    identity,
-                    Worker {
-                        connector: Arc::new(connector),
-                        next_sequence: 0,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
 
         // Bind `DatagramDispatcher`
 
@@ -101,7 +86,8 @@ impl Broker {
             directory.clone(),
             handle_outlet,
             sender.clone(),
-            workers,
+            broker_identity,
+            connector,
             settings.clone(),
         ));
 

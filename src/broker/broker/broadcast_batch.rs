@@ -34,7 +34,8 @@ struct WitnessCollector<'a> {
 
 impl Broker {
     pub(in crate::broker::broker) async fn broadcast_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         batch: &mut Batch,
         compressed_batch: CompressedBatch,
@@ -85,7 +86,8 @@ impl Broker {
             let root = batch.entries.root();
 
             let handle = fuse.spawn(Broker::submit_batch(
-                worker,
+                broker_identity,
+                worker_index,
                 sequence,
                 root,
                 compressed_batch.clone(),
@@ -367,6 +369,7 @@ mod tests {
         let fake_signature = clients_keychains[0]
             .sign(&BatchWitness {
                 broker: &broker.keycard().identity(),
+                worker: &0,
                 sequence: &0,
                 root: &hash(&0).unwrap(),
             })
@@ -394,6 +397,7 @@ mod tests {
 
         let (height, certificate) = Broker::broadcast_batch(
             broker.keycard().identity(),
+            0,
             0,
             &mut batch,
             compressed_batch,
@@ -438,6 +442,7 @@ mod tests {
         let fake_signature = clients[0]
             .sign(&BatchWitness {
                 broker: &broker.keycard().identity(),
+                worker: &0,
                 sequence: &0,
                 root: &hash(&0).unwrap(),
             })
@@ -465,6 +470,7 @@ mod tests {
 
         let (height, certificate) = Broker::broadcast_batch(
             broker.keycard().identity(),
+            0,
             0,
             &mut batch,
             compressed_batch,

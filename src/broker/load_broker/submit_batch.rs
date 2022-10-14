@@ -20,7 +20,8 @@ type DeliveryShardInlet = MpscSender<(Identity, DeliveryShard)>;
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn submit_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         root: Hash,
         raw_batch: Arc<Vec<u8>>,
@@ -38,7 +39,8 @@ impl LoadBroker {
         let mut agent = settings.submission_schedule.agent();
 
         while let Err(error) = Broker::try_submit_batch(
-            worker,
+            broker_identity,
+            worker_index,
             sequence,
             root,
             raw_batch.as_slice(),

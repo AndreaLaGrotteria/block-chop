@@ -1,6 +1,6 @@
 use crate::{
     broadcast::Entry,
-    broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission, Worker},
+    broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission},
     crypto::records::Height as HeightRecord,
     debug, info,
     system::{Directory, Membership},
@@ -9,7 +9,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::sign::Signature, Identity},
-    net::DatagramSender,
+    net::{DatagramSender, SessionConnector},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -36,13 +36,17 @@ impl Broker {
         directory: Arc<Directory>,
         mut handle_outlet: RequestOutlet,
         sender: Arc<DatagramSender<Response>>,
-        mut workers: HashMap<Identity, Worker>,
+        broker_identity: Identity,
+        connector: SessionConnector,
         settings: BrokerSettings,
     ) {
-        let (worker_recycler, mut available_workers) = mpsc::channel(workers.len());
+        let connector = Arc::new(connector);
 
-        for identity in workers.keys().copied() {
-            worker_recycler.send(identity).await.unwrap();
+        let mut worker_sequences = vec![0; settings.workers as usize];
+        let (worker_recycler, mut available_workers) = mpsc::channel(worker_sequences.len());
+
+        for worker_index in 0..settings.workers {
+            worker_recycler.send(worker_index).await.unwrap();
         }
 
         let mut top_record = None;
@@ -110,28 +114,29 @@ impl Broker {
             if pool.len() >= settings.pool_capacity
                 || (next_flush.is_some() && Instant::now() > next_flush.unwrap())
             {
-                if let Ok(identity) = available_workers.try_recv() {
+                if let Ok(worker_index) = available_workers.try_recv() {
                     info!("Flushing pool into a batch ({} entries).", pool.len());
 
                     next_flush = None;
 
-                    let worker = workers.get_mut(&identity).unwrap();
+                    let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
                     fuse.spawn(Broker::manage_batch(
-                        identity,
-                        worker.next_sequence,
+                        broker_identity,
+                        worker_index,
+                        *next_sequence,
                         membership.clone(),
                         directory.clone(),
                         mem::take(&mut pool),
                         top_record.clone(),
                         reduction_inlet.subscribe(),
                         sender.clone(),
-                        worker.connector.clone(),
+                        connector.clone(),
                         worker_recycler.clone(),
                         settings.clone(),
                     ));
 
-                    worker.next_sequence += 1;
+                    *next_sequence += 1;
                 }
             }
         }

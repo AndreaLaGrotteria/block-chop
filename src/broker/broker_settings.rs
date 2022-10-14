@@ -7,6 +7,8 @@ pub struct BrokerSettings {
     pub pool_timeout: Duration,
     pub reduction_timeout: Duration,
 
+    pub workers: u16,
+
     pub maximum_packet_rate: f64,
     pub authenticate_tasks: usize,
 
@@ -32,6 +34,7 @@ impl Default for BrokerSettings {
             pool_capacity: 65536,
             pool_timeout: Duration::from_secs(1),
             reduction_timeout: Duration::from_secs(2),
+            workers: 32768,
             maximum_packet_rate: 262144.,
             authenticate_tasks: num_cpus::get(),
             authentication_burst_size: 2048,

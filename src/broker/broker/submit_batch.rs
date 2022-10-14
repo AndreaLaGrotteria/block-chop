@@ -31,7 +31,8 @@ pub(in crate::broker) enum TrySubmitError {
 
 impl Broker {
     pub(in crate::broker::broker) async fn submit_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         root: Hash,
         compressed_batch: Arc<CompressedBatch>,
@@ -51,7 +52,8 @@ impl Broker {
         let mut agent = settings.submission_schedule.agent();
 
         while let Err(error) = Broker::try_submit_batch(
-            worker,
+            broker_identity,
+            worker_index,
             sequence,
             root,
             raw_batch.as_slice(),
@@ -70,7 +72,8 @@ impl Broker {
     }
 
     pub(in crate::broker) async fn try_submit_batch(
-        worker: Identity,
+        broker_identity: Identity,
+        worker_index: u16,
         sequence: u64,
         root: Hash,
         raw_batch: &[u8],
@@ -81,7 +84,7 @@ impl Broker {
         witness: &mut Board<Certificate>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
     ) -> Result<(), Top<TrySubmitError>> {
-        debug!("Submitting batch (worker {worker:?}, sequence {sequence})");
+        debug!("Submitting batch (worker {worker_index}, sequence {sequence})");
 
         // Send request
 
@@ -91,7 +94,7 @@ impl Broker {
             .pot(TrySubmitError::ConnectFailed, here!())?;
 
         session
-            .send(&(sequence, root))
+            .send(&(worker_index, sequence, root))
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -136,7 +139,8 @@ impl Broker {
                     .verify(
                         [server],
                         &BatchWitness {
-                            broker: &worker,
+                            broker: &broker_identity,
+                            worker: &worker_index,
                             sequence: &sequence,
                             root: &root,
                         },

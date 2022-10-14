@@ -1,8 +1,5 @@
-use crate::{
-    broker::{LoadBrokerSettings, Worker},
-    system::Membership,
-};
-use std::{collections::HashMap, sync::Arc};
+use crate::{broker::LoadBrokerSettings, system::Membership};
+use std::sync::Arc;
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
@@ -14,34 +11,19 @@ pub struct LoadBroker {
 }
 
 impl LoadBroker {
-    pub fn new<C, B>(
+    pub fn new<B>(
         membership: Membership,
-        connectors: C,
+        broker_identity: Identity,
+        connector: SessionConnector,
         batches: B,
         settings: LoadBrokerSettings,
     ) -> Self
     where
-        C: IntoIterator<Item = (Identity, SessionConnector)>,
         B: IntoIterator<Item = (Hash, Vec<u8>)>,
     {
         // Build `Arc`s
 
         let membership = Arc::new(membership);
-
-        // Setup workers
-
-        let workers = connectors
-            .into_iter()
-            .map(|(identity, connector)| {
-                (
-                    identity,
-                    Worker {
-                        connector: Arc::new(connector),
-                        next_sequence: 0,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
 
         // Spawn tasks
 
@@ -49,7 +31,8 @@ impl LoadBroker {
 
         fuse.spawn(LoadBroker::broadcast_batches(
             membership.clone(),
-            workers,
+            broker_identity,
+            connector,
             batches.into_iter().collect(),
             settings.clone(),
         ));
@@ -94,7 +77,8 @@ mod tests {
 
         let _load_broker = LoadBroker::new(
             membership.clone(),
-            [(broker_identity, session_connector)],
+            broker_identity,
+            session_connector,
             batches,
             LoadBrokerSettings {
                 rate: 16.,
