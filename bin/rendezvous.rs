@@ -17,7 +17,7 @@ async fn main() {
     );
 
     let port = args.get_integer("port") as u16;
-    let expected_participants = args.get_integer("port") as usize;
+    let expected_participants = args.get_integer("expected_participants") as usize;
 
     println!("Starting `Rendezvous` server..");
 
