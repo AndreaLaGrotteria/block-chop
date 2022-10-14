@@ -1,5 +1,5 @@
 use crate::{order::LoopBack, server::ServerSettings, Directory, Membership, Server};
-use std::{collections::HashMap, iter, net::SocketAddr};
+use std::{collections::HashMap, iter, net::SocketAddr, sync::Arc};
 use talk::{
     crypto::{Identity, KeyChain},
     net::test::{TestConnector, TestListener},
@@ -50,7 +50,7 @@ pub(crate) async fn generate_system(
     }
 
     for (keychain, broker_listener, totality_listener) in listeners {
-        let broadcast = LoopBack::new();
+        let broadcast = Arc::new(LoopBack::new());
 
         let totality_connector =
             TestConnector::new(keychain.clone(), totality_connector_map.clone());

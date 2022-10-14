@@ -28,6 +28,11 @@ path = "bin/rendezvous.rs"
 required-features = [ "benchmark" ]
 
 [[bin]]
+name = "server"
+path = "bin/server.rs"
+required-features = [ "benchmark" ]
+
+[[bin]]
 name = "load_broker"
 path = "bin/load_broker.rs"
 required-features = [ "benchmark" ]

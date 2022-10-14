@@ -23,25 +23,23 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<B, BL, TC, TL>(
+    pub fn new<BL, TC, TL>(
         keychain: KeyChain,
         membership: Membership,
         directory: Directory,
-        broadcast: B,
+        broadcast: Arc<dyn Order>,
         broker_listener: BL,
         totality_connector: TC,
         totality_listener: TL,
         settings: ServerSettings,
     ) -> Self
     where
-        B: Order,
         BL: Listener,
         TC: Connector,
         TL: Listener,
     {
         // Preprocess arguments
 
-        let broadcast = Arc::new(broadcast);
         let broker_listener = SessionListener::new(broker_listener);
 
         // Initialize components
