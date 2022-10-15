@@ -16,7 +16,13 @@ use std::{
     io::{Read, Write},
     mem,
 };
-use talk::crypto::KeyCard;
+use talk::crypto::{
+    primitives::{
+        multi::{PublicKey as MultiPublicKey, Signer as MultiSigner},
+        sign::{PublicKey as SignPublicKey, Signer as SignSigner},
+    },
+    Identity, KeyCard,
+};
 
 const BLOCK_SIZE: usize = 145;
 const CHUNK_SIZE: usize = 16 * 1048576;
@@ -178,6 +184,30 @@ impl Directory {
 
     pub fn get(&self, id: u64) -> Option<&KeyCard> {
         self.keycards.get(id as usize).map(Option::as_ref).flatten()
+    }
+
+    pub fn get_identity(&self, id: u64) -> Option<Identity> {
+        self.keycards
+            .get(id as usize)
+            .map(Option::as_ref)
+            .flatten()
+            .map(KeyCard::identity)
+    }
+
+    pub fn get_sign_public_key(&self, id: u64) -> Option<&SignPublicKey> {
+        self.keycards
+            .get(id as usize)
+            .map(Option::as_ref)
+            .flatten()
+            .map(SignSigner::public_key)
+    }
+
+    pub fn get_multi_public_key(&self, id: u64) -> Option<&MultiPublicKey> {
+        self.keycards
+            .get(id as usize)
+            .map(Option::as_ref)
+            .flatten()
+            .map(MultiSigner::public_key)
     }
 
     pub fn insert(&mut self, id: u64, keycard: KeyCard) {
