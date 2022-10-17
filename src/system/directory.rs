@@ -194,7 +194,7 @@ impl Directory {
             .map(KeyCard::identity)
     }
 
-    pub fn get_sign_public_key(&self, id: u64) -> Option<&SignPublicKey> {
+    pub fn get_public_key(&self, id: u64) -> Option<&SignPublicKey> {
         self.keycards
             .get(id as usize)
             .map(Option::as_ref)
