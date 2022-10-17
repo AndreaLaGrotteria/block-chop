@@ -182,10 +182,6 @@ impl Directory {
         self.keycards.len()
     }
 
-    pub fn get(&self, id: u64) -> Option<&KeyCard> {
-        self.keycards.get(id as usize).map(Option::as_ref).flatten()
-    }
-
     pub fn get_identity(&self, id: u64) -> Option<Identity> {
         self.keycards
             .get(id as usize)
