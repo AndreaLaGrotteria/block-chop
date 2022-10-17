@@ -140,7 +140,7 @@ impl CompressedBatch {
             .map(|id| {
                 let id = id as u64;
 
-                let identity = directory.get(id).unwrap().identity();
+                let identity = directory.get_identity(id).unwrap();
                 let keychain = passepartout.get(identity).unwrap();
 
                 let entry = Entry {

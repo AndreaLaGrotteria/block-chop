@@ -45,8 +45,7 @@ pub async fn load<A>(
     let keychains = range
         .clone()
         .map(|id| {
-            let keycard = directory.get(id).unwrap();
-            let identity = keycard.identity();
+            let identity = directory.get_identity(id).unwrap();
             let keychain = passepartout.get(identity).unwrap();
 
             keychain

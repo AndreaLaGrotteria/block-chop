@@ -117,7 +117,7 @@ fn main() {
                 .iter()
                 .copied()
                 .map(|id| {
-                    let identity = directory.get(id).unwrap().identity();
+                    let identity = directory.get_identity(id).unwrap();
                     let keychain = passepartout.get(identity).unwrap();
 
                     let state = State {

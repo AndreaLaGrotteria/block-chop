@@ -330,7 +330,7 @@ mod tests {
         let directory = Directory::from_keycards(keycards);
 
         let before = (0..1024)
-            .map(|id| directory.get(id).unwrap().identity())
+            .map(|id| directory.get_identity(id).unwrap())
             .collect::<Vec<_>>();
 
         let mut path = env::temp_dir();
@@ -342,7 +342,7 @@ mod tests {
         };
 
         let after = (0..1024)
-            .map(|id| directory.get(id).unwrap().identity())
+            .map(|id| directory.get_identity(id).unwrap())
             .collect::<Vec<_>>();
 
         assert_eq!(before, after);
