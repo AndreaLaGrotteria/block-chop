@@ -1,15 +1,16 @@
 use doomstack::{here, Doom, ResultExt, Top};
 #[cfg(feature = "benchmark")]
 use memmap::{Mmap, MmapMut, MmapOptions};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use std::{
+    fs,
+    io::{self, BufReader, BufWriter},
+    path::Path,
+};
 #[cfg(feature = "benchmark")]
 use std::{
     fs::{File, OpenOptions},
     slice,
-};
-use std::{
-    io::{self, BufReader, BufWriter},
-    path::Path,
 };
 #[cfg(feature = "benchmark")]
 use std::{
@@ -27,13 +28,18 @@ use talk::crypto::{
 const BLOCK_SIZE: usize = 145;
 const CHUNK_SIZE: usize = 16 * 1048576;
 
-#[cfg(feature = "benchmark")]
-const ENTRY_SIZE: usize = mem::size_of::<Option<KeyCard>>();
-
 pub struct Directory {
-    keycards: Vec<Option<KeyCard>>,
+    identities: Vec<Option<Identity>>,
+    public_keys: Vec<Option<PublicKey>>,
+    multi_public_keys: Vec<Option<MultiPublicKey>>,
     #[cfg(feature = "benchmark")]
-    mmap: Option<Mmap>,
+    mmaps: Option<Mmaps>,
+}
+
+struct Mmaps {
+    _identities: Mmap,
+    _public_keys: Mmap,
+    _multi_public_keys: Mmap,
 }
 
 #[derive(Doom)]
@@ -66,6 +72,28 @@ pub enum DirectoryError {
 impl Directory {
     pub fn new() -> Self {
         Directory::from_keycards(Vec::new())
+    }
+
+    pub(crate) fn from_keycards(keycards: Vec<Option<KeyCard>>) -> Self {
+        let mut identities = Vec::with_capacity(keycards.len());
+        let mut public_keys = Vec::with_capacity(keycards.len());
+        let mut multi_public_keys = Vec::with_capacity(keycards.len());
+
+        for keycard in keycards {
+            let keycard = keycard.as_ref();
+
+            identities.push(keycard.map(KeyCard::identity));
+            public_keys.push(keycard.map(Signer::public_key).cloned());
+            multi_public_keys.push(keycard.map(MultiSigner::public_key).cloned());
+        }
+
+        Directory {
+            identities,
+            public_keys,
+            multi_public_keys,
+            #[cfg(feature = "benchmark")]
+            mmaps: None,
+        }
     }
 
     pub fn load<P>(path: P) -> Result<Self, Top<DirectoryError>>
@@ -143,11 +171,7 @@ impl Directory {
             keycards.append(&mut chunk);
         }
 
-        Ok(Directory {
-            keycards,
-            #[cfg(feature = "benchmark")]
-            mmap: None,
-        })
+        Ok(Directory::from_keycards(keycards))
     }
 
     #[cfg(feature = "benchmark")]
@@ -155,68 +179,92 @@ impl Directory {
     where
         P: AsRef<Path>,
     {
-        let mmap = MmapOptions::new().map(&File::open(&path).unwrap()).unwrap();
+        unsafe fn load_component<T>(root: &Path, file: &str) -> (Vec<Option<T>>, Mmap) {
+            let mut path = root.to_path_buf();
+            path.push(file);
 
-        if mmap.len() % ENTRY_SIZE != 0 {
-            panic!("Called `Directory::load_raw` on a non-aligned file");
+            let mmap = MmapOptions::new()
+                .map(&File::open(path.as_path()).unwrap())
+                .unwrap();
+
+            if mmap.len() % mem::size_of::<Option<T>>() != 0 {
+                panic!("Called `Directory::load_raw` on non-aligned components");
+            }
+
+            let pointer = mmap.as_ptr() as *mut Option<T>;
+            let capacity = mmap.len() / mem::size_of::<Option<T>>();
+            let vector = Vec::from_raw_parts(pointer, capacity, capacity);
+
+            (vector, mmap)
         }
 
-        let pointer = mmap.as_ptr() as *mut Option<KeyCard>;
-        let capacity = mmap.len() / ENTRY_SIZE;
+        let (identities, identities_mmap) = load_component(path.as_ref(), "identities.raw");
+        let (public_keys, public_keys_mmap) = load_component(path.as_ref(), "public_keys.raw");
 
-        Directory {
-            keycards: Vec::from_raw_parts(pointer, capacity, capacity),
-            mmap: Some(mmap),
+        let (multi_public_keys, multi_public_keys_mmap) =
+            load_component(path.as_ref(), "multi_public_keys.raw");
+
+        if identities.len() != public_keys.len() || public_keys.len() != multi_public_keys.len() {
+            panic!("Called `Directory::load_raw` on length-mismatched components");
         }
-    }
 
-    pub(crate) fn from_keycards(keycards: Vec<Option<KeyCard>>) -> Self {
         Directory {
-            keycards,
-            #[cfg(feature = "benchmark")]
-            mmap: None,
+            identities,
+            public_keys,
+            multi_public_keys,
+            mmaps: Some(Mmaps {
+                _identities: identities_mmap,
+                _public_keys: public_keys_mmap,
+                _multi_public_keys: multi_public_keys_mmap,
+            }),
         }
     }
 
     pub fn capacity(&self) -> usize {
-        self.keycards.len()
+        self.identities.len()
     }
 
     pub fn get_identity(&self, id: u64) -> Option<Identity> {
-        self.keycards
+        self.identities
             .get(id as usize)
             .map(Option::as_ref)
             .flatten()
-            .map(KeyCard::identity)
+            .cloned()
     }
 
     pub fn get_public_key(&self, id: u64) -> Option<&PublicKey> {
-        self.keycards
+        self.public_keys
             .get(id as usize)
             .map(Option::as_ref)
             .flatten()
-            .map(Signer::public_key)
     }
 
     pub fn get_multi_public_key(&self, id: u64) -> Option<&MultiPublicKey> {
-        self.keycards
+        self.multi_public_keys
             .get(id as usize)
             .map(Option::as_ref)
             .flatten()
-            .map(MultiSigner::public_key)
     }
 
     pub fn insert(&mut self, id: u64, keycard: KeyCard) {
         #[cfg(feature = "benchmark")]
-        if self.mmap.is_some() {
+        if self.mmaps.is_some() {
             panic!("Called `Directory::insert` on an `memmap`ed `Directory`");
         }
 
-        if self.keycards.len() <= (id as usize) {
-            self.keycards.resize((id as usize) + 1, None);
+        if self.identities.len() <= (id as usize) {
+            self.identities.resize((id as usize) + 1, None);
+            self.public_keys.resize((id as usize) + 1, None);
+            self.multi_public_keys.resize((id as usize) + 1, None);
         }
 
-        *self.keycards.get_mut(id as usize).unwrap() = Some(keycard);
+        *self.identities.get_mut(id as usize).unwrap() = Some(keycard.identity());
+
+        *self.public_keys.get_mut(id as usize).unwrap() =
+            Some(Signer::public_key(&keycard).clone());
+
+        *self.multi_public_keys.get_mut(id as usize).unwrap() =
+            Some(MultiSigner::public_key(&keycard).clone());
     }
 
     pub fn save<P>(&self, path: P) -> Result<(), Top<DirectoryError>>
@@ -230,12 +278,25 @@ impl Directory {
 
         let mut file = BufWriter::new(file);
 
-        for chunk in self.keycards.chunks(CHUNK_SIZE) {
-            // Serialize `chunk` in parallel
+        for (public_key_chunk, multi_public_key_chunk) in self
+            .public_keys
+            .chunks(CHUNK_SIZE)
+            .zip(self.multi_public_keys.chunks(CHUNK_SIZE))
+        {
+            // (In parallel) Assemble public keys into `KeyCard`s and serialize
 
-            let blocks = chunk
+            let blocks = public_key_chunk
                 .into_par_iter()
-                .map(|keycard| {
+                .zip(multi_public_key_chunk)
+                .map(|(public_key, multi_public_key)| {
+                    let keycard = match (public_key, multi_public_key) {
+                        (Some(public_key), Some(multi_public_key)) => Some(
+                            KeyCard::from_public_keys(public_key.clone(), multi_public_key.clone()),
+                        ),
+                        (None, None) => None,
+                        _ => unreachable!(),
+                    };
+
                     if let Some(keycard) = keycard {
                         let mut block = [0u8; BLOCK_SIZE];
                         bincode::serialize_into(&mut block[1..], &keycard).unwrap();
@@ -269,34 +330,52 @@ impl Directory {
     where
         P: AsRef<Path>,
     {
-        let pointer = self.keycards.as_ptr() as *const u8;
-        let bytes = self.keycards.len() * ENTRY_SIZE;
+        fs::create_dir_all(path.as_ref()).unwrap();
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .unwrap();
+        unsafe fn save_component<T>(root: &Path, file: &str, component: &Vec<Option<T>>) {
+            let mut path = root.to_path_buf();
+            path.push(file);
 
-        file.set_len(bytes as u64).unwrap();
+            let pointer = component.as_ptr() as *const u8;
+            let bytes = component.len() * mem::size_of::<Option<T>>();
 
-        let mut mmap = MmapMut::map_mut(&file).unwrap();
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(path)
+                .unwrap();
 
-        (&mut mmap[..])
-            .write_all(slice::from_raw_parts(pointer, bytes))
-            .unwrap();
+            file.set_len(bytes as u64).unwrap();
 
-        mmap.flush().unwrap();
+            let mut mmap = MmapMut::map_mut(&file).unwrap();
+
+            (&mut mmap[..])
+                .write_all(slice::from_raw_parts(pointer, bytes))
+                .unwrap();
+
+            mmap.flush().unwrap();
+        }
+
+        save_component(path.as_ref(), "identities.raw", &self.identities);
+        save_component(path.as_ref(), "public_keys.raw", &self.public_keys);
+
+        save_component(
+            path.as_ref(),
+            "multi_public_keys.raw",
+            &self.multi_public_keys,
+        );
     }
 }
 
 impl Clone for Directory {
     fn clone(&self) -> Self {
         Directory {
-            keycards: self.keycards.clone(),
+            identities: self.identities.clone(),
+            public_keys: self.public_keys.clone(),
+            multi_public_keys: self.multi_public_keys.clone(),
             #[cfg(feature = "benchmark")]
-            mmap: None,
+            mmaps: None,
         }
     }
 }
@@ -304,8 +383,10 @@ impl Clone for Directory {
 impl Drop for Directory {
     fn drop(&mut self) {
         #[cfg(feature = "benchmark")]
-        if self.mmap.is_some() {
-            mem::forget(mem::take(&mut self.keycards));
+        if self.mmaps.is_some() {
+            mem::forget(mem::take(&mut self.identities));
+            mem::forget(mem::take(&mut self.public_keys));
+            mem::forget(mem::take(&mut self.multi_public_keys));
         }
     }
 }
@@ -314,6 +395,7 @@ impl Drop for Directory {
 #[cfg(feature = "benchmark")]
 mod tests {
     use super::*;
+    use rand::{distributions::Alphanumeric, Rng};
     use std::{env, iter};
     use talk::crypto::KeyChain;
 
@@ -329,8 +411,16 @@ mod tests {
             .map(|id| directory.get_identity(id).unwrap())
             .collect::<Vec<_>>();
 
+        let id: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(8)
+            .map(char::from)
+            .collect();
+
+        let file = format!("test_directory_{id}");
+
         let mut path = env::temp_dir();
-        path.push("test_directory.bin");
+        path.push(file);
 
         let directory = unsafe {
             directory.save_raw(path.clone());
