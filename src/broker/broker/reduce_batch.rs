@@ -229,11 +229,11 @@ impl Broker {
 
             match command {
                 StreamReductionCommand::Aggregate(reductions) => {
-                    // Map ids to `KeyCard`s
+                    // Map ids to `MultiPublicKey`s
 
                     let entries = reductions.iter().map(|(id, multisignature)| {
-                        let keycard = directory.get(*id).unwrap();
-                        (keycard, multisignature)
+                        let multi_public_key = directory.get_multi_public_key(*id).unwrap();
+                        (multi_public_key, multisignature)
                     });
 
                     // Aggregate `entries`

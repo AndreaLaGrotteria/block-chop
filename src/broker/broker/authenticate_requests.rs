@@ -9,7 +9,7 @@ use crate::{
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{net::SocketAddr, sync::Arc};
-use talk::crypto::{primitives::sign::Signature, KeyCard};
+use talk::crypto::primitives::sign::{PublicKey, Signature};
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 
 type BurstOutlet = MpscReceiver<Vec<(SocketAddr, Request)>>;
@@ -18,7 +18,7 @@ type RequestInlet = MpscSender<(SocketAddr, Request)>;
 struct BurstItem<'a> {
     source: SocketAddr,
     request: Request,
-    keycard: &'a KeyCard,
+    public_key: &'a PublicKey,
 }
 
 #[derive(Doom)]
@@ -52,7 +52,7 @@ impl Broker {
 
             // Remove from `burst` all `Request`s whose fields are trivially invalid
             // (i.e., unknown id or missing authentication). To each `Request` attach
-            // a reference to the relevant `KeyCard`.
+            // a reference to the relevant `PublicKey`.
 
             let burst = burst
                 .into_iter()
@@ -88,17 +88,17 @@ impl Broker {
         source: SocketAddr,
         request: Request,
     ) -> Result<BurstItem<'a>, Top<FilterError>> {
-        let keycard = match &request {
+        let public_key = match &request {
             Request::Broadcast {
                 entry,
                 height_record,
                 authentication,
                 ..
             } => {
-                // Fetch relevant `KeyCard` from `directory`
+                // Fetch relevant `PublicKey` from `directory`
 
-                let keycard = directory
-                    .get(entry.id)
+                let public_key = directory
+                    .get_public_key(entry.id)
                     .ok_or(FilterError::IdUnknown.into_top())
                     .spot(here!())?;
 
@@ -108,24 +108,24 @@ impl Broker {
                     return FilterError::MissingAuthentication.fail().spot(here!());
                 }
 
-                keycard
+                public_key
             }
             Request::Reduction { id, .. } => {
-                // Fetch relevant `KeyCard` from `directory`
+                // Fetch relevant `PublicKey` from `directory`
 
-                let keycard = directory
-                    .get(*id)
+                let public_key = directory
+                    .get_public_key(*id)
                     .ok_or(FilterError::IdUnknown.into_top())
                     .spot(here!())?;
 
-                keycard
+                public_key
             }
         };
 
         Ok(BurstItem {
             source,
             request,
-            keycard,
+            public_key,
         })
     }
 
@@ -139,18 +139,18 @@ impl Broker {
         // Initialize buffers to `Signature::batch_verify` `BroadcastStatement`s,
         // `BroadcastAuthenticationStatement`s and `ReductionAuthenticationStatement`s
 
-        let mut broadcast_keycards = Vec::with_capacity(settings.authentication_burst_size);
+        let mut broadcast_public_keys = Vec::with_capacity(settings.authentication_burst_size);
         let mut broadcast_statements = Vec::with_capacity(settings.authentication_burst_size);
         let mut broadcast_signatures = Vec::with_capacity(settings.authentication_burst_size);
 
-        let mut broadcast_authentication_keycards =
+        let mut broadcast_authentication_public_keys =
             Vec::with_capacity(settings.authentication_burst_size);
         let mut broadcast_authentication_statements =
             Vec::with_capacity(settings.authentication_burst_size);
         let mut broadcast_authentication_signatures =
             Vec::with_capacity(settings.authentication_burst_size);
 
-        let mut reduction_authentication_keycards =
+        let mut reduction_authentication_public_keys =
             Vec::with_capacity(settings.authentication_burst_size);
         let mut reduction_authentication_statements =
             Vec::with_capacity(settings.authentication_burst_size);
@@ -170,7 +170,7 @@ impl Broker {
                 } => {
                     // `BroadcastStatement`
 
-                    broadcast_keycards.push(item.keycard);
+                    broadcast_public_keys.push(item.public_key);
 
                     broadcast_statements.push(BroadcastStatement {
                         sequence: &entry.sequence,
@@ -182,7 +182,7 @@ impl Broker {
                     // `BroadcastAuthenticationStatement` (optional)
 
                     if let Some(height_record) = height_record {
-                        broadcast_authentication_keycards.push(item.keycard);
+                        broadcast_authentication_public_keys.push(item.public_key);
 
                         broadcast_authentication_statements
                             .push(BroadcastAuthenticationStatement { height_record });
@@ -199,7 +199,7 @@ impl Broker {
                 } => {
                     // `ReductionAuthenticationStatement`
 
-                    reduction_authentication_keycards.push(item.keycard);
+                    reduction_authentication_public_keys.push(item.public_key);
 
                     reduction_authentication_statements.push(ReductionAuthenticationStatement {
                         root,
@@ -215,21 +215,21 @@ impl Broker {
         // Return `Ok` only if all verifications are successful.
 
         Signature::batch_verify(
-            broadcast_keycards,
+            broadcast_public_keys,
             broadcast_statements.iter(),
             broadcast_signatures,
         )
         .pot(FilterError::InvalidSignature, here!())?;
 
         Signature::batch_verify(
-            broadcast_authentication_keycards,
+            broadcast_authentication_public_keys,
             broadcast_authentication_statements.iter(),
             broadcast_authentication_signatures,
         )
         .pot(FilterError::InvalidAuthentication, here!())?;
 
         Signature::batch_verify(
-            reduction_authentication_keycards,
+            reduction_authentication_public_keys,
             reduction_authentication_statements.iter(),
             reduction_authentication_signatures,
         )
@@ -257,7 +257,7 @@ impl Broker {
                 };
 
                 signature
-                    .verify(item.keycard, &broadcast_statement)
+                    .verify(item.public_key, &broadcast_statement)
                     .pot(FilterError::InvalidSignature, here!())?;
 
                 // `BroadcastAuthenticationStatement` (optional)
@@ -269,7 +269,7 @@ impl Broker {
                     authentication
                         .as_ref()
                         .unwrap() // We previously checked that `authentication` is `Some`
-                        .verify(item.keycard, &broadcast_authentication_statement)
+                        .verify(item.public_key, &broadcast_authentication_statement)
                         .pot(FilterError::InvalidAuthentication, here!())?;
                 }
             }
@@ -287,7 +287,7 @@ impl Broker {
                 };
 
                 authentication
-                    .verify(item.keycard, &reduction_authentication_statement)
+                    .verify(item.public_key, &reduction_authentication_statement)
                     .pot(FilterError::InvalidAuthentication, here!())?;
             }
         }
