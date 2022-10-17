@@ -19,7 +19,7 @@ use std::{
 use talk::crypto::{
     primitives::{
         multi::{PublicKey as MultiPublicKey, Signer as MultiSigner},
-        sign::{PublicKey as SignPublicKey, Signer as SignSigner},
+        sign::{PublicKey, Signer},
     },
     Identity, KeyCard,
 };
@@ -194,12 +194,12 @@ impl Directory {
             .map(KeyCard::identity)
     }
 
-    pub fn get_public_key(&self, id: u64) -> Option<&SignPublicKey> {
+    pub fn get_public_key(&self, id: u64) -> Option<&PublicKey> {
         self.keycards
             .get(id as usize)
             .map(Option::as_ref)
             .flatten()
-            .map(SignSigner::public_key)
+            .map(Signer::public_key)
     }
 
     pub fn get_multi_public_key(&self, id: u64) -> Option<&MultiPublicKey> {
