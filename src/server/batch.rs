@@ -109,7 +109,7 @@ impl Batch {
                     .get_multi_public_key(id)
                     .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
 
-                reducer_multi_public_keys.push(multi_public_key);
+                reducer_multi_public_keys.push(multi_public_key.clone());
             }
         }
 
@@ -153,7 +153,7 @@ impl Batch {
             };
 
             multisignature
-                .verify(reducer_multi_public_keys, &statement)
+                .verify(reducer_multi_public_keys.iter(), &statement)
                 .pot(BatchError::InvalidReduction, here!())?;
         }
 
