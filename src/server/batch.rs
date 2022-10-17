@@ -71,26 +71,26 @@ impl Batch {
 
         let mut stragglers = compressed_batch.stragglers.iter().peekable();
 
-        let mut reducer_keycards = Vec::with_capacity(ids.len());
+        let mut reducer_multi_public_keys = Vec::with_capacity(ids.len());
 
-        let mut straggler_keycards = Vec::with_capacity(stragglers.len());
+        let mut straggler_public_keys = Vec::with_capacity(stragglers.len());
         let mut straggler_statements = Vec::with_capacity(stragglers.len());
         let mut straggler_signatures = Vec::with_capacity(stragglers.len());
 
         let mut straggler_entries = Vec::with_capacity(stragglers.len());
 
         for (index, (id, message)) in ids.iter().copied().zip(messages.iter()).enumerate() {
-            let keycard = directory
-                .get(id)
-                .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
-
             if let Some(straggler) = stragglers.peek().filter(|straggler| straggler.id == id) {
+                let public_key = directory
+                    .get_public_key(id)
+                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+
                 let statement = BroadcastStatement {
                     sequence: &straggler.sequence,
                     message,
                 };
 
-                straggler_keycards.push(keycard);
+                straggler_public_keys.push(public_key);
                 straggler_statements.push(statement);
                 straggler_signatures.push(&straggler.signature);
 
@@ -105,14 +105,18 @@ impl Batch {
 
                 stragglers.next();
             } else {
-                reducer_keycards.push(keycard);
+                let multi_public_key = directory
+                    .get_multi_public_key(id)
+                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+
+                reducer_multi_public_keys.push(multi_public_key);
             }
         }
 
         // Verify straggler `Signature`s
 
         Signature::batch_verify(
-            straggler_keycards,
+            straggler_public_keys,
             straggler_statements.iter(),
             straggler_signatures,
         )
@@ -138,7 +142,7 @@ impl Batch {
 
         // Verify reducers' `MultiSignature`
 
-        if !reducer_keycards.is_empty() {
+        if !reducer_multi_public_keys.is_empty() {
             let multisignature = compressed_batch
                 .multisignature
                 .ok_or(BatchError::MissingReduction.into_top())
@@ -149,7 +153,7 @@ impl Batch {
             };
 
             multisignature
-                .verify(reducer_keycards, &statement)
+                .verify(reducer_multi_public_keys, &statement)
                 .pot(BatchError::InvalidReduction, here!())?;
         }
 
