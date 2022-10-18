@@ -130,6 +130,8 @@ async fn main() {
         batches,
         LoadBrokerSettings {
             rate,
+            minimum_rate_window: Duration::from_secs_f64(1.05 / rate),
+            maximum_rate_window: Duration::from_secs_f64(4. / rate),
             ..Default::default()
         },
     );
