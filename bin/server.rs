@@ -194,15 +194,16 @@ async fn main() {
         operations_performed.push_front(total - last_count);
 
         info!(
-            "{} OPps ({} OPps average, {} OPs total).",
-            ((total - last_count) as f64),
+            "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
+            ((total - last_count) as f64) / 1e6,
             (operations_performed
                 .iter()
                 .copied()
                 .take(AVERAGING_INTERVAL)
                 .sum::<usize>() as f64
-                / std::cmp::min(operations_performed.len(), AVERAGING_INTERVAL) as f64),
-            total
+                / std::cmp::min(operations_performed.len(), AVERAGING_INTERVAL) as f64)
+                / 1e6,
+            total / 1000000
         );
 
         last_count = total;
