@@ -65,8 +65,7 @@ impl LoadBroker {
                     }
                     Err(mpsc::error::TryRecvError::Disconnected) => unreachable!(),
                 };
-
-                available_workers.recv().await.unwrap();
+                
                 let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
                 info!("Sending batch {}.", batch_index);
