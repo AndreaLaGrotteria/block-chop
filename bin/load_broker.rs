@@ -132,8 +132,6 @@ async fn main() {
         LoadBrokerSettings {
             rate,
             workers: cmp::max((rate * 1.5) as u16, 1),
-            minimum_rate_window: Duration::from_secs_f64(1.05 / rate),
-            maximum_rate_window: Duration::from_secs_f64(4. / rate),
             ..Default::default()
         },
     );

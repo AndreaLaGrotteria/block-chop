@@ -4,16 +4,13 @@ use crate::{
     system::Membership,
     warn,
 };
-use std::{cmp, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
     sync::fuse::Fuse,
 };
-use tokio::{
-    sync::mpsc::{self},
-    time::{self},
-};
+use tokio::{sync::mpsc, time};
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batches(
@@ -36,47 +33,43 @@ impl LoadBroker {
 
         // Execute submission loop
 
-        let mut submissions = batches.into_iter().enumerate();
-        let mut last_tick = Instant::now();
+        let mut submissions = batches.into_iter();
+
+        let submission_start = Instant::now();
+        let mut batch_index = 0;
 
         let fuse = Fuse::new();
 
         'submission: loop {
-            let sleep_time = settings
-                .minimum_rate_window
-                .saturating_sub(last_tick.elapsed());
+            time::sleep(settings.submission_interval).await;
 
-            if !sleep_time.is_zero() {
-                time::sleep(sleep_time).await;
-            } else {
-                warn!(
-                    "Submission lagged by {:?}.",
-                    last_tick
-                        .elapsed()
-                        .saturating_sub(settings.minimum_rate_window)
-                );
-            }
+            let target = (submission_start.elapsed().as_secs_f64() * settings.rate) as usize;
 
-            let window = last_tick.elapsed();
-            last_tick = Instant::now();
-
-            let submission_allowance = (cmp::min(window, settings.maximum_rate_window)
-                .as_secs_f64()
-                * settings.rate) as usize;
-
-            for _ in 0..submission_allowance {
-                let (index, (batch_root, raw_batch)) = if let Some(submission) = submissions.next()
-                {
+            while batch_index < target {
+                let (batch_root, raw_batch) = if let Some(submission) = submissions.next() {
                     submission
                 } else {
                     // All batches submitted
                     break 'submission;
                 };
 
-                let worker_index = available_workers.recv().await.unwrap();
+                let worker_index = match available_workers.try_recv() {
+                    Ok(index) => index,
+                    Err(mpsc::error::TryRecvError::Empty) => {
+                        let choke_start = Instant::now();
+                        let index = available_workers.recv().await.unwrap();
+
+                        warn!("Waited {:?} to get a worker.", choke_start.elapsed());
+
+                        index
+                    }
+                    Err(mpsc::error::TryRecvError::Disconnected) => unreachable!(),
+                };
+
+                available_workers.recv().await.unwrap();
                 let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
-                info!("Sending batch {}.", index);
+                info!("Sending batch {}.", batch_index);
 
                 {
                     let membership = membership.clone();
@@ -103,6 +96,8 @@ impl LoadBroker {
                 }
 
                 *next_sequence += 1;
+
+                batch_index += 1;
             }
         }
 
