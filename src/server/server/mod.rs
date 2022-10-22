@@ -90,6 +90,7 @@ impl Server {
 
         {
             let broker_slots = broker_slots.clone();
+            let witness_cache = witness_cache.clone();
 
             fuse.spawn(async move {
                 Server::deliver(
@@ -97,6 +98,7 @@ impl Server {
                     membership,
                     broadcast,
                     broker_slots,
+                    witness_cache,
                     totality_manager,
                     deduplicator,
                     next_batch_inlet,

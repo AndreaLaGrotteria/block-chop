@@ -7,7 +7,7 @@ use crate::{
         Certificate,
     },
     order::Order,
-    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager},
+    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
     system::Membership,
     Entry,
 };
@@ -37,6 +37,7 @@ impl Server {
         membership: Membership,
         broadcast: Arc<dyn Order>,
         broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
+        witness_cache: Arc<Mutex<WitnessCache>>,
         mut totality_manager: TotalityManager,
         mut deduplicator: Deduplicator,
         mut next_batch_inlet: BurstInlet,
@@ -50,7 +51,7 @@ impl Server {
                 submission = broadcast.deliver() => {
                     // Parse `submission` to obtain broker identity and batch root
 
-                    if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref()) {
+                    if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref(), witness_cache.as_ref()) {
                         // Retrieve broker sequence number, expected batch, and delivery shard inlet
 
                         let (sequence, expected_batch, delivery_shard_inlet) = {
@@ -126,6 +127,7 @@ impl Server {
         submission: &[u8],
         membership: &Membership,
         broker_slots: &Mutex<HashMap<(Identity, u16), BrokerSlot>>,
+        witness_cache: &Mutex<WitnessCache>,
     ) -> Result<(Identity, u16, Hash), Top<ParseSubmissionError>> {
         let (broker, worker, root, witness) =
             bincode::deserialize::<(Identity, u16, Hash, Certificate)>(submission)
@@ -140,17 +142,23 @@ impl Server {
             .or_default()
             .next_sequence;
 
-        witness
-            .verify_plurality(
-                &membership,
-                &BatchWitnessStatement {
-                    broker: &broker,
-                    worker: &worker,
-                    sequence: &sequence,
-                    root: &root,
-                },
-            )
-            .pot(ParseSubmissionError::WitnessInvalid, here!())?;
+        if !witness_cache
+            .lock()
+            .unwrap()
+            .contains(&broker, &worker, &sequence, &root, &witness)
+        {
+            witness
+                .verify_plurality(
+                    &membership,
+                    &BatchWitnessStatement {
+                        broker: &broker,
+                        worker: &worker,
+                        sequence: &sequence,
+                        root: &root,
+                    },
+                )
+                .pot(ParseSubmissionError::WitnessInvalid, here!())?;
+        }
 
         Ok((broker, worker, root))
     }
