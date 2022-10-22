@@ -3,7 +3,7 @@ use crate::{
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
-    server::{Batch, BrokerSlot, Server, ServerSettings},
+    server::{Batch, BrokerSlot, Server, ServerSettings, WitnessCache},
     system::{Directory, Membership},
     warn,
 };
@@ -45,6 +45,7 @@ impl Server {
         directory: Directory,
         broadcast: Arc<dyn Order>,
         broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
+        witness_cache: Arc<Mutex<WitnessCache>>,
         mut listener: SessionListener,
         settings: ServerSettings,
     ) {
@@ -65,6 +66,7 @@ impl Server {
             let broadcast = broadcast.clone();
             let broker_slots = broker_slots.clone();
             let semaphore = semaphore.clone();
+            let witness_cache = witness_cache.clone();
 
             fuse.spawn(async move {
                 if let Err(error) = Server::serve(
@@ -76,6 +78,7 @@ impl Server {
                     broadcast,
                     broker_slots,
                     semaphore,
+                    witness_cache,
                 )
                 .await
                 {
@@ -94,6 +97,7 @@ impl Server {
         broadcast: Arc<dyn Order>,
         broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
         semaphore: Arc<Semaphore>,
+        witness_cache: Arc<Mutex<WitnessCache>>,
     ) -> Result<(), Top<ServeError>> {
         // Receive broker request
 
@@ -233,6 +237,11 @@ impl Server {
                 },
             )
             .pot(ServeError::WitnessInvalid, here!())?;
+
+        witness_cache
+            .lock()
+            .unwrap()
+            .store(&broker, &worker, &sequence, &root, &witness);
 
         debug!("Witness certificate valid.");
 

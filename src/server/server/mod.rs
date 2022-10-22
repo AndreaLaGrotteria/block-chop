@@ -1,6 +1,6 @@
 use crate::{
     order::Order,
-    server::{Deduplicator, ServerSettings, TotalityManager},
+    server::{Deduplicator, ServerSettings, TotalityManager, WitnessCache},
     system::{Directory, Membership},
     Entry,
 };
@@ -45,6 +45,7 @@ impl Server {
         // Initialize components
 
         let broker_slots = Arc::new(Mutex::new(HashMap::new()));
+        let witness_cache = Arc::new(Mutex::new(WitnessCache::new(Default::default())));
 
         let totality_manager = TotalityManager::new(
             membership.clone(),
@@ -69,6 +70,7 @@ impl Server {
             let membership = membership.clone();
             let broadcast = broadcast.clone();
             let broker_slots = broker_slots.clone();
+            let witness_cache = witness_cache.clone();
             let settings = settings.clone();
 
             fuse.spawn(async move {
@@ -78,6 +80,7 @@ impl Server {
                     directory,
                     broadcast,
                     broker_slots,
+                    witness_cache,
                     broker_listener,
                     settings,
                 )
