@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use talk::link::{
     context::{ConnectDispatcher, ListenDispatcher},
@@ -184,28 +184,29 @@ async fn main() {
 
     // Log progress
 
+    let mut rates = VecDeque::with_capacity(120);
+
     let mut last_count = 0;
-    let mut operations_performed: VecDeque<usize> = VecDeque::with_capacity(120);
+    let mut last_time = Instant::now();
 
     loop {
         time::sleep(Duration::from_secs(1)).await;
 
         let total = counter.load(Ordering::Relaxed);
-        operations_performed.push_front(total - last_count);
+        let rate = (total - last_count) as f64 / last_time.elapsed().as_secs_f64();
+
+        last_count = total;
+        last_time = Instant::now();
+
+        rates.push_front(rate);
 
         info!(
             "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
-            ((total - last_count) as f64) / 1e6,
-            (operations_performed
-                .iter()
-                .copied()
-                .take(AVERAGING_INTERVAL)
-                .sum::<usize>() as f64
-                / std::cmp::min(operations_performed.len(), AVERAGING_INTERVAL) as f64)
+            rate / 1e6,
+            (rates.iter().copied().take(AVERAGING_INTERVAL).sum::<f64>()
+                / std::cmp::min(rates.len(), AVERAGING_INTERVAL) as f64)
                 / 1e6,
             total / 1000000
         );
-
-        last_count = total;
     }
 }
