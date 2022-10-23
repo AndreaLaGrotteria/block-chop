@@ -4,7 +4,7 @@ use crate::{
     system::Membership,
     warn,
 };
-use std::{sync::Arc, time::Instant};
+use std::{cmp, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
@@ -43,7 +43,22 @@ impl LoadBroker {
         'submission: loop {
             time::sleep(settings.submission_interval).await;
 
-            let target = (submission_start.elapsed().as_secs_f64() * settings.rate) as usize;
+            // Target number of submitted batches is computed as the integral of:
+            //  - Linear increase to `settings.rate` in `settings.warmup` (hence
+            //    the quadratic term `1/2 * acceleration * time^2`);
+            //  - Constant `settings.rate` after `settings.warmup` (hence the
+            //    linear term `speed * time`).
+
+            let run_time = submission_start.elapsed();
+            let warmup_time = cmp::min(run_time, settings.warmup);
+            let cruise_time = run_time.saturating_sub(settings.warmup);
+
+            let target = 0.5
+                * (settings.rate / settings.warmup.as_secs_f64())
+                * warmup_time.as_secs_f64().powi(2)
+                + settings.rate * cruise_time.as_secs_f64();
+
+            let target = target as usize;
 
             while batch_index < target {
                 let (batch_root, raw_batch) = if let Some(submission) = submissions.next() {
