@@ -37,6 +37,16 @@ name = "load_broker"
 path = "bin/load_broker.rs"
 required-features = [ "benchmark" ]
 
+[[bin]]
+name = "honest_broker"
+path = "bin/honest_broker.rs"
+required-features = [ "benchmark" ]
+
+[[bin]]
+name = "load_client"
+path = "bin/load_client.rs"
+required-features = [ "benchmark" ]
+
 [features]
 all = [ "benchmark" ]
 benchmark = [ "dep:memmap" ]

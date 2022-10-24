@@ -194,7 +194,7 @@ async fn main() {
         operations_performed.push_front(total - last_count);
 
         info!(
-            "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
+            "{:.04} MOPps ({:.04} MOPps average, {} MOPs total).",
             ((total - last_count) as f64) / 1e6,
             (operations_performed
                 .iter()

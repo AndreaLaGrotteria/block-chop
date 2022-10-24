@@ -142,7 +142,7 @@ async fn main() {
 
     // Wait indefinitely
 
-    print!("\n    [Hit Ctrl + C to stop this daemon]  ");
+    println!("\n    [Hit Ctrl + C to stop this daemon]  ");
     io::stdout().flush().unwrap();
     future::pending::<()>().await;
 }
