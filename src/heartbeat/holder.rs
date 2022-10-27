@@ -1,19 +1,19 @@
-use crate::heartbeat::Event;
+use crate::heartbeat::Entry;
 use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
 };
 
-type EventInlet = Sender<Event>;
-type EventOutlet = Receiver<Event>;
+type EntryInlet = Sender<Entry>;
+type EntryOutlet = Receiver<Entry>;
 
 pub(in crate::heartbeat) struct Holder {
     channel: Mutex<Option<Channel>>,
 }
 
 struct Channel {
-    inlet: EventInlet,
-    outlet: Arc<Mutex<EventOutlet>>,
+    inlet: EntryInlet,
+    outlet: Arc<Mutex<EntryOutlet>>,
 }
 
 impl Holder {
@@ -23,13 +23,13 @@ impl Holder {
         }
     }
 
-    pub fn get_inlet(&self) -> EventInlet {
+    pub fn get_inlet(&self) -> EntryInlet {
         let mut channel = self.channel.lock().unwrap();
         Holder::fill(&mut channel);
         channel.as_ref().unwrap().inlet.clone()
     }
 
-    pub fn get_outlet(&self) -> Arc<Mutex<EventOutlet>> {
+    pub fn get_outlet(&self) -> Arc<Mutex<EntryOutlet>> {
         let mut channel = self.channel.lock().unwrap();
         Holder::fill(&mut channel);
         channel.as_ref().unwrap().outlet.clone()
