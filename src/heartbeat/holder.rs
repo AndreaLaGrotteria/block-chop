@@ -12,7 +12,7 @@ pub(in crate::heartbeat) struct Holder {
 }
 
 struct Channel {
-    inlet: Arc<EventInlet>,
+    inlet: EventInlet,
     outlet: Arc<Mutex<EventOutlet>>,
 }
 
@@ -23,7 +23,7 @@ impl Holder {
         }
     }
 
-    pub fn get_inlet(&self) -> Arc<EventInlet> {
+    pub fn get_inlet(&self) -> EventInlet {
         let mut channel = self.channel.lock().unwrap();
         Holder::fill(&mut channel);
         channel.as_ref().unwrap().inlet.clone()
@@ -38,8 +38,6 @@ impl Holder {
     fn fill(channel: &mut Option<Channel>) {
         if channel.is_none() {
             let (inlet, outlet) = mpsc::channel();
-
-            let inlet = Arc::new(inlet);
             let outlet = Arc::new(Mutex::new(outlet));
 
             *channel = Some(Channel { inlet, outlet })
