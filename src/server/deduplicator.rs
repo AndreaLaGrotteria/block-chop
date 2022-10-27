@@ -649,7 +649,7 @@ mod tests {
 
     fn build_entry(id: u64, sequence: u64, message: u64) -> Entry {
         let mut buffer = Message::default();
-        buffer[0..8].copy_from_slice(&message.to_be_bytes()[..]);
+        buffer.bytes[0..8].copy_from_slice(&message.to_be_bytes()[..]);
 
         Entry {
             id,

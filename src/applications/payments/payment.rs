@@ -1,4 +1,7 @@
-use crate::{applications::payments::Deposit, broadcast::Entry};
+use crate::{
+    applications::payments::Deposit,
+    broadcast::{Entry, Message},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
@@ -9,7 +12,7 @@ pub struct Payment {
 
 impl Payment {
     pub fn from_entry(entry: Entry) -> Self {
-        let message = u64::from_le_bytes(entry.message);
+        let message = u64::from_le_bytes(entry.message.bytes);
 
         Payment {
             from: entry.id,
@@ -25,12 +28,14 @@ impl Payment {
         }
     }
 
-    pub fn to_message(&self) -> (u64, [u8; 8]) {
+    pub fn to_message(&self) -> (u64, Message) {
         debug_assert!(self.to < (1 << 32));
         debug_assert!(self.amount < (1 << 32));
 
         let message = (self.to << 32) | self.amount;
-        (self.from, message.to_le_bytes())
+        let bytes = message.to_le_bytes();
+
+        (self.from, Message { bytes })
     }
 }
 

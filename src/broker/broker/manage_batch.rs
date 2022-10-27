@@ -57,7 +57,11 @@ impl Broker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{broadcast::MESSAGE_SIZE, client::Client, system::test::generate_system};
+    use crate::{
+        broadcast::{Message, MESSAGE_SIZE},
+        client::Client,
+        system::test::generate_system,
+    };
     use std::time::Duration;
     use talk::{
         crypto::KeyChain,
@@ -92,7 +96,12 @@ mod tests {
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
-        let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [1u8; MESSAGE_SIZE],
+            })
+            .await;
 
         time::sleep(Duration::from_millis(200)).await;
     }
@@ -124,9 +133,24 @@ mod tests {
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
-        let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
-        let _delivery_record = client.broadcast([2u8; MESSAGE_SIZE]).await;
-        let _delivery_record = client.broadcast([3u8; MESSAGE_SIZE]).await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [1u8; MESSAGE_SIZE],
+            })
+            .await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [2u8; MESSAGE_SIZE],
+            })
+            .await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [3u8; MESSAGE_SIZE],
+            })
+            .await;
 
         time::sleep(Duration::from_millis(200)).await;
     }
@@ -160,9 +184,24 @@ mod tests {
         let client = client_keychains[0].clone();
         let client = Client::new(0, client, membership.clone(), "127.0.0.1:9001");
         client.add_broker(broker_address).await.unwrap();
-        let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
-        let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
-        let _delivery_record = client.broadcast([1u8; MESSAGE_SIZE]).await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [1u8; MESSAGE_SIZE],
+            })
+            .await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [1u8; MESSAGE_SIZE],
+            })
+            .await;
+
+        let _delivery_record = client
+            .broadcast(Message {
+                bytes: [1u8; MESSAGE_SIZE],
+            })
+            .await;
 
         time::sleep(Duration::from_millis(200)).await;
     }

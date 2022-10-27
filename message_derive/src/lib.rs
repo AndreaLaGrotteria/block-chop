@@ -18,7 +18,10 @@ pub fn message(_: TokenStream) -> TokenStream {
             pub const MESSAGE_SIZE: usize = {message_size};
             pub(crate) const PACKING: usize = {packing}; 
 
-            pub type Message = [u8; {message_size}];
+            #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+            pub struct Message {{
+                pub bytes: [u8; {message_size}]
+            }}
         "
     )
     .parse()

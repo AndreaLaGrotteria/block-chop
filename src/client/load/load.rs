@@ -111,7 +111,7 @@ pub async fn load<A>(
             let id = range.start + (index as u64);
 
             let mut message = Message::default();
-            message[0..8].copy_from_slice(id.to_be_bytes().as_slice());
+            message.bytes[0..8].copy_from_slice(id.to_be_bytes().as_slice());
 
             let entry = Entry {
                 id,
