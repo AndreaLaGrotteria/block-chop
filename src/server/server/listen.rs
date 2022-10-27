@@ -1,3 +1,5 @@
+#[cfg(feature = "benchmark")]
+use crate::heartbeat::{self, Event};
 use crate::{
     broadcast::DeliveryShard,
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
@@ -106,10 +108,16 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchAnnounced { root });
+
         let raw_batch = session
             .receive_raw_bytes()
             .await
             .pot(ServeError::ConnectionError, here!())?;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchReceived { root });
 
         let compressed_batch = bincode::deserialize(raw_batch.as_slice())
             .map_err(ServeError::deserialize_failed)
@@ -140,6 +148,9 @@ impl Server {
 
         // Expand `compressed_batch`
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchExpansionStarted { root, verify });
+
         let batch = {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
@@ -154,6 +165,9 @@ impl Server {
             .unwrap()
             .pot(ServeError::BatchInvalid, here!())?
         };
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchExpansionCompleted { root });
 
         // Reject request if `batch.root()` does not match `root`. In case of
         // root mismatch, either the broker is Byzantine, or some miscommunication
@@ -219,6 +233,11 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
+        #[cfg(feature = "benchmark")]
+        if witness_shard.is_some() {
+            heartbeat::log(Event::BatchWitnessed { root });
+        }
+
         // Receive and verify the witness certificate
 
         let witness = session
@@ -250,6 +269,9 @@ impl Server {
         let submission = bincode::serialize(&(broker, worker, root, witness)).unwrap();
         broadcast.order(submission.as_slice()).await;
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchOrdered { root });
+
         // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
 
         let delivery_shard = loop {
@@ -278,6 +300,9 @@ impl Server {
             .pot(ServeError::ConnectionError, here!())?;
 
         debug!("Delivery shard sent.");
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchServed { root });
 
         session.end();
 
