@@ -168,10 +168,10 @@ impl Server {
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
-        // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`,
-        // store `Ignore` elements of `duplicates` for later removal
+        // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
+        // `Ignore` and `Nudge` elements of `duplicates` for later removal
 
-        let mut to_ignore = Vec::new();
+        let mut to_omit = Vec::new();
 
         for duplicate in duplicates.iter() {
             // Locate `duplicate` within `batch`
@@ -191,13 +191,15 @@ impl Server {
 
             match duplicate {
                 Duplicate::Ignore { .. } => {
-                    to_ignore.push(index);
+                    to_omit.push(index);
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
                     let mut entry = batch.entries.items()[index].clone().unwrap();
                     entry.sequence = *sequence;
                     batch.entries.set(index, Some(entry)).unwrap();
+
+                    to_omit.push(index);
                 }
                 Duplicate::Drop { .. } => {
                     batch.entries.set(index, None).unwrap();
@@ -207,11 +209,11 @@ impl Server {
 
         let amended_root = batch.root();
 
-        // Extract `batch`'s entries, remove all `Ignore` duplicates
+        // Extract `batch`'s entries, remove all duplicates in `to_omit`
 
         let mut entries = Vec::from(batch.entries);
 
-        for ignore in to_ignore {
+        for ignore in to_omit {
             entries[ignore] = None;
         }
 
