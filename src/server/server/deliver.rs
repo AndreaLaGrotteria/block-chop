@@ -169,7 +169,10 @@ impl Server {
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
-        // Stash batch root for later logging
+        // Stash statistics for later logging
+
+        #[cfg(feature = "benchmark")]
+        let unamended_entries = batch.entries.len();
 
         #[cfg(feature = "benchmark")]
         let unamended_root = batch.entries.root();
@@ -230,6 +233,7 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(Event::BatchDelivered {
             root: unamended_root,
+            entries: unamended_entries as u32,
             duplicates: duplicates.len() as u32,
         });
 
