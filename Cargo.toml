@@ -39,7 +39,7 @@ required-features = [ "benchmark" ]
 
 [features]
 all = [ "benchmark" ]
-benchmark = [ "dep:memmap", "dep:signal-hook" ]
+benchmark = [ "dep:memmap", "dep:signal-hook", "dep:signal-hook-tokio" ]
 
 [dependencies]
 message_derive = { path = "./message_derive" }
@@ -69,6 +69,7 @@ lapp = { version = "0.4.0" }
 log = { version = "0.4.17" }
 env_logger = { version = "0.9.0" }
 signal-hook = { version = "0.3.14", optional = true }
+signal-hook-tokio = { version = "0.3.1", features = [ "futures-v0_3" ], optional = true }
 
 num_cpus = { version = "1.13.1" }
 

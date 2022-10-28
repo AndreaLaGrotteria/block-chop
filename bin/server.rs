@@ -1,13 +1,16 @@
 use chop_chop::{
     heartbeat, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
 };
+use futures::stream::StreamExt;
 use log::info;
+use signal_hook::consts::signal::*;
+use signal_hook_tokio::Signals;
 use std::{
     collections::VecDeque,
     fs::File,
     io::{BufWriter, Write},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -190,38 +193,44 @@ async fn main() {
         });
     }
 
-    let terminate = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&terminate)).unwrap();
-
     // Log progress
 
-    let mut rates = VecDeque::with_capacity(120);
+    tokio::spawn(async move {
+        let mut rates = VecDeque::with_capacity(120);
 
-    let mut last_count = 0;
-    let mut last_time = Instant::now();
+        let mut last_count = 0;
+        let mut last_time = Instant::now();
 
-    while !terminate.load(Ordering::Relaxed) {
-        time::sleep(Duration::from_secs(1)).await;
+        loop {
+            time::sleep(Duration::from_secs(1)).await;
 
-        let total = counter.load(Ordering::Relaxed);
-        let rate = (total - last_count) as f64 / last_time.elapsed().as_secs_f64();
+            let total = counter.load(Ordering::Relaxed);
+            let rate = (total - last_count) as f64 / last_time.elapsed().as_secs_f64();
 
-        last_count = total;
-        last_time = Instant::now();
+            last_count = total;
+            last_time = Instant::now();
 
-        rates.push_front(rate);
+            rates.push_front(rate);
 
-        info!(
-            "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
-            rate / 1e6,
-            (rates.iter().copied().take(AVERAGING_INTERVAL).sum::<f64>()
-                / std::cmp::min(rates.len(), AVERAGING_INTERVAL) as f64)
-                / 1e6,
-            total / 1000000
-        );
-    }
+            info!(
+                "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
+                rate / 1e6,
+                (rates.iter().copied().take(AVERAGING_INTERVAL).sum::<f64>()
+                    / std::cmp::min(rates.len(), AVERAGING_INTERVAL) as f64)
+                    / 1e6,
+                total / 1000000
+            );
+        }
+    });
+
+    // Wait for `Ctrl + C`
+
+    let mut signals = Signals::new(&[SIGTERM, SIGINT, SIGQUIT]).unwrap();
+    signals.next().await;
 
     info!("`Ctrl + C` detected, shutting down..");
+
+    // Save `heartbeat` data (if necessary)
 
     if let Some(heartbeat_path) = heartbeat_path {
         info!("Saving `heartbeat` data to {heartbeat_path}..");
@@ -235,4 +244,6 @@ async fn main() {
 
         file.flush().unwrap();
     }
+
+    info!("All done! Chop CHOP!");
 }
