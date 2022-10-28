@@ -6,6 +6,7 @@ use crate::{
         },
         Certificate,
     },
+    heartbeat::{self, Event},
     order::Order,
     server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
     system::Membership,
@@ -168,6 +169,11 @@ impl Server {
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
+        // Stash batch root for later logging
+
+        #[cfg(feature = "benchmark")]
+        let unamended_root = batch.entries.root();
+
         // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
         // `Ignore` and `Nudge` elements of `duplicates` for later removal
 
@@ -220,6 +226,12 @@ impl Server {
         // Send `entries` to `next_batch`
 
         let _ = next_batch_inlet.send(entries).await;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchDelivered {
+            root: unamended_root,
+            duplicates: duplicates.len() as u32,
+        });
 
         // Return `amended_root` and all elements of `duplicates` (`Nudge`
         // and `Drop`) that can be transformed into `Amendment`s

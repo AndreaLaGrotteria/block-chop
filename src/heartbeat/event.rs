@@ -7,5 +7,6 @@ pub enum Event {
     BatchExpansionCompleted { root: Hash },
     BatchWitnessed { root: Hash },
     BatchOrdered { root: Hash },
+    BatchDelivered { root: Hash, duplicates: u32 },
     BatchServed { root: Hash },
 }
