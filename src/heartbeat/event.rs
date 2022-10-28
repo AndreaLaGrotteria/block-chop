@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
 use talk::crypto::primitives::hash::Hash;
 
+#[derive(Serialize, Deserialize)]
 pub enum Event {
     // Local `Server` received `Batch`'s metadata (root, worker, ..)
     BatchAnnounced {

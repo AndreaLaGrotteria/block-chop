@@ -1,9 +1,13 @@
-use chop_chop::{Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server};
+use chop_chop::{
+    heartbeat, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
+};
 use log::info;
 use std::{
     collections::VecDeque,
+    fs::File,
+    io::{BufWriter, Write},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -39,6 +43,9 @@ async fn main() {
         Underlying Total Order Broadcast (choose one):
           --loopback use `LoopBack` order (warning: does not actually guarantee Total Order!)
           --hotstuff (string) address to `HotStuff`'s endpoint
+
+        Heartbeat:
+          --heartbeat-path (string) path to save `heartbeat` data
         ",
     );
 
@@ -49,6 +56,7 @@ async fn main() {
     let passepartout_path = args.get_string("passepartout_path");
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
+    let heartbeat_path = args.get_string_result("heartbeat-path").ok();
 
     let loopback = args.get_bool("loopback");
     let hotstuff = args.get_string_result("hotstuff").ok();
@@ -182,6 +190,9 @@ async fn main() {
         });
     }
 
+    let terminate = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&terminate)).unwrap();
+
     // Log progress
 
     let mut rates = VecDeque::with_capacity(120);
@@ -189,7 +200,7 @@ async fn main() {
     let mut last_count = 0;
     let mut last_time = Instant::now();
 
-    loop {
+    while !terminate.load(Ordering::Relaxed) {
         time::sleep(Duration::from_secs(1)).await;
 
         let total = counter.load(Ordering::Relaxed);
@@ -208,5 +219,20 @@ async fn main() {
                 / 1e6,
             total / 1000000
         );
+    }
+
+    info!("`Ctrl + C` detected, shutting down..");
+
+    if let Some(heartbeat_path) = heartbeat_path {
+        info!("Saving `heartbeat` data to {heartbeat_path}..");
+
+        let entries = heartbeat::flush();
+
+        let file = File::create(heartbeat_path).unwrap();
+        let mut file = BufWriter::new(file);
+
+        bincode::serialize_into(&mut file, &entries).unwrap();
+
+        file.flush().unwrap();
     }
 }
