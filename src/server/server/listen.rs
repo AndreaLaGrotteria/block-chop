@@ -1,7 +1,7 @@
 #[cfg(feature = "benchmark")]
 use crate::heartbeat::{self, Event};
 use crate::{
-    broadcast::DeliveryShard,
+    broadcast::{CompressedBatch, DeliveryShard},
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
@@ -119,10 +119,16 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(Event::BatchReceived { root });
 
-        let compressed_batch = bincode::deserialize(raw_batch.as_slice())
+        let compressed_batch = bincode::deserialize::<CompressedBatch>(raw_batch.as_slice())
             .map_err(ServeError::deserialize_failed)
             .map_err(Doom::into_top)
             .spot(here!())?;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(Event::BatchDeserialized {
+            root,
+            stragglers: compressed_batch.stragglers.len() as u32,
+        });
 
         let verify = session
             .receive::<bool>()

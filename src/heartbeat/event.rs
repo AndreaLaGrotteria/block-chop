@@ -13,6 +13,12 @@ pub enum Event {
         root: Hash,
     },
 
+    // Local `Server` deserialized `CompressedBatch`
+    BatchDeserialized {
+        root: Hash,
+        stragglers: u32,
+    },
+
     // Local `Server` started expanding `CompressedBatch` into `Batch` (`verify`
     // indicates whether `expand_verified` or `expand_unverified` is called)
     BatchExpansionStarted {
