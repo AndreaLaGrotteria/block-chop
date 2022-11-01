@@ -13,9 +13,11 @@ pub enum Event {
         root: Hash,
     },
 
-    // Local `Server` deserialized `CompressedBatch`
+    // Local `Server` deserialized `CompressedBatch` containing `entries`
+    // entries, `stragglers` of which were stragglers (failed to reduce)
     BatchDeserialized {
         root: Hash,
+        entries: u32,
         stragglers: u32,
     },
 
@@ -49,14 +51,14 @@ pub enum Event {
     },
 
     // Local `Server` delivered (zero or more of) `Batch`'s `Entry`ies to the
-    // application layer; `Batch` contains `entries` `Entry`ies, `duplicates`
-    //  of which were omitted (i.e., not delivered to the application layer).
-    // Note that: the event logs when `Entry`ies are delivered to, not processed
-    // by, the application layer; the number of `Entry`ies effectively delivered
-    // to the application layer is `entries - duplicates`.
+    // application layer. Reminder: `Batch` was previously logged by 
+    // `Event::BatchDeserialized` to contain `entries` `Entry`ies. `duplicates` 
+    // out of `entries` entries were omitted (i.e., not delivered to the 
+    // application layer). Note that: the event logs when `Entry`ies are delivered 
+    // to, not processed by, the application layer; the number of `Entry`ies 
+    // effectively delivered to the application layer is `entries - duplicates`.
     BatchDelivered {
         root: Hash,
-        entries: u32,
         duplicates: u32,
     },
 

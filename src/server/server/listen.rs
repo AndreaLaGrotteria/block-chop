@@ -127,6 +127,7 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(Event::BatchDeserialized {
             root,
+            entries: compressed_batch.messages.len() as u32,
             stragglers: compressed_batch.stragglers.len() as u32,
         });
 

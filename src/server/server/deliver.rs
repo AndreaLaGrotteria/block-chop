@@ -177,9 +177,6 @@ impl Server {
         // Stash statistics for later logging
 
         #[cfg(feature = "benchmark")]
-        let unamended_entries = batch.entries.len();
-
-        #[cfg(feature = "benchmark")]
         let unamended_root = batch.entries.root();
 
         // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
@@ -238,7 +235,6 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(Event::BatchDelivered {
             root: unamended_root,
-            entries: unamended_entries as u32,
             duplicates: duplicates.len() as u32,
         });
 
