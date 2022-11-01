@@ -51,11 +51,11 @@ pub enum Event {
     },
 
     // Local `Server` delivered (zero or more of) `Batch`'s `Entry`ies to the
-    // application layer. Reminder: `Batch` was previously logged by 
-    // `Event::BatchDeserialized` to contain `entries` `Entry`ies. `duplicates` 
-    // out of `entries` entries were omitted (i.e., not delivered to the 
-    // application layer). Note that: the event logs when `Entry`ies are delivered 
-    // to, not processed by, the application layer; the number of `Entry`ies 
+    // application layer. Reminder: `Batch` was previously logged by
+    // `Event::BatchDeserialized` to contain `entries` `Entry`ies. `duplicates`
+    // out of `entries` entries were omitted (i.e., not delivered to the
+    // application layer). Note that: the event logs when `Entry`ies are delivered
+    // to, not processed by, the application layer; the number of `Entry`ies
     // effectively delivered to the application layer is `entries - duplicates`.
     BatchDelivered {
         root: Hash,

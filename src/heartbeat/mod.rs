@@ -11,4 +11,6 @@ pub use entry::Entry;
 pub use event::Event;
 pub use functions::flush;
 
-static HOLDER: Holder = Holder::new();
+lazy_static::lazy_static! {
+    static ref HOLDER: Holder = Holder::new();
+}
