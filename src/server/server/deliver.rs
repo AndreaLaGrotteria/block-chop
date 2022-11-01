@@ -53,6 +53,11 @@ impl Server {
                     // Parse `submission` to obtain broker identity and batch root
 
                     if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref(), witness_cache.as_ref()) {
+                        #[cfg(feature = "benchmark")]
+                        heartbeat::log(Event::BatchOrdered {
+                            root
+                        });
+
                         // Retrieve broker sequence number, expected batch, and delivery shard inlet
 
                         let (sequence, expected_batch, delivery_shard_inlet) = {

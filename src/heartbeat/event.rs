@@ -31,8 +31,13 @@ pub enum Event {
     },
 
     // Local `Server` submitted `Batch` ('s root, witness certificate, ..) to
-    // underlying Total-Order Broadcast (note that this event is logged when
-    // `Batch` is *submitted*, not when it is delivered from underlying TOB)
+    // underlying instance of Total-Order Broadcast
+    BatchSubmitted {
+        root: Hash,
+    },
+
+    // Local `Server` delivered `Batch` ('s root, witness certificate, ..) from
+    // underlying instance of Total-Order Broadcast
     BatchOrdered {
         root: Hash,
     },

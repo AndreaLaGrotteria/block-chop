@@ -270,7 +270,7 @@ impl Server {
         broadcast.order(submission.as_slice()).await;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchOrdered { root });
+        heartbeat::log(Event::BatchSubmitted { root });
 
         // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
 
