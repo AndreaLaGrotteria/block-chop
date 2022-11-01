@@ -1,9 +1,9 @@
+mod channel;
 mod entry;
 mod event;
 mod functions;
-mod holder;
 
-use holder::Holder;
+use channel::Channel;
 
 pub(crate) use functions::log;
 
@@ -12,5 +12,5 @@ pub use event::Event;
 pub use functions::flush;
 
 lazy_static::lazy_static! {
-    static ref HOLDER: Holder = Holder::new();
+    static ref CHANNEL: Channel = Channel::new();
 }

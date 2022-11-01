@@ -1,10 +1,10 @@
-use crate::heartbeat::{Entry, Event, HOLDER};
+use crate::heartbeat::{Entry, Event, CHANNEL};
 use std::sync::mpsc::Sender;
 
 type EntryInlet = Sender<Entry>;
 
 thread_local! {
-    static ENTRY_INLET: EntryInlet = HOLDER.get_inlet();
+    static ENTRY_INLET: EntryInlet = CHANNEL.clone_inlet();
 }
 
 pub(crate) fn log(event: Event) {
@@ -12,8 +12,7 @@ pub(crate) fn log(event: Event) {
 }
 
 pub fn flush() -> Vec<Entry> {
-    let outlet = HOLDER.get_outlet();
-    let outlet = outlet.lock().unwrap();
+    let outlet = CHANNEL.lock_outlet();
 
     let mut entries = Vec::new();
 
