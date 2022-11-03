@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
-use talk::crypto::primitives::hash::Hash;
+use talk::crypto::{primitives::hash::Hash, Identity};
 
 #[derive(Serialize, Deserialize)]
 pub enum Event {
     Server(ServerEvent),
+    Broker(BrokerEvent),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,8 +74,30 @@ pub enum ServerEvent {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+pub enum BrokerEvent {
+    SubmissionStarted { root: Hash, server: Identity },
+    ServerConnected { root: Hash, server: Identity },
+    BatchSent { root: Hash, server: Identity },
+    WitnessShardRequested { root: Hash, server: Identity },
+    WitnessShardReceived { root: Hash, server: Identity },
+    WitnessShardVerified { root: Hash, server: Identity },
+    WitnessShardWaived { root: Hash, server: Identity },
+    WitnessShardConcluded { root: Hash, server: Identity },
+    WitnessAcquired { root: Hash, server: Identity },
+    WitnessSent { root: Hash, server: Identity },
+    DeliveryShardReceived { root: Hash, server: Identity },
+    SubmissionCompleted { root: Hash, server: Identity },
+}
+
 impl From<ServerEvent> for Event {
     fn from(event: ServerEvent) -> Self {
         Event::Server(event)
+    }
+}
+
+impl From<BrokerEvent> for Event {
+    fn from(event: BrokerEvent) -> Self {
+        Event::Broker(event)
     }
 }

@@ -2,7 +2,9 @@ use crate::{
     broadcast::{CompressedBatch, DeliveryShard},
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
-    debug, warn, BrokerSettings,
+    debug,
+    heartbeat::{self, BrokerEvent},
+    warn, BrokerSettings,
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::sync::Arc;
@@ -84,6 +86,12 @@ impl Broker {
         witness: &mut Board<Certificate>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
     ) -> Result<(), Top<TrySubmitError>> {
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::SubmissionStarted {
+            root,
+            server: server.identity(),
+        });
+
         debug!("Submitting batch (worker {worker_index}, sequence {sequence})");
 
         // Send request
@@ -92,6 +100,12 @@ impl Broker {
             .connect(server.identity())
             .await
             .pot(TrySubmitError::ConnectFailed, here!())?;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::ServerConnected {
+            root,
+            server: server.identity(),
+        });
 
         session
             .send(&(worker_index, sequence, root))
@@ -102,6 +116,12 @@ impl Broker {
             .send_raw_bytes(&raw_batch)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::BatchSent {
+            root,
+            server: server.identity(),
+        });
 
         let verify = if let Some(verify) = verify.as_ref().await {
             *verify
@@ -123,6 +143,12 @@ impl Broker {
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
+            #[cfg(feature = "benchmark")]
+            heartbeat::log(BrokerEvent::WitnessShardRequested {
+                root,
+                server: server.identity(),
+            });
+
             let witness_shard = session
                 .receive::<Option<MultiSignature>>()
                 .await
@@ -135,6 +161,12 @@ impl Broker {
             // produced by the local broker. If so, no additional witness
             // shard is required for the submission to succeed.
             if let Some(witness_shard) = witness_shard {
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(BrokerEvent::WitnessShardReceived {
+                    root,
+                    server: server.identity(),
+                });
+
                 witness_shard
                     .verify(
                         [server],
@@ -147,6 +179,12 @@ impl Broker {
                     )
                     .pot(TrySubmitError::InvalidWitnessShard, here!())?;
 
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(BrokerEvent::WitnessShardVerified {
+                    root,
+                    server: server.identity(),
+                });
+
                 let _ = witness_shard_inlet
                     .send((server.identity(), witness_shard))
                     .await;
@@ -157,6 +195,12 @@ impl Broker {
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
+            #[cfg(feature = "benchmark")]
+            heartbeat::log(BrokerEvent::WitnessShardWaived {
+                root,
+                server: server.identity(),
+            });
+
             session
                 .receive::<Option<MultiSignature>>()
                 .await
@@ -164,6 +208,12 @@ impl Broker {
 
             witness_shard_inlet.take();
         }
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::WitnessShardConcluded {
+            root,
+            server: server.identity(),
+        });
 
         // Send witness
 
@@ -175,10 +225,22 @@ impl Broker {
             std::future::pending().await
         };
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::WitnessAcquired {
+            root,
+            server: server.identity(),
+        });
+
         session
             .send(witness)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::WitnessSent {
+            root,
+            server: server.identity(),
+        });
 
         // Collect delivery shard
 
@@ -187,6 +249,12 @@ impl Broker {
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::DeliveryShardReceived {
+            root,
+            server: server.identity(),
+        });
+
         let _ = delivery_shard_inlet
             .take()
             .unwrap()
@@ -194,6 +262,13 @@ impl Broker {
             .await;
 
         session.end();
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::SubmissionCompleted {
+            root,
+            server: server.identity(),
+        });
+
         Ok(())
     }
 }
