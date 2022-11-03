@@ -13,6 +13,7 @@ use crate::{
     Entry,
 };
 use doomstack::{here, Doom, ResultExt, Top};
+use log::warn;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
@@ -82,7 +83,10 @@ impl Server {
                         match expected_batch {
                             Some((raw_batch, batch)) if batch.root() == root =>
                                 totality_manager.hit(raw_batch, batch).await,
-                            _ => totality_manager.miss(root).await,
+                            _ => {
+                                warn!("Batch {:#?} missing from `TotalityManager`.", root);
+                                totality_manager.miss(root).await
+                            }
                         };
 
                         // Push batch metadata to `pending_deliveries`
