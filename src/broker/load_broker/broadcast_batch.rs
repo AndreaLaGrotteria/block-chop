@@ -5,7 +5,7 @@ use crate::{
 };
 use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -38,6 +38,10 @@ impl LoadBroker {
         connector: Arc<SessionConnector>,
         settings: LoadBrokerSettings,
     ) {
+        // Record start time for submission lockstepping
+
+        let broadcast_start = Instant::now();
+
         // Preprocess arguments
 
         let raw_batch = Arc::new(raw_batch);
@@ -124,6 +128,24 @@ impl LoadBroker {
         }
 
         let witness = witness_collector.finalize();
+
+        // Round latency up to ensure submission lockstepping
+
+        let lockstep_delay = settings
+            .lockstep_delay
+            .saturating_sub(broadcast_start.elapsed());
+
+        if !lockstep_delay.is_zero() {
+            time::sleep(lockstep_delay).await;
+        } else {
+            warn!(
+                "Broadcast delayed by {:?}: lockstep lost.",
+                broadcast_start
+                    .elapsed()
+                    .saturating_sub(settings.lockstep_delay)
+            );
+        }
+
         witness_poster.post(witness);
 
         // Wait until (f + 1) processes have replied with a delivery shard,
