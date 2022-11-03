@@ -44,7 +44,7 @@ required-features = [ "benchmark" ]
 
 [features]
 all = [ "benchmark" ]
-benchmark = [ "dep:memmap", "dep:signal-hook", "dep:signal-hook-tokio" ]
+benchmark = [ "dep:memmap", "dep:signal-hook", "dep:signal-hook-tokio", "dep:statistical" ]
 
 [dependencies]
 message_derive = { path = "./message_derive" }
@@ -84,7 +84,7 @@ jemallocator = { version = "0.5.0" }
 
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1" }
-
+statistical = { version = "1.0.0", optional = true }
 
 [profile.release]
 lto = "fat"
