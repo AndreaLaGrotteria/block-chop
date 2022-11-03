@@ -3,6 +3,7 @@ use crate::{
     server::{Batch, DeduplicatorSettings, Duplicate},
 };
 use futures::{stream::FuturesOrdered, StreamExt};
+use log::warn;
 use oh_snap::Snap;
 use std::{
     cmp, iter,
@@ -412,6 +413,14 @@ impl Deduplicator {
 
                 for duplicates_burst in duplicates_bursts.iter_mut() {
                     duplicates.extend(duplicates_burst.next().unwrap());
+                }
+
+                if !duplicates.is_empty() {
+                    warn!(
+                        "Batch {:#?} had {} duplicates.",
+                        batch.entries.root(),
+                        duplicates.len()
+                    );
                 }
 
                 let _ = pull_inlet.send((batch, duplicates)).await;
