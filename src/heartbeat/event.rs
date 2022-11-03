@@ -76,17 +76,46 @@ pub enum ServerEvent {
 
 #[derive(Serialize, Deserialize)]
 pub enum BrokerEvent {
+    // Local `Broker` begun executing `Broker::try_submit_batch`
     SubmissionStarted { root: Hash, server: Identity },
+
+    // Local `Broker` established a connection to submission `Server`
     ServerConnected { root: Hash, server: Identity },
+
+    // Local `Broker` sent raw batch to submisison `Server`
     BatchSent { root: Hash, server: Identity },
+
+    // Local `Broker` requested a witness shard from submission `Server`
     WitnessShardRequested { root: Hash, server: Identity },
+
+    // Local `Broker` received a witness shard from submission `Server`
     WitnessShardReceived { root: Hash, server: Identity },
+
+    // Local `Broker` successfully verified the witness shard received
+    // from submission `Server`
     WitnessShardVerified { root: Hash, server: Identity },
+
+    // Local `Broker` waived requesting a witness shard from submission
+    // `Server` (i.e., `Server` is an idler)
     WitnessShardWaived { root: Hash, server: Identity },
+
+    // Local `Broker` concluded witnessing submission batch (this event
+    // is triggered both if the witness shard was requested and obtained,
+    // or waived)
     WitnessShardConcluded { root: Hash, server: Identity },
+
+    // Local `Broker` aggregated a complete witness `Certificate` from a
+    // plurality of submission `Server`s, and is ready to be sent the
+    // witness to the submission `Server`
     WitnessAcquired { root: Hash, server: Identity },
+
+    // Local `Broker` sent witness `Certificate` to submission `Server`
     WitnessSent { root: Hash, server: Identity },
+
+    // Local `Broker` received `DeliveryShard` from submission `Server`
     DeliveryShardReceived { root: Hash, server: Identity },
+
+    // Local `Broker` completed its submission to submission `Server`
     SubmissionCompleted { root: Hash, server: Identity },
 }
 
