@@ -225,7 +225,7 @@ async fn main() {
 
     // Wait for `Ctrl + C`
 
-    let mut signals = Signals::new(&[SIGTERM, SIGINT, SIGQUIT]).unwrap();
+    let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
     signals.next().await;
 
     info!("`Ctrl + C` detected, shutting down..");
