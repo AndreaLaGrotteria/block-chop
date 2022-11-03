@@ -37,6 +37,11 @@ name = "load_broker"
 path = "bin/load_broker.rs"
 required-features = [ "benchmark" ]
 
+[[bin]]
+name = "heartbeat_statistics"
+path = "bin/heartbeat_statistics.rs"
+required-features = [ "benchmark" ]
+
 [features]
 all = [ "benchmark" ]
 benchmark = [ "dep:memmap", "dep:signal-hook", "dep:signal-hook-tokio" ]
