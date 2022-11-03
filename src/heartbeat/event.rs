@@ -3,6 +3,11 @@ use talk::crypto::primitives::hash::Hash;
 
 #[derive(Serialize, Deserialize)]
 pub enum Event {
+    Server(ServerEvent),
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum ServerEvent {
     // Local `Server` received `Batch`'s metadata (root, worker, ..)
     BatchAnnounced {
         root: Hash,
@@ -66,4 +71,10 @@ pub enum Event {
     BatchServed {
         root: Hash,
     },
+}
+
+impl From<ServerEvent> for Event {
+    fn from(event: ServerEvent) -> Self {
+        Event::Server(event)
+    }
 }

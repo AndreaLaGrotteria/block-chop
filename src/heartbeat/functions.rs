@@ -7,8 +7,11 @@ thread_local! {
     static ENTRY_INLET: EntryInlet = CHANNEL.clone_inlet();
 }
 
-pub(crate) fn log(event: Event) {
-    ENTRY_INLET.with(|entry_inlet| entry_inlet.send(Entry::now(event)).unwrap());
+pub(crate) fn log<E>(event: E)
+where
+    E: Into<Event>,
+{
+    ENTRY_INLET.with(|entry_inlet| entry_inlet.send(Entry::now(event.into())).unwrap());
 }
 
 pub fn flush() -> Vec<Entry> {

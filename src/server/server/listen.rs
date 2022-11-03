@@ -1,5 +1,5 @@
 #[cfg(feature = "benchmark")]
-use crate::heartbeat::{self, Event};
+use crate::heartbeat::{self, ServerEvent};
 use crate::{
     broadcast::{CompressedBatch, DeliveryShard},
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
@@ -109,7 +109,7 @@ impl Server {
             .pot(ServeError::ConnectionError, here!())?;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchAnnounced { root });
+        heartbeat::log(ServerEvent::BatchAnnounced { root });
 
         let raw_batch = session
             .receive_raw_bytes()
@@ -117,7 +117,7 @@ impl Server {
             .pot(ServeError::ConnectionError, here!())?;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchReceived { root });
+        heartbeat::log(ServerEvent::BatchReceived { root });
 
         let compressed_batch = bincode::deserialize::<CompressedBatch>(raw_batch.as_slice())
             .map_err(ServeError::deserialize_failed)
@@ -125,7 +125,7 @@ impl Server {
             .spot(here!())?;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchDeserialized {
+        heartbeat::log(ServerEvent::BatchDeserialized {
             root,
             entries: compressed_batch.messages.len() as u32,
             stragglers: compressed_batch.stragglers.len() as u32,
@@ -156,7 +156,7 @@ impl Server {
         // Expand `compressed_batch`
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchExpansionStarted { root, verify });
+        heartbeat::log(ServerEvent::BatchExpansionStarted { root, verify });
 
         let batch = {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
@@ -174,7 +174,7 @@ impl Server {
         };
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchExpansionCompleted { root });
+        heartbeat::log(ServerEvent::BatchExpansionCompleted { root });
 
         // Reject request if `batch.root()` does not match `root`. In case of
         // root mismatch, either the broker is Byzantine, or some miscommunication
@@ -242,7 +242,7 @@ impl Server {
 
         #[cfg(feature = "benchmark")]
         if witness_shard.is_some() {
-            heartbeat::log(Event::BatchWitnessed { root });
+            heartbeat::log(ServerEvent::BatchWitnessed { root });
         }
 
         // Receive and verify the witness certificate
@@ -277,7 +277,7 @@ impl Server {
         broadcast.order(submission.as_slice()).await;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchSubmitted { root });
+        heartbeat::log(ServerEvent::BatchSubmitted { root });
 
         // Wait for the batch's delivery shard (produced after TOB-delivery and deduplication)
 
@@ -309,7 +309,7 @@ impl Server {
         debug!("Delivery shard sent.");
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchServed { root });
+        heartbeat::log(ServerEvent::BatchServed { root });
 
         session.end();
 

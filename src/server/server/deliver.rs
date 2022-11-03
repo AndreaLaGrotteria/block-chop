@@ -6,7 +6,7 @@ use crate::{
         },
         Certificate,
     },
-    heartbeat::{self, Event},
+    heartbeat::{self, ServerEvent},
     order::Order,
     server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
     system::Membership,
@@ -55,7 +55,7 @@ impl Server {
 
                     if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref(), witness_cache.as_ref()) {
                         #[cfg(feature = "benchmark")]
-                        heartbeat::log(Event::BatchOrdered {
+                        heartbeat::log(ServerEvent::BatchOrdered {
                             root
                         });
 
@@ -237,7 +237,7 @@ impl Server {
         let _ = next_batch_inlet.send(entries).await;
 
         #[cfg(feature = "benchmark")]
-        heartbeat::log(Event::BatchDelivered {
+        heartbeat::log(ServerEvent::BatchDelivered {
             root: unamended_root,
             duplicates: duplicates.len() as u32,
         });
