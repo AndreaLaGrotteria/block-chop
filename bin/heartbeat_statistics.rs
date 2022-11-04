@@ -5,10 +5,15 @@ fn main() {
 
         Choose one of the following:
           --shallow-broker (string) path to `Broker` / `LoadBroker` `heartbeat` data
+
+        Options:
+          --drop-front (default 0) number of seconds to drop from the beginning of the `heartbeat` data
         ",
     );
 
     let shallow_broker = args.get_string_result("shallow-broker").ok();
+
+    let drop_front = args.get_float("drop-front");
 
     if [&shallow_broker].into_iter().flatten().count() != 1 {
         println!("Please select one of the available statistical modes.");
@@ -16,14 +21,19 @@ fn main() {
     }
 
     if let Some(path) = shallow_broker {
-        modes::shallow_broker(path);
+        modes::shallow_broker(path, drop_front);
     }
 }
 
 mod modes {
     use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
     use rayon::slice::ParallelSliceMut;
-    use std::{collections::HashMap, fs::File, io::Read, time::SystemTime};
+    use std::{
+        collections::HashMap,
+        fs::File,
+        io::Read,
+        time::{Duration, SystemTime},
+    };
     use talk::crypto::{primitives::hash::Hash, Identity};
 
     #[allow(dead_code)]
@@ -55,7 +65,7 @@ mod modes {
         max: f64,
     }
 
-    pub fn shallow_broker(path: String) {
+    pub fn shallow_broker(path: String, drop_front: f32) {
         // Load, deserialize and sort `Entry`ies by time
 
         let mut file = File::open(path).unwrap();
@@ -64,6 +74,23 @@ mod modes {
 
         let mut entries = bincode::deserialize::<Vec<Entry>>(buffer.as_slice()).unwrap();
         entries.par_sort_unstable_by_key(|entry| entry.time);
+
+        // Crop entries from front
+
+        let heartbeat_start = entries.first().unwrap().time;
+
+        let entries = entries
+            .into_iter()
+            .filter_map(|entry| {
+                if entry.time.duration_since(heartbeat_start).unwrap()
+                    >= Duration::from_secs_f64(drop_front as f64)
+                {
+                    Some(entry)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         // Initialize table of `BrokerSubmission`s
 
@@ -74,14 +101,11 @@ mod modes {
             submissions: &mut HashMap<Identity, HashMap<Hash, Vec<BrokerSubmission>>>,
             root: Hash,
             server: Identity,
-        ) -> &mut BrokerSubmission {
+        ) -> Option<&mut BrokerSubmission> {
             submissions
                 .get_mut(&server)
-                .unwrap()
-                .get_mut(&root)
-                .unwrap()
-                .last_mut()
-                .unwrap()
+                .and_then(|submissions| submissions.get_mut(&root))
+                .and_then(|submissions| submissions.last_mut())
         }
 
         // Loop through `entries` to fill `submissions`
@@ -119,44 +143,59 @@ mod modes {
                         });
                 }
                 BrokerEvent::ServerConnected { root, server } => {
-                    last_submission(&mut submissions, root, server).server_connected = Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.server_connected = Some(time);
+                    }
                 }
                 BrokerEvent::BatchSent { root, server } => {
-                    last_submission(&mut submissions, root, server).batch_sent = Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.batch_sent = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessShardRequested { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_shard_requested =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_shard_requested = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessShardReceived { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_shard_received =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_shard_received = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessShardVerified { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_shard_verified =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_shard_verified = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessShardWaived { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_shard_waived =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_shard_waived = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessShardConcluded { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_shard_concluded =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_shard_concluded = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessAcquired { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_acquired = Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_acquired = Some(time);
+                    }
                 }
                 BrokerEvent::WitnessSent { root, server } => {
-                    last_submission(&mut submissions, root, server).witness_sent = Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.witness_sent = Some(time);
+                    }
                 }
                 BrokerEvent::DeliveryShardReceived { root, server } => {
-                    last_submission(&mut submissions, root, server).delivery_shard_received =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.delivery_shard_received = Some(time);
+                    }
                 }
                 BrokerEvent::SubmissionCompleted { root, server } => {
-                    last_submission(&mut submissions, root, server).submission_completed =
-                        Some(time);
+                    if let Some(submission) = last_submission(&mut submissions, root, server) {
+                        submission.submission_completed = Some(time);
+                    }
                 }
             }
         }
