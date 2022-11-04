@@ -213,6 +213,42 @@ mod modes {
             }
         }
 
+        fn format_time(mut time: f64) -> String {
+            if time >= 1. {
+                return format!("{time:.02} s");
+            }
+
+            time *= 1000.;
+
+            if time >= 1. {
+                return format!("{time:.02} ms");
+            }
+
+            time *= 1000.;
+
+            if time >= 1. {
+                return format!("{time:.02} us");
+            }
+
+            time *= 1000.;
+
+            format!("{time:.02} ns")
+        }
+
+        fn print_times(observable: Observable) {
+            println!("Applicability: {:.03}", observable.applicability);
+            println!("Average: {}", format_time(observable.average));
+            println!(
+                "Standard deviation: {}",
+                format_time(observable.standard_deviation)
+            );
+            println!("Median: {}", format_time(observable.median));
+            println!("Min: {}", format_time(observable.min));
+            println!("Max: {}", format_time(observable.max));
+        }
+
+        // Completion
+
         let completion = observe(&submissions, |submission| {
             conditional_delta(
                 Some(submission.submission_started),
@@ -220,6 +256,73 @@ mod modes {
             )
         });
 
-        println!("Completion times (s): {completion:?}");
+        println!("  --------------------- Completion times ---------------------  ");
+        print_times(completion);
+        println!("  ------------------------------------------------------------  ");
+        println!();
+
+        // Connection
+
+        let connection = observe(&submissions, |submission| {
+            conditional_delta(
+                Some(submission.submission_started),
+                submission.server_connected,
+            )
+        });
+
+        println!("  --------------------- Connection times ---------------------  ");
+        print_times(connection);
+        println!("  ------------------------------------------------------------  ");
+        println!();
+
+        // Send
+
+        let send = observe(&submissions, |submission| {
+            conditional_delta(submission.server_connected, submission.batch_sent)
+        });
+
+        println!("  --------------------- Send times ---------------------  ");
+        print_times(send);
+        println!("  ------------------------------------------------------  ");
+        println!();
+
+        // Witness shard
+
+        let witness_shard = observe(&submissions, |submission| {
+            conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+        });
+
+        println!("  --------------------- Witness shard times ---------------------  ");
+        print_times(witness_shard);
+        println!("  ---------------------------------------------------------------  ");
+        println!();
+
+        // Witness
+
+        let witness = observe(&submissions, |submission| {
+            conditional_delta(
+                submission.witness_shard_concluded,
+                submission.witness_acquired,
+            )
+        });
+
+        println!("  --------------------- Witness times ---------------------  ");
+        print_times(witness);
+        println!("  ---------------------------------------------------------  ");
+        println!();
+
+        // Delivery shard
+
+        let delivery_shard = observe(&submissions, |submission| {
+            conditional_delta(
+                submission.witness_acquired,
+                submission.delivery_shard_received,
+            )
+        });
+
+        println!("  --------------------- Delivery shard times ---------------------  ");
+        print_times(delivery_shard);
+        println!("  ----------------------------------------------------------------  ");
+        println!();
     }
 }
