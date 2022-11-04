@@ -136,7 +136,7 @@ async fn main() {
         batches,
         LoadBrokerSettings {
             rate,
-            workers: cmp::max((rate * 10.) as u16, 1),
+            workers: cmp::max((rate * 30.) as u16, 1),
             ..Default::default()
         },
     );
