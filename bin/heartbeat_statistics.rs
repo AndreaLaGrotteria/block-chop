@@ -161,7 +161,8 @@ mod modes {
             }
         }
 
-        let membership = submissions.keys().copied().collect::<Vec<_>>();
+        let mut membership = submissions.keys().copied().collect::<Vec<_>>();
+        membership.sort();
 
         // Extract observables
 
