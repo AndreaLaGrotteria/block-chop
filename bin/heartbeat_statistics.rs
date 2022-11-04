@@ -23,7 +23,12 @@ fn main() {
 mod modes {
     use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
     use rayon::slice::ParallelSliceMut;
-    use std::{collections::HashMap, fs::File, io::Read, time::SystemTime};
+    use std::{
+        collections::HashMap,
+        fs::File,
+        io::Read,
+        time::{Duration, SystemTime},
+    };
     use talk::crypto::{primitives::hash::Hash, Identity};
 
     struct BrokerSubmission {
@@ -39,6 +44,15 @@ mod modes {
         witness_sent: Option<SystemTime>,
         delivery_shard_received: Option<SystemTime>,
         submission_completed: Option<SystemTime>,
+    }
+
+    struct Observable {
+        applicability: f64,
+        average: f64,
+        standard_deviation: f64,
+        median: f64,
+        min: f64,
+        max: f64,
     }
 
     pub fn shallow_broker(path: String) {
@@ -142,6 +156,63 @@ mod modes {
                     last_submission(&mut submissions, root, server).submission_completed =
                         Some(time);
                 }
+            }
+        }
+
+        // Extract observables
+
+        fn observe<O>(
+            submissions: &HashMap<Identity, HashMap<Hash, Vec<BrokerSubmission>>>,
+            observable: O,
+        ) -> Observable
+        where
+            O: Fn(&BrokerSubmission) -> Option<f64>,
+        {
+            let submissions = submissions
+                .values()
+                .map(HashMap::values)
+                .flatten()
+                .map(|submissions| submissions.iter())
+                .flatten();
+
+            let mut non_applicable = 0;
+
+            let mut values = submissions
+                .map(observable)
+                .filter_map(|value| {
+                    if value.is_none() {
+                        non_applicable += 1;
+                    }
+
+                    value
+                })
+                .collect::<Vec<_>>();
+
+            let applicability = (values.len() as f64) / ((values.len() + non_applicable) as f64);
+
+            let average = statistical::mean(values.as_slice());
+            let standard_deviation = statistical::standard_deviation(values.as_slice(), None);
+            let median = statistical::median(values.as_slice());
+
+            values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let min = *values.first().unwrap();
+            let max = *values.last().unwrap();
+
+            Observable {
+                applicability,
+                average,
+                standard_deviation,
+                median,
+                min,
+                max,
+            }
+        }
+
+        fn conditional_delta(from: Option<SystemTime>, to: Option<SystemTime>) -> Option<Duration> {
+            match (from, to) {
+                (Some(from), Some(to)) => Some(to.duration_since(from).unwrap()),
+                _ => None,
             }
         }
     }
