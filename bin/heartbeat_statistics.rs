@@ -292,9 +292,24 @@ mod modes {
             conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
         });
 
-        println!("  --------------------- Witness shard times ---------------------  ");
+        println!("  --------------------- Witness shard times (all) ---------------------  ");
         print_times(witness_shard);
-        println!("  ---------------------------------------------------------------  ");
+        println!("  ---------------------------------------------------------------------  ");
+        println!();
+
+        // Witness shard (verifier)
+
+        let witness_shard_verifiers = observe(&submissions, |submission| {
+            if submission.witness_shard_requested.is_some() {
+                conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+            } else {
+                None
+            }
+        });
+
+        println!("  --------------------- Witness shard times (verifiers) ---------------------  ");
+        print_times(witness_shard_verifiers);
+        println!("  ---------------------------------------------------------------------------  ");
         println!();
 
         // Witness
