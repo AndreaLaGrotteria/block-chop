@@ -23,12 +23,7 @@ fn main() {
 mod modes {
     use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
     use rayon::slice::ParallelSliceMut;
-    use std::{
-        collections::HashMap,
-        fs::File,
-        io::Read,
-        time::{Duration, SystemTime},
-    };
+    use std::{collections::HashMap, fs::File, io::Read, time::SystemTime};
     use talk::crypto::{primitives::hash::Hash, Identity};
 
     struct BrokerSubmission {
@@ -46,6 +41,8 @@ mod modes {
         submission_completed: Option<SystemTime>,
     }
 
+    #[derive(Debug)]
+    #[allow(dead_code)]
     struct Observable {
         applicability: f64,
         average: f64,
@@ -209,11 +206,20 @@ mod modes {
             }
         }
 
-        fn conditional_delta(from: Option<SystemTime>, to: Option<SystemTime>) -> Option<Duration> {
+        fn conditional_delta(from: Option<SystemTime>, to: Option<SystemTime>) -> Option<f64> {
             match (from, to) {
-                (Some(from), Some(to)) => Some(to.duration_since(from).unwrap()),
+                (Some(from), Some(to)) => Some(to.duration_since(from).unwrap().as_secs_f64()),
                 _ => None,
             }
         }
+
+        let completion = observe(&submissions, |submission| {
+            conditional_delta(
+                Some(submission.submission_started),
+                submission.submission_completed,
+            )
+        });
+
+        println!("Completion times (s): {completion:?}");
     }
 }
