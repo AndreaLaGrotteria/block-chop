@@ -1,10 +1,12 @@
-use chop_chop::{LoadBroker, LoadBrokerSettings, Membership};
+use chop_chop::{heartbeat, LoadBroker, LoadBrokerSettings, Membership};
+use futures::stream::StreamExt;
 use log::info;
+use signal_hook::consts::signal::*;
+use signal_hook_tokio::Signals;
 use std::{
     cmp,
     fs::File,
-    future,
-    io::{self, Read, Write},
+    io::{BufWriter, Read, Write},
     path::PathBuf,
     time::Duration,
 };
@@ -39,6 +41,8 @@ async fn main() {
           <flow_range_end> (integer) end of the range of flows to broadcast
           --batches-per-flow (default 1920) number of batches per flow
           
+        Heartbeat:
+          --heartbeat-path (string) path to save `heartbeat` data
         ",
     );
 
@@ -50,6 +54,7 @@ async fn main() {
     let flow_range_start = args.get_integer("flow_range_start") as usize;
     let flow_range_end = args.get_integer("flow_range_end") as usize;
     let batches_per_flow = args.get_integer("batches-per-flow") as usize;
+    let heartbeat_path = args.get_string_result("heartbeat-path").ok();
 
     // Load `Membership`
 
@@ -136,11 +141,29 @@ async fn main() {
         },
     );
 
-    println!(" .. done! `LoadBroker` running!");
+    info!(" .. done! `LoadBroker` running!");
 
-    // Wait indefinitely
+    // Wait for `Ctrl + C`
 
-    print!("\n    [Hit Ctrl + C to stop this daemon]  ");
-    io::stdout().flush().unwrap();
-    future::pending::<()>().await;
+    let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
+    signals.next().await;
+
+    info!("`Ctrl + C` detected, shutting down..");
+
+    // Save `heartbeat` data (if necessary)
+
+    if let Some(heartbeat_path) = heartbeat_path {
+        info!("Saving `heartbeat` data to {heartbeat_path}..");
+
+        let entries = heartbeat::flush();
+
+        let file = File::create(heartbeat_path).unwrap();
+        let mut file = BufWriter::new(file);
+
+        bincode::serialize_into(&mut file, &entries).unwrap();
+
+        file.flush().unwrap();
+    }
+
+    info!("All done! Chop CHOP!");
 }
