@@ -26,7 +26,10 @@ mod modes {
     use std::{collections::HashMap, fs::File, io::Read, time::SystemTime};
     use talk::crypto::{primitives::hash::Hash, Identity};
 
+    #[allow(dead_code)]
     struct BrokerSubmission {
+        root: Hash,
+        server: Identity,
         submission_started: SystemTime,
         server_connected: Option<SystemTime>,
         batch_sent: Option<SystemTime>,
@@ -99,6 +102,8 @@ mod modes {
                         .entry(root)
                         .or_default()
                         .push(BrokerSubmission {
+                            root,
+                            server,
                             submission_started: time,
                             server_connected: None,
                             batch_sent: None,
@@ -155,6 +160,8 @@ mod modes {
                 }
             }
         }
+
+        let membership = submissions.keys().copied().collect::<Vec<_>>();
 
         // Extract observables
 
@@ -311,6 +318,23 @@ mod modes {
         print_times(witness_shard_verifiers);
         println!("  ---------------------------------------------------------------------------  ");
         println!();
+
+        // Witness shard (verifier, per server)
+
+        for (index, server) in membership.iter().copied().enumerate() {
+            let witness_shard_verifiers = observe(&submissions, |submission| {
+                if submission.witness_shard_requested.is_some() && submission.server == server {
+                    conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+                } else {
+                    None
+                }
+            });
+
+            println!("  --------------------- Witness shard times (verifiers, server {index}) ---------------------  ");
+            print_times(witness_shard_verifiers);
+            println!("  -------------------------------------------------------------------------------------  ");
+            println!();
+        }
 
         // Witness
 
