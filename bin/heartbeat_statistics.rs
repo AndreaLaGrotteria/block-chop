@@ -7,7 +7,7 @@ fn main() {
           --shallow-broker (string) path to `Broker` / `LoadBroker` `heartbeat` data
 
         Options:
-          --drop-front (default 0) number of seconds to drop from the beginning of the `heartbeat` data
+          --drop-front (default 0.) number of seconds to drop from the beginning of the `heartbeat` data
         ",
     );
 
