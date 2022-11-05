@@ -1,8 +1,8 @@
-mod batch;
 mod broker_slot;
 mod deduplicator;
 mod deduplicator_settings;
 mod duplicate;
+mod merkle_batch;
 mod server;
 mod server_settings;
 mod totality_manager;
@@ -19,7 +19,7 @@ use totality_manager_settings::TotalityManagerSettings;
 use witness_cache::WitnessCache;
 use witness_cache_settings::WitnessCacheSettings;
 
-pub(crate) use batch::MerkleBatch;
+pub(crate) use merkle_batch::MerkleBatch;
 
 pub use server::Server;
 pub use server_settings::ServerSettings;
