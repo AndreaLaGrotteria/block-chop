@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, Message},
-    server::{Batch, DeduplicatorSettings, Duplicate},
+    server::{DeduplicatorSettings, Duplicate, MerkleBatch},
 };
 use futures::{stream::FuturesOrdered, StreamExt};
 use log::warn;
@@ -17,14 +17,14 @@ use tokio::{
     task, time,
 };
 
-type BatchInlet = MpscSender<Batch>;
-type BatchOutlet = MpscReceiver<Batch>;
+type BatchInlet = MpscSender<MerkleBatch>;
+type BatchOutlet = MpscReceiver<MerkleBatch>;
 
-type DeduplicatedBatchInlet = MpscSender<(Batch, Vec<Duplicate>)>;
-type DeduplicatedBatchOutlet = MpscReceiver<(Batch, Vec<Duplicate>)>;
+type DeduplicatedBatchInlet = MpscSender<(MerkleBatch, Vec<Duplicate>)>;
+type DeduplicatedBatchOutlet = MpscReceiver<(MerkleBatch, Vec<Duplicate>)>;
 
-type BatchBurstInlet = MpscSender<Arc<Vec<Batch>>>;
-type BatchBurstOutlet = MpscReceiver<Arc<Vec<Batch>>>;
+type BatchBurstInlet = MpscSender<Arc<Vec<MerkleBatch>>>;
+type BatchBurstOutlet = MpscReceiver<Arc<Vec<MerkleBatch>>>;
 
 type DuplicatesBurstInlet = MpscSender<Vec<Vec<Duplicate>>>;
 type DuplicatesBurstOutlet = MpscReceiver<Vec<Vec<Duplicate>>>;
@@ -65,13 +65,13 @@ impl Deduplicator {
         }
     }
 
-    pub async fn push(&self, batch: Batch) {
+    pub async fn push(&self, batch: MerkleBatch) {
         // `self` holds the `Fuse` to all tasks,
         // so this is guaranteed to succeed.
         let _ = self.dispatch_inlet.send(batch).await;
     }
 
-    pub async fn pull(&mut self) -> (Batch, Vec<Duplicate>) {
+    pub async fn pull(&mut self) -> (MerkleBatch, Vec<Duplicate>) {
         // `self` holds the `Fuse` to all tasks,
         // so this is guaranteed to succeed.
         self.pull_outlet.recv().await.unwrap()
@@ -217,7 +217,7 @@ impl Deduplicator {
         // Run task for `settings.run_duration`
 
         while task_start.elapsed() < settings.run_duration {
-            // Collect burst of `Batch`es
+            // Collect burst of `MerkleBatch`es
 
             let mut burst = Vec::with_capacity(settings.burst_size);
 
@@ -356,7 +356,7 @@ impl Deduplicator {
         settings: DeduplicatorSettings,
     ) -> DeduplicatedBatchInlet {
         loop {
-            // Receive next burst of `Batch`es from `dispatch`
+            // Receive next burst of `MerkleBatch`es from `dispatch`
 
             let mut batch_burst = if let Some(burst) = join_batch_burst_outlet.recv().await {
                 // Either the current iteration of `run` concluded, or
@@ -404,7 +404,7 @@ impl Deduplicator {
                 };
             };
 
-            // For each `Batch` in `batch_burst`, concatenate the corresponding
+            // For each `MerkleBatch` in `batch_burst`, concatenate the corresponding
             // `Vec<Duplicate>`s from each element of `duplicates_burst`. Send
             // each resulting deduplicated batch to `pull`
 
@@ -677,11 +677,11 @@ mod tests {
             .collect::<Vec<_>>()
     }
 
-    fn build_batch<E>(entries: E) -> Batch
+    fn build_batch<E>(entries: E) -> MerkleBatch
     where
         E: IntoIterator<Item = (u64, u64, u64)>,
     {
-        Batch {
+        MerkleBatch {
             entries: Vector::new(build_entries(entries)).unwrap(),
         }
     }

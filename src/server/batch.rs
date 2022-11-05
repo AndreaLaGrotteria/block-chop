@@ -8,7 +8,7 @@ use talk::crypto::primitives::{hash::Hash, sign::Signature};
 use zebra::vector::Vector;
 
 #[derive(Clone)]
-pub(crate) struct Batch {
+pub(crate) struct MerkleBatch {
     pub entries: Vector<Option<Entry>, PACKING>,
 }
 
@@ -32,7 +32,7 @@ pub(crate) enum BatchError {
     InvalidReduction,
 }
 
-impl Batch {
+impl MerkleBatch {
     pub fn expand_verified(
         directory: &Directory,
         compressed_batch: CompressedBatch,
@@ -163,7 +163,7 @@ impl Batch {
             entries.set(index, entry).unwrap();
         }
 
-        Ok(Batch { entries })
+        Ok(MerkleBatch { entries })
     }
 
     pub fn expand_unverified(compressed_batch: CompressedBatch) -> Result<Self, Top<BatchError>> {
@@ -206,7 +206,7 @@ impl Batch {
 
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
-        Ok(Batch { entries })
+        Ok(MerkleBatch { entries })
     }
 
     pub fn root(&self) -> Hash {
@@ -218,11 +218,11 @@ impl Batch {
 mod tests {
     use super::*;
 
-    impl Batch {
+    impl MerkleBatch {
         pub(crate) fn expanded_batch_entries(
             compressed_batch: CompressedBatch,
         ) -> Vector<Option<Entry>, PACKING> {
-            let Batch { entries } = Batch::expand_unverified(compressed_batch).unwrap();
+            let MerkleBatch { entries } = MerkleBatch::expand_unverified(compressed_batch).unwrap();
             entries
         }
     }

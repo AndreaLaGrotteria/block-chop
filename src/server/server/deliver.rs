@@ -8,7 +8,9 @@ use crate::{
     },
     heartbeat::{self, ServerEvent},
     order::Order,
-    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
+    server::{
+        BrokerSlot, Deduplicator, Duplicate, MerkleBatch, Server, TotalityManager, WitnessCache,
+    },
     system::Membership,
     Entry,
 };
@@ -174,7 +176,7 @@ impl Server {
     }
 
     async fn burst_batch(
-        mut batch: Batch,
+        mut batch: MerkleBatch,
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {

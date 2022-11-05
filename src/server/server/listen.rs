@@ -5,7 +5,7 @@ use crate::{
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
-    server::{Batch, BrokerSlot, Server, ServerSettings, WitnessCache},
+    server::{BrokerSlot, MerkleBatch, Server, ServerSettings, WitnessCache},
     system::{Directory, Membership},
     warn,
 };
@@ -163,9 +163,9 @@ impl Server {
 
             task::spawn_blocking(move || {
                 if verify {
-                    Batch::expand_verified(&directory, compressed_batch)
+                    MerkleBatch::expand_verified(&directory, compressed_batch)
                 } else {
-                    Batch::expand_unverified(compressed_batch)
+                    MerkleBatch::expand_unverified(compressed_batch)
                 }
             })
             .await
@@ -385,7 +385,7 @@ mod tests {
             session.receive::<Option<MultiSignature>>().await.unwrap();
         }
 
-        let mut batch = Batch::expand_unverified(compressed_batch).unwrap();
+        let mut batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
 
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitnessStatement {

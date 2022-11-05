@@ -1,5 +1,5 @@
 use crate::{
-    server::{Batch, TotalityManagerSettings},
+    server::{MerkleBatch, TotalityManagerSettings},
     system::Membership,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -27,10 +27,10 @@ use tokio::{
 type CallInlet = MpscSender<Call>;
 type CallOutlet = MpscReceiver<Call>;
 
-type BatchInlet = MpscSender<Batch>;
-type BatchOutlet = MpscReceiver<Batch>;
+type BatchInlet = MpscSender<MerkleBatch>;
+type BatchOutlet = MpscReceiver<MerkleBatch>;
 
-type EntryInlet = MpscSender<(u64, Batch)>;
+type EntryInlet = MpscSender<(u64, MerkleBatch)>;
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
@@ -40,7 +40,7 @@ pub(in crate::server) struct TotalityManager {
 
 struct DeliveryQueue {
     offset: u64,
-    entries: VecDeque<Option<Batch>>,
+    entries: VecDeque<Option<MerkleBatch>>,
 }
 
 struct TotalityQueue {
@@ -49,7 +49,7 @@ struct TotalityQueue {
 }
 
 enum Call {
-    Hit(Vec<u8>, Batch),
+    Hit(Vec<u8>, MerkleBatch),
     Miss(Hash),
 }
 
@@ -162,7 +162,7 @@ impl TotalityManager {
         }
     }
 
-    pub async fn hit(&self, compressed_batch: Vec<u8>, batch: Batch) {
+    pub async fn hit(&self, compressed_batch: Vec<u8>, batch: MerkleBatch) {
         let _ = self
             .run_call_inlet
             .send(Call::Hit(compressed_batch, batch))
@@ -173,7 +173,7 @@ impl TotalityManager {
         let _ = self.run_call_inlet.send(Call::Miss(root)).await;
     }
 
-    pub async fn pull(&mut self) -> Batch {
+    pub async fn pull(&mut self) -> MerkleBatch {
         // The `Fuse` to `TotalityManager::run` is owned by
         // `self`, so `pull_inlet` cannot have been dropped
         self.pull_outlet.recv().await.unwrap()
@@ -380,7 +380,7 @@ impl TotalityManager {
         root: Hash,
         server: Identity,
         connector: Arc<SessionConnector>,
-    ) -> Result<Batch, Top<QueryError>> {
+    ) -> Result<MerkleBatch, Top<QueryError>> {
         let mut session = connector
             .connect(server)
             .await
@@ -407,13 +407,13 @@ impl TotalityManager {
             .pot(QueryError::ConnectionError, here!())?;
 
         // Expand using a blocking task to avoid clogging the event loop
-        let batch = task::spawn_blocking(move || -> Result<Batch, Top<QueryError>> {
+        let batch = task::spawn_blocking(move || -> Result<MerkleBatch, Top<QueryError>> {
             let batch = bincode::deserialize(batch.as_slice())
                 .map_err(QueryError::deserialize_failed)
                 .map_err(Doom::into_top)
                 .spot(here!())?;
 
-            Batch::expand_unverified(batch).pot(QueryError::ExpandFailed, here!())
+            MerkleBatch::expand_unverified(batch).pot(QueryError::ExpandFailed, here!())
         })
         .await
         .unwrap()?;
@@ -572,7 +572,7 @@ mod tests {
             let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
             let root = batch.root();
 
             totality_manager
@@ -617,7 +617,7 @@ mod tests {
             let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
             let root = batch.root();
 
             hitter.hit(serialized_compressed_batch, batch).await;
@@ -663,7 +663,7 @@ mod tests {
             let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
             let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
+            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
             let root = batch.root();
 
             totality_managers.shuffle(&mut rand::thread_rng());

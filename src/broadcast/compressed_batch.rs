@@ -159,7 +159,7 @@ impl CompressedBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{server::Batch as ServerBatch, system::test::generate_system};
+    use crate::{server::MerkleBatch, system::test::generate_system};
 
     #[tokio::test]
     #[cfg(feature = "benchmark")]
@@ -185,7 +185,7 @@ mod tests {
         let (root, compressed_batch) = CompressedBatch::assemble(requests.clone());
 
         let server_batch =
-            ServerBatch::expand_verified(&directory, compressed_batch.clone()).unwrap();
+            MerkleBatch::expand_verified(&directory, compressed_batch.clone()).unwrap();
 
         assert_eq!(server_batch.root(), root);
 
