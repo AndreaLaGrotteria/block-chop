@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{CompressedBatch, Straggler},
-    broker::{Batch, BatchStatus, Broker, BrokerSettings, Reduction},
+    broker::{Batch, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     debug, info,
     system::Directory,
@@ -186,8 +186,6 @@ impl Broker {
 
         let ids = VarCram::cram(ids.as_slice());
         let raise = batch.raise;
-
-        batch.status = BatchStatus::Submitting;
 
         // Assemble and return `CompressedBatch`
 

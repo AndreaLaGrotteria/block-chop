@@ -20,6 +20,6 @@ pub use load_broker_settings::LoadBrokerSettings;
 pub(crate) use request::Request;
 pub(crate) use response::Response;
 
-use batch::{Batch, BatchStatus};
+use batch::Batch;
 use reduction::Reduction;
 use submission::Submission;

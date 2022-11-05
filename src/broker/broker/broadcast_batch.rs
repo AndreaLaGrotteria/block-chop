@@ -1,9 +1,6 @@
 use crate::{
     broadcast::{Amendment, CompressedBatch, DeliveryShard},
-    broker::{
-        batch::{Batch, BatchStatus},
-        Broker,
-    },
+    broker::{batch::Batch, Broker},
     crypto::{statements::BatchDelivery, Certificate},
     warn, BrokerSettings, Membership,
 };
@@ -161,8 +158,6 @@ impl Broker {
             &mut delivery_shard_outlet,
         )
         .await;
-
-        batch.status = BatchStatus::Delivered;
 
         // Move `fuse` to a long-lived task, submitting `batch`
         // to straggler servers until a timeout expires
@@ -387,7 +382,6 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut batch = Batch {
-            status: BatchStatus::Submitting,
             submissions,
             raise: 0,
             entries,
@@ -460,7 +454,6 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut batch = Batch {
-            status: BatchStatus::Submitting,
             submissions,
             raise: 0,
             entries,
