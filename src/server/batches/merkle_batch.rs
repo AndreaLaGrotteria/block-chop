@@ -9,7 +9,7 @@ use zebra::vector::Vector;
 
 #[derive(Clone)]
 pub(crate) struct MerkleBatch {
-    entries: Vector<Option<Entry>, PACKING>,
+    pub(in crate::server::batches) entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
@@ -166,7 +166,9 @@ impl MerkleBatch {
         Ok(MerkleBatch { entries })
     }
 
-    pub fn expand_unverified(broadcast_batch: BroadcastBatch) -> Result<Self, Top<MerkleBatchError>> {
+    pub fn expand_unverified(
+        broadcast_batch: BroadcastBatch,
+    ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
         let ids = broadcast_batch
