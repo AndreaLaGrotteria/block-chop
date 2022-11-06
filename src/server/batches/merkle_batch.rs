@@ -1,6 +1,7 @@
 use crate::{
     broadcast::{Batch as BroadcastBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
+    server::batches::PlainBatch,
     system::Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -225,6 +226,14 @@ impl MerkleBatch {
 
     pub fn unwrap(self) -> Vec<Option<Entry>> {
         Vec::from(self.entries)
+    }
+}
+
+impl From<PlainBatch> for MerkleBatch {
+    fn from(plain_batch: PlainBatch) -> Self {
+        MerkleBatch {
+            entries: Vector::new(plain_batch.entries).unwrap(),
+        }
     }
 }
 
