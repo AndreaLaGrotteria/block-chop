@@ -1,6 +1,5 @@
-use talk::crypto::primitives::hash::Hash;
-
 use crate::{broadcast::Entry, server::batches::MerkleBatch};
+use talk::crypto::primitives::hash::Hash;
 
 #[derive(Clone)]
 pub(crate) struct PlainBatch {
