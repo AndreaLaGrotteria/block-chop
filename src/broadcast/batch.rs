@@ -18,7 +18,7 @@ use varcram::VarCram;
 #[cfg(feature = "benchmark")]
 use zebra::vector::Vector;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Batch {
     pub ids: VarCram,
     pub messages: Vec<Message>,

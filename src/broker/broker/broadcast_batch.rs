@@ -323,29 +323,6 @@ mod tests {
     };
     use varcram::VarCram;
 
-    impl Clone for Straggler {
-        fn clone(&self) -> Self {
-            Self {
-                id: self.id.clone(),
-                sequence: self.sequence.clone(),
-                signature: self.signature.clone(),
-            }
-        }
-    }
-
-    impl Clone for BroadcastBatch {
-        fn clone(&self) -> Self {
-            let ids = VarCram::cram(self.ids.uncram().unwrap().clone().as_ref());
-            Self {
-                ids,
-                messages: self.messages.clone(),
-                raise: self.raise.clone(),
-                multisignature: self.multisignature.clone(),
-                stragglers: self.stragglers.clone(),
-            }
-        }
-    }
-
     #[tokio::test]
     async fn broker_broadcast_0_faulty() {
         let (_servers, membership, _, connector_map, clients_keychains) =
