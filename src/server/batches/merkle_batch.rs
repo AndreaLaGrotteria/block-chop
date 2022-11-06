@@ -1,7 +1,7 @@
 use crate::{
     broadcast::{Batch as BroadcastBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
-    server::batches::PlainBatch,
+    server::batches::{CompressedBatch, PlainBatch},
     system::Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -242,6 +242,12 @@ impl From<PlainBatch> for MerkleBatch {
             entries: Vector::new(plain_batch.entries).unwrap(),
             sequence_mode: plain_batch.sequence_mode,
         }
+    }
+}
+
+impl From<CompressedBatch> for MerkleBatch {
+    fn from(compressed_batch: CompressedBatch) -> Self {
+        MerkleBatch::from(PlainBatch::from(compressed_batch))
     }
 }
 

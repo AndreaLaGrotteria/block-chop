@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, Message},
-    server::batches::PlainBatch,
+    server::batches::{MerkleBatch, PlainBatch},
 };
 use talk::crypto::primitives::hash::Hash;
 use varcram::VarCram;
@@ -67,5 +67,11 @@ impl From<PlainBatch> for CompressedBatch {
             messages,
             deltas,
         }
+    }
+}
+
+impl From<MerkleBatch> for CompressedBatch {
+    fn from(merkle_batch: MerkleBatch) -> Self {
+        CompressedBatch::from(PlainBatch::from(merkle_batch))
     }
 }
