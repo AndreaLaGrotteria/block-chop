@@ -11,6 +11,7 @@ use zebra::vector::Vector;
 #[derive(Clone)]
 pub(crate) struct MerkleBatch {
     pub(in crate::server::batches) entries: Vector<Option<Entry>, PACKING>,
+    pub(in crate::server::batches) sequence_mode: u64,
 }
 
 #[derive(Doom)]
@@ -164,7 +165,10 @@ impl MerkleBatch {
             entries.set(index, entry).unwrap();
         }
 
-        Ok(MerkleBatch { entries })
+        Ok(MerkleBatch {
+            entries,
+            sequence_mode: raise,
+        })
     }
 
     pub fn expand_unverified(
@@ -209,7 +213,10 @@ impl MerkleBatch {
 
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
-        Ok(MerkleBatch { entries })
+        Ok(MerkleBatch {
+            entries,
+            sequence_mode: raise,
+        })
     }
 
     pub fn root(&self) -> Hash {
@@ -233,6 +240,7 @@ impl From<PlainBatch> for MerkleBatch {
     fn from(plain_batch: PlainBatch) -> Self {
         MerkleBatch {
             entries: Vector::new(plain_batch.entries).unwrap(),
+            sequence_mode: plain_batch.sequence_mode,
         }
     }
 }
@@ -240,16 +248,35 @@ impl From<PlainBatch> for MerkleBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     impl MerkleBatch {
         pub(crate) fn from_entries(entries: Vector<Option<Entry>, PACKING>) -> Self {
-            MerkleBatch { entries }
+            let mut sequence_histogram: HashMap<u64, usize> = HashMap::new();
+
+            for entry in entries.items() {
+                if let Some(entry) = entry {
+                    *sequence_histogram.entry(entry.sequence).or_default() += 1;
+                }
+            }
+
+            let mut sequence_histogram = sequence_histogram.into_iter().collect::<Vec<_>>();
+            sequence_histogram.sort_unstable_by_key(|(_, height)| *height);
+
+            let (sequence_mode, _) = *sequence_histogram.last().unwrap();
+
+            MerkleBatch {
+                entries,
+                sequence_mode,
+            }
         }
 
         pub(crate) fn expanded_batch_entries(
             broadcast_batch: BroadcastBatch,
         ) -> Vector<Option<Entry>, PACKING> {
-            let MerkleBatch { entries } = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let MerkleBatch { entries, .. } =
+                MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+
             entries
         }
     }

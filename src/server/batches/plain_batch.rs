@@ -5,6 +5,7 @@ use talk::crypto::primitives::hash::Hash;
 pub(crate) struct PlainBatch {
     pub(in crate::server::batches) root: Option<Hash>,
     pub(in crate::server::batches) entries: Vec<Option<Entry>>,
+    pub(in crate::server::batches) sequence_mode: u64,
 }
 
 impl PlainBatch {
@@ -31,6 +32,7 @@ impl From<MerkleBatch> for PlainBatch {
         PlainBatch {
             root: Some(merkle_batch.root()),
             entries: merkle_batch.entries.into(),
+            sequence_mode: merkle_batch.sequence_mode,
         }
     }
 }
