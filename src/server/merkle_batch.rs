@@ -13,7 +13,7 @@ pub(crate) struct MerkleBatch {
 }
 
 #[derive(Doom)]
-pub(crate) enum BatchError {
+pub(crate) enum MerkleBatchError {
     #[doom(description("Malformed ids (invalid `VarCram`)"))]
     MalformedIds,
     #[doom(description("Empty batch"))]
@@ -36,23 +36,23 @@ impl MerkleBatch {
     pub fn expand_verified(
         directory: &Directory,
         broadcast_batch: BroadcastBatch,
-    ) -> Result<Self, Top<BatchError>> {
+    ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
         let ids = broadcast_batch
             .ids
             .uncram()
-            .ok_or(BatchError::MalformedIds.into_top())
+            .ok_or(MerkleBatchError::MalformedIds.into_top())
             .spot(here!())?;
 
         if ids.is_empty() {
-            return BatchError::EmptyBatch.fail().spot(here!());
+            return MerkleBatchError::EmptyBatch.fail().spot(here!());
         }
 
         let messages = broadcast_batch.messages;
 
         if messages.len() != ids.len() {
-            return BatchError::LengthMismatch.fail().spot(here!());
+            return MerkleBatchError::LengthMismatch.fail().spot(here!());
         }
 
         // Verify that ids are strictly increasing
@@ -62,7 +62,7 @@ impl MerkleBatch {
                 if window[0] < window[1] {
                     Ok(())
                 } else {
-                    return BatchError::IdsUnsorted.fail().spot(here!());
+                    return MerkleBatchError::IdsUnsorted.fail().spot(here!());
                 }
             })
             .collect::<Result<_, _>>()?;
@@ -83,7 +83,7 @@ impl MerkleBatch {
             if let Some(straggler) = stragglers.peek().filter(|straggler| straggler.id == id) {
                 let public_key = directory
                     .get_public_key(id)
-                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+                    .ok_or_else(|| MerkleBatchError::IdUnknown.into_top().spot(here!()))?;
 
                 let statement = BroadcastStatement {
                     sequence: &straggler.sequence,
@@ -107,7 +107,7 @@ impl MerkleBatch {
             } else {
                 let multi_public_key = directory
                     .get_multi_public_key(id)
-                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+                    .ok_or_else(|| MerkleBatchError::IdUnknown.into_top().spot(here!()))?;
 
                 reducer_multi_public_keys.push(multi_public_key.clone());
             }
@@ -120,7 +120,7 @@ impl MerkleBatch {
             straggler_statements.iter(),
             straggler_signatures,
         )
-        .pot(BatchError::InvalidStraggler, here!())?;
+        .pot(MerkleBatchError::InvalidStraggler, here!())?;
 
         // Build `Entry` Merkle tree
 
@@ -145,7 +145,7 @@ impl MerkleBatch {
         if !reducer_multi_public_keys.is_empty() {
             let multisignature = broadcast_batch
                 .multisignature
-                .ok_or(BatchError::MissingReduction.into_top())
+                .ok_or(MerkleBatchError::MissingReduction.into_top())
                 .spot(here!())?;
 
             let statement = ReductionStatement {
@@ -154,7 +154,7 @@ impl MerkleBatch {
 
             multisignature
                 .verify(reducer_multi_public_keys.iter(), &statement)
-                .pot(BatchError::InvalidReduction, here!())?;
+                .pot(MerkleBatchError::InvalidReduction, here!())?;
         }
 
         // Update straggler `entries`
@@ -166,13 +166,13 @@ impl MerkleBatch {
         Ok(MerkleBatch { entries })
     }
 
-    pub fn expand_unverified(broadcast_batch: BroadcastBatch) -> Result<Self, Top<BatchError>> {
+    pub fn expand_unverified(broadcast_batch: BroadcastBatch) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
         let ids = broadcast_batch
             .ids
             .uncram()
-            .ok_or(BatchError::MalformedIds.into_top())
+            .ok_or(MerkleBatchError::MalformedIds.into_top())
             .spot(here!())?;
 
         let messages = broadcast_batch.messages;
