@@ -1,4 +1,7 @@
-use crate::{broadcast::Entry, server::batches::MerkleBatch};
+use crate::{
+    broadcast::Entry,
+    server::batches::{CompressedBatch, Delta, MerkleBatch},
+};
 use talk::crypto::primitives::hash::Hash;
 
 #[derive(Clone)]
@@ -33,6 +36,49 @@ impl From<MerkleBatch> for PlainBatch {
             root: Some(merkle_batch.root()),
             entries: merkle_batch.entries.into(),
             sequence_mode: merkle_batch.sequence_mode,
+        }
+    }
+}
+
+impl From<CompressedBatch> for PlainBatch {
+    fn from(compressed_batch: CompressedBatch) -> Self {
+        let CompressedBatch {
+            root,
+            ids,
+            sequence_mode,
+            messages,
+            deltas,
+        } = compressed_batch;
+
+        let ids = ids.uncram().unwrap();
+
+        let mut entries = ids
+            .into_iter()
+            .zip(messages)
+            .map(|(id, message)| {
+                Some(Entry {
+                    id,
+                    sequence: sequence_mode,
+                    message,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for delta in deltas {
+            match delta {
+                Delta::Nudge { index, sequence } => {
+                    entries.get_mut(index).unwrap().as_mut().unwrap().sequence = sequence;
+                }
+                Delta::Drop { index } => {
+                    *entries.get_mut(index).unwrap() = None;
+                }
+            }
+        }
+
+        PlainBatch {
+            root,
+            entries,
+            sequence_mode,
         }
     }
 }
