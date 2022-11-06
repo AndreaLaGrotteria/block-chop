@@ -2,11 +2,13 @@ use crate::{
     broadcast::{Entry, Message},
     server::batches::{MerkleBatch, PlainBatch},
 };
+use serde::{Deserialize, Serialize};
 use talk::crypto::primitives::hash::Hash;
 use varcram::VarCram;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct CompressedBatch {
+    #[serde(skip)]
     pub(in crate::server::batches) root: Option<Hash>,
     pub(in crate::server::batches) ids: VarCram,
     pub(in crate::server::batches) sequence_mode: u64,
@@ -14,7 +16,7 @@ pub(crate) struct CompressedBatch {
     pub(in crate::server::batches) deltas: Vec<Delta>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::server::batches) enum Delta {
     Nudge { index: usize, sequence: u64 },
     Drop { index: usize },
