@@ -14,12 +14,12 @@ pub enum ServerEvent {
         root: Hash,
     },
 
-    // Local `Server` received (not yet deserialized) `CompressedBatch`
+    // Local `Server` received (not yet deserialized) `Batch`
     BatchReceived {
         root: Hash,
     },
 
-    // Local `Server` deserialized `CompressedBatch` containing `entries`
+    // Local `Server` deserialized `Batch` containing `entries`
     // entries, `stragglers` of which were stragglers (failed to reduce)
     BatchDeserialized {
         root: Hash,
@@ -27,14 +27,14 @@ pub enum ServerEvent {
         stragglers: u32,
     },
 
-    // Local `Server` started expanding `CompressedBatch` into `Batch` (`verify`
+    // Local `Server` started expanding `Batch` into `Batch` (`verify`
     // indicates whether `expand_verified` or `expand_unverified` is called)
     BatchExpansionStarted {
         root: Hash,
         verify: bool,
     },
 
-    // Local `Server` finished expanding `CompressedBatch` into `Batch`
+    // Local `Server` finished expanding `Batch` into `Batch`
     BatchExpansionCompleted {
         root: Hash,
     },

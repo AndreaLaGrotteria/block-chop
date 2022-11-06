@@ -1,5 +1,5 @@
 mod amendment;
-mod compressed_batch;
+mod batch;
 mod delivery_shard;
 mod entry;
 mod message;
@@ -12,7 +12,7 @@ pub(crate) use amendment::Amendment;
 pub(crate) use delivery_shard::DeliveryShard;
 pub(crate) use message::PACKING;
 
-pub use compressed_batch::CompressedBatch;
+pub use batch::Batch;
 pub use entry::Entry;
 pub use message::{Message, MESSAGE_SIZE};
 pub use straggler::Straggler;

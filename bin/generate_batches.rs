@@ -1,4 +1,4 @@
-use chop_chop::{CompressedBatch, Directory, Entry, Passepartout};
+use chop_chop::{Batch, Directory, Entry, Passepartout};
 use rand::{
     distributions::{Distribution, WeightedIndex},
     seq::SliceRandom,
@@ -133,7 +133,7 @@ fn main() {
                 })
                 .collect::<Vec<_>>();
 
-            // Generate `CompressedBatch`es
+            // Generate `Batch`es
 
             for batch_index in 0..batches_per_flow {
                 // Select broadcasters
@@ -181,7 +181,7 @@ fn main() {
                         .take(broadcasters.len())
                         .collect::<Vec<_>>();
 
-                // Assemble `CompressedBatch`
+                // Assemble `Batch`
 
                 let requests = broadcasters
                     .iter()
@@ -191,7 +191,7 @@ fn main() {
                         (entry, broadcaster.keychain.clone(), reduce)
                     });
 
-                let (root, compressed_batch) = CompressedBatch::assemble(requests);
+                let (root, batch) = Batch::assemble(requests);
 
                 // Update `next_sequence`s in `broadcasters`
 
@@ -200,23 +200,23 @@ fn main() {
                     state.last_broadcast = Some(batch_index);
 
                     state.next_sequence = if reduced {
-                        compressed_batch.raise + 1
+                        batch.raise + 1
                     } else {
                         state.next_sequence + 1
                     };
                 }
 
-                // Save `root` and `compressed_batch`
+                // Save `root` and `batch`
 
                 let mut batch_path = flow_path.clone();
                 batch_path.push(format!("batch-{batch_index:05}.raw"));
 
                 let root = root.to_bytes();
-                let compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+                let batch = bincode::serialize(&batch).unwrap();
 
                 let mut file = File::create(batch_path).unwrap();
                 file.write_all(root.as_slice()).unwrap();
-                file.write_all(compressed_batch.as_slice()).unwrap();
+                file.write_all(batch.as_slice()).unwrap();
 
                 // Log progress
 

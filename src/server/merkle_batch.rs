@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{CompressedBatch, Entry, PACKING},
+    broadcast::{Batch as BroadcastBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
     system::Directory,
 };
@@ -35,11 +35,11 @@ pub(crate) enum BatchError {
 impl MerkleBatch {
     pub fn expand_verified(
         directory: &Directory,
-        compressed_batch: CompressedBatch,
+        broadcast_batch: BroadcastBatch,
     ) -> Result<Self, Top<BatchError>> {
         // Extract ids and messages
 
-        let ids = compressed_batch
+        let ids = broadcast_batch
             .ids
             .uncram()
             .ok_or(BatchError::MalformedIds.into_top())
@@ -49,7 +49,7 @@ impl MerkleBatch {
             return BatchError::EmptyBatch.fail().spot(here!());
         }
 
-        let messages = compressed_batch.messages;
+        let messages = broadcast_batch.messages;
 
         if messages.len() != ids.len() {
             return BatchError::LengthMismatch.fail().spot(here!());
@@ -69,7 +69,7 @@ impl MerkleBatch {
 
         // Separate stragglers from reducers
 
-        let mut stragglers = compressed_batch.stragglers.iter().peekable();
+        let mut stragglers = broadcast_batch.stragglers.iter().peekable();
 
         let mut reducer_multi_public_keys = Vec::with_capacity(ids.len());
 
@@ -124,7 +124,7 @@ impl MerkleBatch {
 
         // Build `Entry` Merkle tree
 
-        let raise = compressed_batch.raise;
+        let raise = broadcast_batch.raise;
 
         let entries = ids
             .into_iter()
@@ -143,7 +143,7 @@ impl MerkleBatch {
         // Verify reducers' `MultiSignature`
 
         if !reducer_multi_public_keys.is_empty() {
-            let multisignature = compressed_batch
+            let multisignature = broadcast_batch
                 .multisignature
                 .ok_or(BatchError::MissingReduction.into_top())
                 .spot(here!())?;
@@ -166,19 +166,19 @@ impl MerkleBatch {
         Ok(MerkleBatch { entries })
     }
 
-    pub fn expand_unverified(compressed_batch: CompressedBatch) -> Result<Self, Top<BatchError>> {
+    pub fn expand_unverified(broadcast_batch: BroadcastBatch) -> Result<Self, Top<BatchError>> {
         // Extract ids and messages
 
-        let ids = compressed_batch
+        let ids = broadcast_batch
             .ids
             .uncram()
             .ok_or(BatchError::MalformedIds.into_top())
             .spot(here!())?;
 
-        let messages = compressed_batch.messages;
-        let raise = compressed_batch.raise;
+        let messages = broadcast_batch.messages;
+        let raise = broadcast_batch.raise;
 
-        let mut stragglers = compressed_batch.stragglers.iter().peekable();
+        let mut stragglers = broadcast_batch.stragglers.iter().peekable();
 
         // Build `Entry` Merkle tree
 
@@ -220,9 +220,9 @@ mod tests {
 
     impl MerkleBatch {
         pub(crate) fn expanded_batch_entries(
-            compressed_batch: CompressedBatch,
+            broadcast_batch: BroadcastBatch,
         ) -> Vector<Option<Entry>, PACKING> {
-            let MerkleBatch { entries } = MerkleBatch::expand_unverified(compressed_batch).unwrap();
+            let MerkleBatch { entries } = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
             entries
         }
     }

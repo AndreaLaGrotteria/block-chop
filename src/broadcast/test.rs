@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{CompressedBatch, PACKING},
+    broadcast::{Batch, PACKING},
     crypto::statements::Reduction,
     Entry,
 };
@@ -12,7 +12,7 @@ use talk::crypto::{
 use varcram::VarCram;
 use zebra::vector::Vector;
 
-pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> (Hash, CompressedBatch) {
+pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> (Hash, Batch) {
     let entries = (0..(size as u64))
         .map(|id| {
             Some(Entry {
@@ -35,7 +35,7 @@ pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> (Hash
     let messages = Vec::from_iter(iter::repeat(Default::default()).take(size));
     let multisignature = Some(MultiSignature::aggregate(multisignatures).unwrap());
 
-    let compressed_batch = CompressedBatch {
+    let batch = Batch {
         ids,
         messages,
         raise: 0,
@@ -43,10 +43,10 @@ pub(crate) fn null_batch(client_keychains: &Vec<KeyChain>, size: usize) -> (Hash
         stragglers: vec![],
     };
 
-    (root, compressed_batch)
+    (root, batch)
 }
 
-pub(crate) fn random_unauthenticated_batch(clients: usize, size: usize) -> (Hash, CompressedBatch) {
+pub(crate) fn random_unauthenticated_batch(clients: usize, size: usize) -> (Hash, Batch) {
     let mut ids = (0..(clients as u64))
         .into_iter()
         .choose_multiple(&mut rand::thread_rng(), size);
@@ -74,7 +74,7 @@ pub(crate) fn random_unauthenticated_batch(clients: usize, size: usize) -> (Hash
     let ids = VarCram::cram(ids.as_slice());
     let raise = 0;
 
-    let compressed_batch = CompressedBatch {
+    let batch = Batch {
         ids,
         messages,
         raise,
@@ -82,5 +82,5 @@ pub(crate) fn random_unauthenticated_batch(clients: usize, size: usize) -> (Hash
         stragglers: Vec::new(),
     };
 
-    (root, compressed_batch)
+    (root, batch)
 }

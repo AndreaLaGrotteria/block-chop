@@ -162,11 +162,8 @@ impl TotalityManager {
         }
     }
 
-    pub async fn hit(&self, compressed_batch: Vec<u8>, batch: MerkleBatch) {
-        let _ = self
-            .run_call_inlet
-            .send(Call::Hit(compressed_batch, batch))
-            .await;
+    pub async fn hit(&self, raw_batch: Vec<u8>, batch: MerkleBatch) {
+        let _ = self.run_call_inlet.send(Call::Hit(raw_batch, batch)).await;
     }
 
     pub async fn miss(&self, root: Hash) {
@@ -211,8 +208,8 @@ impl TotalityManager {
                     };
 
                     match call {
-                        Call::Hit(compressed_batch, batch) => {
-                            // Make `compressed_batch` available to other servers,
+                        Call::Hit(raw_batch, batch) => {
+                            // Make `raw_batch` available to other servers,
                             // stage `batch` for delivery
 
                             delivery_queue.entries.push_back(Some(batch));
@@ -221,7 +218,7 @@ impl TotalityManager {
                                 .lock()
                                 .unwrap()
                                 .entries
-                                .push_back(Some(Arc::new(compressed_batch)));
+                                .push_back(Some(Arc::new(raw_batch)));
                         }
 
                         Call::Miss(root) => {
@@ -569,15 +566,13 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
-            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let root = merkle_batch.root();
 
-            totality_manager
-                .hit(serialized_compressed_batch, batch)
-                .await;
+            totality_manager.hit(raw_batch, merkle_batch).await;
 
             let batch = totality_manager.pull().await;
 
@@ -614,13 +609,13 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
-            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let root = merkle_batch.root();
 
-            hitter.hit(serialized_compressed_batch, batch).await;
+            hitter.hit(raw_batch, merkle_batch).await;
             misser.miss(root).await;
 
             let hitter_batch = hitter.pull().await;
@@ -660,20 +655,18 @@ mod tests {
             .collect::<Vec<_>>();
 
         for _ in 0..1024 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
-            let batch = MerkleBatch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let root = merkle_batch.root();
 
             totality_managers.shuffle(&mut rand::thread_rng());
 
             let hitters = rand::random::<usize>() % 16 + 1;
 
             for hitter in &totality_managers[0..hitters] {
-                hitter
-                    .hit(serialized_compressed_batch.clone(), batch.clone())
-                    .await;
+                hitter.hit(raw_batch.clone(), merkle_batch.clone()).await;
             }
 
             for misser in &totality_managers[hitters..] {

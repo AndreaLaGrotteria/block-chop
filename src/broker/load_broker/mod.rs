@@ -49,7 +49,7 @@ mod submit_batch;
 mod tests {
     use super::*;
     use crate::{
-        broadcast::{test::null_batch, CompressedBatch},
+        broadcast::{test::null_batch, Batch as BroadcastBatch},
         system::test::generate_system,
     };
     use std::time::Duration;
@@ -59,7 +59,7 @@ mod tests {
     };
     use tokio::time;
 
-    fn to_raw(val: (Hash, CompressedBatch)) -> (Hash, Vec<u8>) {
+    fn to_raw(val: (Hash, BroadcastBatch)) -> (Hash, Vec<u8>) {
         (val.0, bincode::serialize(&val.1).unwrap())
     }
 
