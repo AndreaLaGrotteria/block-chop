@@ -184,15 +184,15 @@ mod tests {
 
         let (root, batch) = Batch::assemble(requests.clone());
 
-        let server_batch = MerkleBatch::expand_verified(&directory, batch.clone()).unwrap();
+        let merkle_batch = MerkleBatch::expand_verified(&directory, batch.clone()).unwrap();
 
-        assert_eq!(server_batch.root(), root);
+        assert_eq!(merkle_batch.root(), root);
 
         requests.sort_unstable_by_key(|(entry, ..)| entry.id);
 
         for ((mut reference, _, reduce), expanded) in requests.into_iter().zip(
-            server_batch
-                .entries
+            merkle_batch
+                .entries()
                 .items()
                 .iter()
                 .cloned()

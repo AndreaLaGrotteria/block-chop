@@ -280,7 +280,7 @@ impl Deduplicator {
                         end: range.end as u64,
                     };
 
-                    let crop = Deduplicator::crop(batch.entries.items(), range.clone());
+                    let crop = Deduplicator::crop(batch.entries().items(), range.clone());
 
                     crop.iter()
                         .filter_map(|entry| {
@@ -318,7 +318,7 @@ impl Deduplicator {
             let duplicates_burst = batch_burst
                 .iter()
                 .map(|batch| {
-                    let top_id = batch.entries.items().last().unwrap().as_ref().unwrap().id;
+                    let top_id = batch.entries().items().last().unwrap().as_ref().unwrap().id;
 
                     let capacity_required = if top_id >= offset {
                         ((top_id - offset) as usize) + 1 // `tail.get_mut(top_id - offset)` is invoked later
@@ -330,7 +330,7 @@ impl Deduplicator {
                         tail.resize(capacity_required, None);
                     }
 
-                    let crop = Deduplicator::crop(batch.entries.items(), offset..);
+                    let crop = Deduplicator::crop(batch.entries().items(), offset..);
 
                     crop.iter()
                         .filter_map(|entry| {
@@ -418,7 +418,7 @@ impl Deduplicator {
                 if !duplicates.is_empty() {
                     warn!(
                         "Batch {:#?} had {} duplicates.",
-                        batch.entries.root(),
+                        batch.root(),
                         duplicates.len()
                     );
                 }
@@ -681,9 +681,7 @@ mod tests {
     where
         E: IntoIterator<Item = (u64, u64, u64)>,
     {
-        MerkleBatch {
-            entries: Vector::new(build_entries(entries)).unwrap(),
-        }
+        MerkleBatch::from_entries(Vector::new(build_entries(entries)).unwrap())
     }
 
     #[tokio::test]
@@ -696,7 +694,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
 
@@ -706,7 +704,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
 
@@ -716,7 +714,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Ignore { id: 0 }]);
         }
 
@@ -726,7 +724,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Nudge { id: 0, sequence: 1 }]);
         }
 
@@ -736,7 +734,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
         }
 
@@ -746,7 +744,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
         }
 
@@ -756,7 +754,7 @@ mod tests {
             deduplicator.push(build_batch(entries)).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
     }
@@ -787,31 +785,31 @@ mod tests {
         deduplicator.push(build_batch(entries_6)).await;
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_0));
+        assert_eq!(batch.entries().items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_1));
+        assert_eq!(batch.entries().items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_2));
+        assert_eq!(batch.entries().items(), &build_entries(entries_2));
         assert_eq!(duplicates, vec![Duplicate::Ignore { id: 0 }]);
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_3));
+        assert_eq!(batch.entries().items(), &build_entries(entries_3));
         assert_eq!(duplicates, vec![Duplicate::Nudge { id: 0, sequence: 1 }]);
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_4));
+        assert_eq!(batch.entries().items(), &build_entries(entries_4));
         assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_5));
+        assert_eq!(batch.entries().items(), &build_entries(entries_5));
         assert_eq!(duplicates, vec![Duplicate::Drop { id: 0 }]);
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_6));
+        assert_eq!(batch.entries().items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
 
@@ -827,7 +825,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
 
@@ -839,7 +837,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
 
@@ -851,7 +849,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
 
             assert_eq!(
                 duplicates,
@@ -869,7 +867,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
 
             assert_eq!(
                 duplicates,
@@ -890,7 +888,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
 
             assert_eq!(
                 duplicates,
@@ -908,7 +906,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
 
             assert_eq!(
                 duplicates,
@@ -926,7 +924,7 @@ mod tests {
             deduplicator.push(build_batch(entries.clone())).await;
             let (batch, duplicates) = deduplicator.pull().await;
 
-            assert_eq!(batch.entries.items(), &build_entries(entries));
+            assert_eq!(batch.entries().items(), &build_entries(entries));
             assert!(duplicates.is_empty());
         }
     }
@@ -978,15 +976,15 @@ mod tests {
         deduplicator.push(build_batch(entries_6.clone())).await;
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_0));
+        assert_eq!(batch.entries().items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_1));
+        assert_eq!(batch.entries().items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_2));
+        assert_eq!(batch.entries().items(), &build_entries(entries_2));
 
         assert_eq!(
             duplicates,
@@ -996,7 +994,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_3));
+        assert_eq!(batch.entries().items(), &build_entries(entries_3));
 
         assert_eq!(
             duplicates,
@@ -1009,7 +1007,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_4));
+        assert_eq!(batch.entries().items(), &build_entries(entries_4));
 
         assert_eq!(
             duplicates,
@@ -1019,7 +1017,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_5));
+        assert_eq!(batch.entries().items(), &build_entries(entries_5));
 
         assert_eq!(
             duplicates,
@@ -1029,7 +1027,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_6));
+        assert_eq!(batch.entries().items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
 
@@ -1080,15 +1078,15 @@ mod tests {
         deduplicator.push(build_batch(entries_6.clone())).await;
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_0));
+        assert_eq!(batch.entries().items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_1));
+        assert_eq!(batch.entries().items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_2));
+        assert_eq!(batch.entries().items(), &build_entries(entries_2));
 
         assert_eq!(
             duplicates,
@@ -1098,7 +1096,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_3));
+        assert_eq!(batch.entries().items(), &build_entries(entries_3));
 
         assert_eq!(
             duplicates,
@@ -1111,7 +1109,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_4));
+        assert_eq!(batch.entries().items(), &build_entries(entries_4));
 
         assert_eq!(
             duplicates,
@@ -1121,7 +1119,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_5));
+        assert_eq!(batch.entries().items(), &build_entries(entries_5));
 
         assert_eq!(
             duplicates,
@@ -1131,7 +1129,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_6));
+        assert_eq!(batch.entries().items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
 
@@ -1200,15 +1198,15 @@ mod tests {
         deduplicator.push(build_batch(entries_6.clone())).await;
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_0));
+        assert_eq!(batch.entries().items(), &build_entries(entries_0));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_1));
+        assert_eq!(batch.entries().items(), &build_entries(entries_1));
         assert!(duplicates.is_empty());
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_2));
+        assert_eq!(batch.entries().items(), &build_entries(entries_2));
 
         assert_eq!(
             duplicates,
@@ -1218,7 +1216,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_3));
+        assert_eq!(batch.entries().items(), &build_entries(entries_3));
 
         assert_eq!(
             duplicates,
@@ -1231,7 +1229,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_4));
+        assert_eq!(batch.entries().items(), &build_entries(entries_4));
 
         assert_eq!(
             duplicates,
@@ -1241,7 +1239,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_5));
+        assert_eq!(batch.entries().items(), &build_entries(entries_5));
 
         assert_eq!(
             duplicates,
@@ -1251,7 +1249,7 @@ mod tests {
         );
 
         let (batch, duplicates) = deduplicator.pull().await;
-        assert_eq!(batch.entries.items(), &build_entries(entries_6));
+        assert_eq!(batch.entries().items(), &build_entries(entries_6));
         assert!(duplicates.is_empty());
     }
 

@@ -9,7 +9,7 @@ use zebra::vector::Vector;
 
 #[derive(Clone)]
 pub(crate) struct MerkleBatch {
-    pub entries: Vector<Option<Entry>, PACKING>,
+    entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
@@ -212,6 +212,18 @@ impl MerkleBatch {
     pub fn root(&self) -> Hash {
         self.entries.root()
     }
+
+    pub fn entries(&self) -> &Vector<Option<Entry>, PACKING> {
+        &self.entries
+    }
+
+    pub fn entries_mut(&mut self) -> &mut Vector<Option<Entry>, PACKING> {
+        &mut self.entries
+    }
+
+    pub fn unwrap(self) -> Vec<Option<Entry>> {
+        Vec::from(self.entries)
+    }
 }
 
 #[cfg(test)]
@@ -219,6 +231,10 @@ mod tests {
     use super::*;
 
     impl MerkleBatch {
+        pub(crate) fn from_entries(entries: Vector<Option<Entry>, PACKING>) -> Self {
+            MerkleBatch { entries }
+        }
+
         pub(crate) fn expanded_batch_entries(
             broadcast_batch: BroadcastBatch,
         ) -> Vector<Option<Entry>, PACKING> {

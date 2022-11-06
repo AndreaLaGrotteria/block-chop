@@ -183,7 +183,7 @@ impl Server {
         // Stash statistics for later logging
 
         #[cfg(feature = "benchmark")]
-        let unamended_root = batch.entries.root();
+        let unamended_root = batch.root();
 
         // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
         // `Ignore` and `Nudge` elements of `duplicates` for later removal
@@ -194,7 +194,7 @@ impl Server {
             // Locate `duplicate` within `batch`
 
             let index = batch
-                .entries
+                .entries()
                 .items()
                 .binary_search_by(|entry| match entry {
                     // Before processing, all elements of `batch.entries` are `Some`.
@@ -212,14 +212,14 @@ impl Server {
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
-                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    let mut entry = batch.entries().items()[index].clone().unwrap();
                     entry.sequence = *sequence;
-                    batch.entries.set(index, Some(entry)).unwrap();
+                    batch.entries_mut().set(index, Some(entry)).unwrap();
 
                     to_omit.push(index);
                 }
                 Duplicate::Drop { .. } => {
-                    batch.entries.set(index, None).unwrap();
+                    batch.entries_mut().set(index, None).unwrap();
                 }
             }
         }
@@ -228,7 +228,7 @@ impl Server {
 
         // Extract `batch`'s entries, remove all duplicates in `to_omit`
 
-        let mut entries = Vec::from(batch.entries);
+        let mut entries = batch.unwrap();
 
         for ignore in to_omit {
             entries[ignore] = None;

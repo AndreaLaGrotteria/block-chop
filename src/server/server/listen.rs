@@ -427,13 +427,13 @@ mod tests {
             match amendment {
                 Amendment::Nudge { id, sequence } => {
                     let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
-                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    let mut entry = batch.entries().items()[index].clone().unwrap();
                     entry.sequence = *sequence;
-                    batch.entries.set(index, Some(entry)).unwrap();
+                    batch.entries_mut().set(index, Some(entry)).unwrap();
                 }
                 Amendment::Drop { id } => {
                     let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
-                    batch.entries.set(index, None).unwrap();
+                    batch.entries_mut().set(index, None).unwrap();
                 }
             }
         }
