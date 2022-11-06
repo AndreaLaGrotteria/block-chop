@@ -83,8 +83,10 @@ impl Server {
                         // available to other servers. Otherwise, retrieve the appropriate batch.
 
                         match expected_batch {
-                            Some((raw_batch, batch)) if batch.root() == root =>
-                                totality_manager.hit(raw_batch, batch).await,
+                            // `expected_batch` was never edited since compression:
+                            // its `root()` is guaranteed to be `Some`
+                            Some(batch) if batch.root().unwrap() == root =>
+                                totality_manager.hit(todo!(), todo!()).await,
                             _ => {
                                 warn!("Batch {:#?} missing from `TotalityManager`.", root);
                                 totality_manager.miss(root).await

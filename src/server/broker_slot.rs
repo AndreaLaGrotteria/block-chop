@@ -1,4 +1,4 @@
-use crate::{broadcast::DeliveryShard, server::MerkleBatch};
+use crate::{broadcast::DeliveryShard, server::CompressedBatch};
 use std::sync::Arc;
 use tokio::sync::watch::{self, Sender as WatchSender};
 
@@ -6,7 +6,7 @@ type DeliveryShardInlet = WatchSender<Option<(u64, DeliveryShard)>>;
 
 pub(in crate::server) struct BrokerSlot {
     pub next_sequence: u64,
-    pub expected_batch: Option<(Vec<u8>, MerkleBatch)>,
+    pub expected_batch: Option<CompressedBatch>,
     pub last_delivery_shard: Arc<DeliveryShardInlet>,
 }
 

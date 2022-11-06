@@ -176,21 +176,23 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionCompleted { root });
 
-        // Reject request if `batch.root()` does not match `root`. In case of
+        // Reject request if `merkle_batch.root()` does not match `root`. In case of
         // root mismatch, either the broker is Byzantine, or some miscommunication
         // happened while `send_raw_bytes()`ing `raw_batch` (e.g., malicious
         // routing node). In either case, a witness cannot be produced:
         //  - On `root`, as the broker never provided a batch whose root is `root`;
-        //  - On `batch.root()`, as the broker never authenticated its intention
-        //    to submit a batch with root `batch.root()`.
+        //  - On `merkle_batch.root()`, as the broker never authenticated its intention
+        //    to submit a batch with root `merkle_batch.root()`.
         // Remark: `batch_raw` is sent unauthenticated to save hashing (computing
-        // `batch_raw`'s Merkle tree is sufficient to authenticate `batch`).
+        // `batch_raw`'s Merkle tree is sufficient to authenticate `merkle_batch`).
 
         if root != merkle_batch.root() {
             return ServeError::RootMismatch.fail().spot(here!());
         }
 
-        // Store `raw_batch` and `batch`, retrieve a copy of the delivery shard outlet
+        // Compress and store `merkle_batch`, retrieve a copy of the delivery shard outlet
+
+        let compressed_batch = merkle_batch.into();
 
         let mut last_delivery_shard;
 
@@ -201,10 +203,12 @@ impl Server {
 
             if sequence == broker_slot.next_sequence {
                 if broker_slot.expected_batch.is_none() {
-                    broker_slot.expected_batch = Some((raw_batch, merkle_batch));
+                    broker_slot.expected_batch = Some(compressed_batch);
                     true
                 } else {
-                    broker_slot.expected_batch.as_ref().unwrap().1.root() == root
+                    // `broker_slot`'s `CompressedBatch` was never edited since
+                    // compression: its `root()` is guaranteed to be `Some`
+                    broker_slot.expected_batch.as_ref().unwrap().root().unwrap() == root
                 }
             } else {
                 false
