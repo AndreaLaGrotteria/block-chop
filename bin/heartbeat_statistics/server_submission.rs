@@ -4,17 +4,17 @@ use talk::crypto::primitives::hash::Hash;
 
 #[allow(dead_code)]
 pub(crate) struct ServerSubmission {
-    root: Hash,
-    batch_announced: SystemTime,
-    batch_received: Option<SystemTime>,
-    batch_deserialized: Option<SystemTime>,
-    batch_expansion_started: Option<SystemTime>,
-    batch_expansion_completed: Option<SystemTime>,
-    batch_witnessed: Option<SystemTime>,
-    batch_submitted: Option<SystemTime>,
-    batch_ordered: Option<SystemTime>,
-    batch_delivered: Option<SystemTime>,
-    batch_served: Option<SystemTime>,
+    pub root: Hash,
+    pub batch_announced: SystemTime,
+    pub batch_received: Option<SystemTime>,
+    pub batch_deserialized: Option<SystemTime>,
+    pub batch_expansion_started: Option<SystemTime>,
+    pub batch_expansion_completed: Option<SystemTime>,
+    pub batch_witnessed: Option<SystemTime>,
+    pub batch_submitted: Option<SystemTime>,
+    pub batch_ordered: Option<SystemTime>,
+    pub batch_delivered: Option<SystemTime>,
+    pub batch_served: Option<SystemTime>,
 }
 
 impl ServerSubmission {
