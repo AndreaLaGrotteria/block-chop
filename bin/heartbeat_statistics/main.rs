@@ -1,6 +1,7 @@
 mod broker_submission;
 mod modes;
 mod observable;
+mod server_submission;
 mod utils;
 
 use broker_submission::BrokerSubmission;
