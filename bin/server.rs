@@ -1,5 +1,5 @@
 use chop_chop::{
-    heartbeat, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
+    heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
 };
 use futures::stream::StreamExt;
 use log::info;
@@ -46,6 +46,7 @@ async fn main() {
         Underlying Total Order Broadcast (choose one):
           --loopback use `LoopBack` order (warning: does not actually guarantee Total Order!)
           --hotstuff (string) address to `HotStuff`'s endpoint
+          --bftsmart (string) address to `BftSmart`'s endpoint
 
         Heartbeat:
           --heartbeat-path (string) path to save `heartbeat` data
@@ -63,8 +64,11 @@ async fn main() {
 
     let loopback = args.get_bool("loopback");
     let hotstuff = args.get_string_result("hotstuff").ok();
+    let bftsmart = args.get_string_result("bftsmart").ok();
 
-    let orders_selected = if loopback { 1 } else { 0 } + if hotstuff.is_some() { 1 } else { 0 };
+    let orders_selected = if loopback { 1 } else { 0 }
+        + if hotstuff.is_some() { 1 } else { 0 }
+        + if bftsmart.is_some() { 1 } else { 0 };
 
     if orders_selected == 0 {
         println!("Please select the underlying Total Order Broadcast.");
@@ -115,8 +119,10 @@ async fn main() {
         Arc::new(LoopBack::new())
     } else if let Some(hotstuff) = hotstuff {
         Arc::new(HotStuff::connect(&hotstuff.parse().unwrap()).await.unwrap())
+    } else if let Some(bftsmart) = bftsmart {
+        Arc::new(BftSmart::connect(server_index as u32, &bftsmart.parse().unwrap()).await.unwrap())
     } else {
-        unreachable!();
+        unreachable!()
     };
 
     // Setup `ConnectDispatcher` and `ListenDispatcher`
