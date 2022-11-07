@@ -113,10 +113,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Witness
 
     let witness = Observable::from_samples(submissions.values().flatten(), |submission| {
-        utils::option_delta_f64(
-            submission.witness_shard_concluded,
-            submission.witness_acquired,
-        )
+        utils::option_delta_f64(submission.submission_started, submission.witness_acquired)
     });
 
     println!("Witness times: {witness:#?}");
