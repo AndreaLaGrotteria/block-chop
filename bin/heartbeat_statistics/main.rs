@@ -6,6 +6,7 @@ mod utils;
 
 use broker_submission::BrokerSubmission;
 use observable::Observable;
+use server_submission::ServerSubmission;
 
 fn main() {
     let args = lapp::parse_args(
