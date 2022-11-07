@@ -1,6 +1,8 @@
+mod broker_submission;
 mod modes;
 mod observable;
 
+use broker_submission::BrokerSubmission;
 use observable::Observable;
 
 fn main() {

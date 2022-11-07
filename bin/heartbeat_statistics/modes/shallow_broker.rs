@@ -1,4 +1,4 @@
-use crate::Observable;
+use crate::{BrokerSubmission, Observable};
 use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
 use rayon::slice::ParallelSliceMut;
 use std::{
@@ -8,24 +8,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use talk::crypto::{primitives::hash::Hash, Identity};
-
-#[allow(dead_code)]
-struct BrokerSubmission {
-    root: Hash,
-    server: Identity,
-    submission_started: SystemTime,
-    server_connected: Option<SystemTime>,
-    batch_sent: Option<SystemTime>,
-    witness_shard_requested: Option<SystemTime>,
-    witness_shard_received: Option<SystemTime>,
-    witness_shard_verified: Option<SystemTime>,
-    witness_shard_waived: Option<SystemTime>,
-    witness_shard_concluded: Option<SystemTime>,
-    witness_acquired: Option<SystemTime>,
-    witness_sent: Option<SystemTime>,
-    delivery_shard_received: Option<SystemTime>,
-    submission_completed: Option<SystemTime>,
-}
 
 pub fn shallow_broker(path: String, drop_front: f32) {
     // Load, deserialize and sort `Entry`ies by time
