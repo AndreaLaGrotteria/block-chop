@@ -6,9 +6,17 @@ pub(crate) struct Observable {
     pub applicability: f64,
     pub average: f64,
     pub standard_deviation: f64,
-    pub median: f64,
-    pub min: f64,
-    pub max: f64,
+    pub percentiles: Percentiles,
+}
+
+pub(crate) struct Percentiles {
+    pub zero: f64,
+    pub five: f64,
+    pub twenty_five: f64,
+    pub fifty: f64,
+    pub seventy_five: f64,
+    pub ninety_five: f64,
+    pub hundred: f64,
 }
 
 impl Observable {
@@ -36,20 +44,30 @@ impl Observable {
 
         let average = statistical::mean(values.as_slice());
         let standard_deviation = statistical::standard_deviation(values.as_slice(), None);
-        let median = statistical::median(values.as_slice());
 
         values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let min = *values.first().unwrap();
-        let max = *values.last().unwrap();
+        let zero = *values.first().unwrap();
+        let five = values[((values.len() as f64) * 0.05) as usize];
+        let twenty_five = values[((values.len() as f64) * 0.25) as usize];
+        let fifty = values[((values.len() as f64) * 0.5) as usize];
+        let seventy_five = values[((values.len() as f64) * 0.75) as usize];
+        let ninety_five = values[((values.len() as f64) * 0.95) as usize];
+        let hundred = *values.last().unwrap();
 
         Observable {
             applicability,
             average,
             standard_deviation,
-            median,
-            min,
-            max,
+            percentiles: Percentiles {
+                zero,
+                five,
+                twenty_five,
+                fifty,
+                seventy_five,
+                ninety_five,
+                hundred,
+            },
         }
     }
 }
@@ -81,24 +99,32 @@ impl Debug for Observable {
         if fmt.alternate() {
             write!(
                 fmt,
-                "{} ± {} (~{:.02}) [{} - {} - {}]",
+                "{} ± {} (~{:.02}) [0%: {}, 5%: {}, 25%: {}, 50%: {}, 75%: {}, 95%: {}, 100%: {}]",
                 format_time(self.average),
                 format_time(self.standard_deviation),
                 self.applicability,
-                format_time(self.min),
-                format_time(self.median),
-                format_time(self.max)
+                format_time(self.percentiles.zero),
+                format_time(self.percentiles.five),
+                format_time(self.percentiles.twenty_five),
+                format_time(self.percentiles.fifty),
+                format_time(self.percentiles.seventy_five),
+                format_time(self.percentiles.ninety_five),
+                format_time(self.percentiles.hundred),
             )
         } else {
             write!(
                 fmt,
-                "{} ± {} (~{:.02}) [{} - {} - {}]",
+                "{} ± {} (~{:.02}) [0%: {}, 5%: {}, 25%: {}, 50%: {}, 75%: {}, 95%: {}, 100%: {}]",
                 self.average,
                 self.standard_deviation,
                 self.applicability,
-                self.min,
-                self.median,
-                self.max,
+                self.percentiles.zero,
+                self.percentiles.five,
+                self.percentiles.twenty_five,
+                self.percentiles.fifty,
+                self.percentiles.seventy_five,
+                self.percentiles.ninety_five,
+                self.percentiles.hundred,
             )
         }
     }
