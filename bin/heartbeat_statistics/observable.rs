@@ -1,6 +1,6 @@
 use rayon::slice::ParallelSliceMut;
+use std::fmt::{self, Debug, Formatter};
 
-#[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct Observable {
     pub applicability: f64,
@@ -50,6 +50,56 @@ impl Observable {
             median,
             min,
             max,
+        }
+    }
+}
+
+impl Debug for Observable {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+        fn format_time(mut time: f64) -> String {
+            if time >= 1. {
+                return format!("{time:.02} s");
+            }
+
+            time *= 1000.;
+
+            if time >= 1. {
+                return format!("{time:.02} ms");
+            }
+
+            time *= 1000.;
+
+            if time >= 1. {
+                return format!("{time:.02} us");
+            }
+
+            time *= 1000.;
+
+            format!("{time:.02} ns")
+        }
+
+        if fmt.alternate() {
+            write!(
+                fmt,
+                "{} ± {} (~{:.02}) [{} - {} - {}]",
+                format_time(self.average),
+                format_time(self.standard_deviation),
+                self.applicability,
+                format_time(self.min),
+                format_time(self.median),
+                format_time(self.max)
+            )
+        } else {
+            write!(
+                fmt,
+                "{} ± {} (~{:.02}) [{} - {} - {}]",
+                self.average,
+                self.standard_deviation,
+                self.applicability,
+                self.min,
+                self.median,
+                self.max,
+            )
         }
     }
 }

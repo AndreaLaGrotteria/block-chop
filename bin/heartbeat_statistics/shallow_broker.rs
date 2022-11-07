@@ -175,40 +175,6 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         }
     }
 
-    fn format_time(mut time: f64) -> String {
-        if time >= 1. {
-            return format!("{time:.02} s");
-        }
-
-        time *= 1000.;
-
-        if time >= 1. {
-            return format!("{time:.02} ms");
-        }
-
-        time *= 1000.;
-
-        if time >= 1. {
-            return format!("{time:.02} us");
-        }
-
-        time *= 1000.;
-
-        format!("{time:.02} ns")
-    }
-
-    fn print_times(observable: Observable) {
-        println!("Applicability: {:.03}", observable.applicability);
-        println!("Average: {}", format_time(observable.average));
-        println!(
-            "Standard deviation: {}",
-            format_time(observable.standard_deviation)
-        );
-        println!("Median: {}", format_time(observable.median));
-        println!("Min: {}", format_time(observable.min));
-        println!("Max: {}", format_time(observable.max));
-    }
-
     // Completion
 
     let completion = Observable::from_samples(submissions.values().flatten(), |submission| {
@@ -218,10 +184,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         )
     });
 
-    println!("  --------------------- Completion times ---------------------  ");
-    print_times(completion);
-    println!("  ------------------------------------------------------------  ");
-    println!();
+    println!("Completion times: {completion:#?}");
 
     // Connection
 
@@ -232,10 +195,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         )
     });
 
-    println!("  --------------------- Connection times ---------------------  ");
-    print_times(connection);
-    println!("  ------------------------------------------------------------  ");
-    println!();
+    println!("Connection times: {connection:#?}");
 
     // Send
 
@@ -243,10 +203,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         conditional_delta(submission.server_connected, submission.batch_sent)
     });
 
-    println!("  --------------------- Send times ---------------------  ");
-    print_times(send);
-    println!("  ------------------------------------------------------  ");
-    println!();
+    println!("Send times: {send:#?}");
 
     // Witness shard
 
@@ -254,10 +211,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
     });
 
-    println!("  --------------------- Witness shard times (all) ---------------------  ");
-    print_times(witness_shard);
-    println!("  ---------------------------------------------------------------------  ");
-    println!();
+    println!("Witness shard times (all): {witness_shard:#?}");
 
     // Witness shard (verifier)
 
@@ -270,10 +224,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
             }
         });
 
-    println!("  --------------------- Witness shard times (verifiers) ---------------------  ");
-    print_times(witness_shard_verifiers);
-    println!("  ---------------------------------------------------------------------------  ");
-    println!();
+    println!("Witness shard times (verifiers): {witness_shard_verifiers:#?}");
 
     // Witness shard (verifier, per server)
 
@@ -287,10 +238,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
                 }
             });
 
-        println!("  --------------------- Witness shard times (verifiers, server {index}) ---------------------  ");
-        print_times(witness_shard_verifiers);
-        println!("  -------------------------------------------------------------------------------------  ");
-        println!();
+        println!("Witness shard times (verifiers, server {index}): {witness_shard_verifiers:#?}");
     }
 
     // Witness
@@ -302,10 +250,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         )
     });
 
-    println!("  --------------------- Witness times ---------------------  ");
-    print_times(witness);
-    println!("  ---------------------------------------------------------  ");
-    println!();
+    println!("Witness times: {witness:#?}");
 
     // Delivery shard
 
@@ -316,8 +261,5 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         )
     });
 
-    println!("  --------------------- Delivery shard times ---------------------  ");
-    print_times(delivery_shard);
-    println!("  ----------------------------------------------------------------  ");
-    println!();
+    println!("Delivery shard times: {delivery_shard:#?}");
 }
