@@ -2,7 +2,7 @@ use crate::Observable;
 use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
 use rayon::slice::ParallelSliceMut;
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs::File,
     io::Read,
     time::{Duration, SystemTime},
@@ -56,16 +56,15 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Initialize table of `BrokerSubmission`s
 
-    let mut submissions: HashMap<Identity, HashMap<Hash, Vec<BrokerSubmission>>> = HashMap::new();
+    let mut submissions: HashMap<(Hash, Identity), Vec<BrokerSubmission>> = HashMap::new();
 
     fn last_submission(
-        submissions: &mut HashMap<Identity, HashMap<Hash, Vec<BrokerSubmission>>>,
+        submissions: &mut HashMap<(Hash, Identity), Vec<BrokerSubmission>>,
         root: Hash,
         server: Identity,
     ) -> Option<&mut BrokerSubmission> {
         submissions
-            .get_mut(&server)
-            .and_then(|submissions| submissions.get_mut(&root))
+            .get_mut(&(root, server))
             .and_then(|submissions| submissions.last_mut())
     }
 
@@ -82,9 +81,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         match broker_event {
             BrokerEvent::SubmissionStarted { root, server } => {
                 submissions
-                    .entry(server)
-                    .or_default()
-                    .entry(root)
+                    .entry((root, server))
                     .or_default()
                     .push(BrokerSubmission {
                         root,
@@ -161,58 +158,15 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         }
     }
 
-    let mut membership = submissions.keys().copied().collect::<Vec<_>>();
-    membership.sort();
+    let membership = submissions
+        .keys()
+        .copied()
+        .map(|(_, server)| server)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     // Extract observables
-
-    fn observe<O>(
-        submissions: &HashMap<Identity, HashMap<Hash, Vec<BrokerSubmission>>>,
-        observable: O,
-    ) -> Observable
-    where
-        O: Fn(&BrokerSubmission) -> Option<f64>,
-    {
-        let submissions = submissions
-            .values()
-            .map(HashMap::values)
-            .flatten()
-            .map(|submissions| submissions.iter())
-            .flatten();
-
-        let mut non_applicable = 0;
-
-        let mut values = submissions
-            .map(observable)
-            .filter_map(|value| {
-                if value.is_none() {
-                    non_applicable += 1;
-                }
-
-                value
-            })
-            .collect::<Vec<_>>();
-
-        let applicability = (values.len() as f64) / ((values.len() + non_applicable) as f64);
-
-        let average = statistical::mean(values.as_slice());
-        let standard_deviation = statistical::standard_deviation(values.as_slice(), None);
-        let median = statistical::median(values.as_slice());
-
-        values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-
-        let min = *values.first().unwrap();
-        let max = *values.last().unwrap();
-
-        Observable {
-            applicability,
-            average,
-            standard_deviation,
-            median,
-            min,
-            max,
-        }
-    }
 
     fn conditional_delta(from: Option<SystemTime>, to: Option<SystemTime>) -> Option<f64> {
         match (from, to) {
@@ -257,7 +211,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Completion
 
-    let completion = observe(&submissions, |submission| {
+    let completion = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(
             Some(submission.submission_started),
             submission.submission_completed,
@@ -271,7 +225,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Connection
 
-    let connection = observe(&submissions, |submission| {
+    let connection = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(
             Some(submission.submission_started),
             submission.server_connected,
@@ -285,7 +239,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Send
 
-    let send = observe(&submissions, |submission| {
+    let send = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(submission.server_connected, submission.batch_sent)
     });
 
@@ -296,7 +250,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Witness shard
 
-    let witness_shard = observe(&submissions, |submission| {
+    let witness_shard = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
     });
 
@@ -307,13 +261,14 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Witness shard (verifier)
 
-    let witness_shard_verifiers = observe(&submissions, |submission| {
-        if submission.witness_shard_requested.is_some() {
-            conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
-        } else {
-            None
-        }
-    });
+    let witness_shard_verifiers =
+        Observable::from_samples(submissions.values().flatten(), |submission| {
+            if submission.witness_shard_requested.is_some() {
+                conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+            } else {
+                None
+            }
+        });
 
     println!("  --------------------- Witness shard times (verifiers) ---------------------  ");
     print_times(witness_shard_verifiers);
@@ -323,13 +278,14 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Witness shard (verifier, per server)
 
     for (index, server) in membership.iter().copied().enumerate() {
-        let witness_shard_verifiers = observe(&submissions, |submission| {
-            if submission.witness_shard_requested.is_some() && submission.server == server {
-                conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
-            } else {
-                None
-            }
-        });
+        let witness_shard_verifiers =
+            Observable::from_samples(submissions.values().flatten(), |submission| {
+                if submission.witness_shard_requested.is_some() && submission.server == server {
+                    conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+                } else {
+                    None
+                }
+            });
 
         println!("  --------------------- Witness shard times (verifiers, server {index}) ---------------------  ");
         print_times(witness_shard_verifiers);
@@ -339,7 +295,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Witness
 
-    let witness = observe(&submissions, |submission| {
+    let witness = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(
             submission.witness_shard_concluded,
             submission.witness_acquired,
@@ -353,7 +309,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
 
     // Delivery shard
 
-    let delivery_shard = observe(&submissions, |submission| {
+    let delivery_shard = Observable::from_samples(submissions.values().flatten(), |submission| {
         conditional_delta(
             submission.witness_acquired,
             submission.delivery_shard_received,
