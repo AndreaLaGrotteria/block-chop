@@ -131,6 +131,35 @@ pub enum BrokerEvent {
     SubmissionCompleted { root: Hash, server: Identity },
 }
 
+impl Event {
+    pub fn is_boot(&self) -> bool {
+        match self {
+            Event::Server(event) => event.is_boot(),
+            Event::Broker(event) => event.is_boot(),
+        }
+    }
+}
+
+impl ServerEvent {
+    pub fn is_boot(&self) -> bool {
+        if let ServerEvent::Booted { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl BrokerEvent {
+    pub fn is_boot(&self) -> bool {
+        if let BrokerEvent::Booted { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl From<ServerEvent> for Event {
     fn from(event: ServerEvent) -> Self {
         Event::Server(event)
