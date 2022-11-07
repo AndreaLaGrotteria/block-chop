@@ -13,14 +13,16 @@ pub fn shallow_broker(path: String, start: f32, duration: f32) {
     let mut entries = bincode::deserialize::<Vec<Entry>>(buffer.as_slice()).unwrap();
     entries.par_sort_unstable_by_key(|entry| entry.time);
 
+    // Drop boot event
+
+    let entries = entries
+        .into_iter()
+        .filter(|entry| entry.event.is_boot())
+        .collect::<Vec<_>>();
+
     // Crop entries from front
 
-    let heartbeat_start = entries
-        .iter()
-        .filter(|entry| !entry.event.is_boot())
-        .next()
-        .unwrap()
-        .time;
+    let heartbeat_start = entries.first().unwrap().time;
 
     let entries = entries
         .into_iter()
