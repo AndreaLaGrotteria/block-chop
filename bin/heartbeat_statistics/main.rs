@@ -1,5 +1,5 @@
+mod modes;
 mod observable;
-mod shallow_broker;
 
 use observable::Observable;
 
@@ -26,6 +26,6 @@ fn main() {
     }
 
     if let Some(path) = shallow_broker {
-        shallow_broker::shallow_broker(path, drop_front);
+        modes::shallow_broker(path, drop_front);
     }
 }
