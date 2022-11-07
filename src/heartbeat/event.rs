@@ -83,6 +83,11 @@ pub enum ServerEvent {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum BrokerEvent {
+    // Local `Broker` with identity `Identity` booted (this event should
+    // be logged only once per execution, and assumes that no two instances
+    // of `Broker` will be run on the same `chop_chop` process)
+    Booted { identity: Identity },
+
     // Local `Broker` begun executing `Broker::try_submit_batch`
     SubmissionStarted { root: Hash, server: Identity },
 

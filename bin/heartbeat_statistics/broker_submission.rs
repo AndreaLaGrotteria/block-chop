@@ -124,6 +124,7 @@ impl BrokerSubmission {
                         submission.submission_completed = Some(time);
                     }
                 }
+                _ => (),
             }
         }
 
