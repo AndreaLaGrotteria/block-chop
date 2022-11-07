@@ -1,12 +1,7 @@
-use crate::{BrokerSubmission, Observable};
+use crate::{utils, BrokerSubmission, Observable};
 use chop_chop::heartbeat::Entry;
 use rayon::slice::ParallelSliceMut;
-use std::{
-    collections::BTreeSet,
-    fs::File,
-    io::Read,
-    time::{Duration, SystemTime},
-};
+use std::{collections::BTreeSet, fs::File, io::Read, time::Duration};
 
 pub fn shallow_broker(path: String, drop_front: f32) {
     // Load, deserialize and sort `Entry`ies by time
@@ -49,20 +44,11 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         .into_iter()
         .collect::<Vec<_>>();
 
-    // Extract observables
-
-    fn conditional_delta(from: Option<SystemTime>, to: Option<SystemTime>) -> Option<f64> {
-        match (from, to) {
-            (Some(from), Some(to)) => Some(to.duration_since(from).unwrap().as_secs_f64()),
-            _ => None,
-        }
-    }
-
     // Completion
 
     let completion = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(
-            Some(submission.submission_started),
+        utils::option_delta_f64(
+            submission.submission_started,
             submission.submission_completed,
         )
     });
@@ -72,10 +58,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Connection
 
     let connection = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(
-            Some(submission.submission_started),
-            submission.server_connected,
-        )
+        utils::option_delta_f64(submission.submission_started, submission.server_connected)
     });
 
     println!("Connection times: {connection:#?}");
@@ -83,7 +66,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Send
 
     let send = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(submission.server_connected, submission.batch_sent)
+        utils::option_delta_f64(submission.server_connected, submission.batch_sent)
     });
 
     println!("Send times: {send:#?}");
@@ -91,7 +74,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Witness shard
 
     let witness_shard = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+        utils::option_delta_f64(submission.batch_sent, submission.witness_shard_concluded)
     });
 
     println!("Witness shard times (all): {witness_shard:#?}");
@@ -101,7 +84,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     let witness_shard_verifiers =
         Observable::from_samples(submissions.values().flatten(), |submission| {
             if submission.witness_shard_requested.is_some() {
-                conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+                utils::option_delta_f64(submission.batch_sent, submission.witness_shard_concluded)
             } else {
                 None
             }
@@ -115,7 +98,10 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         let witness_shard_verifiers =
             Observable::from_samples(submissions.values().flatten(), |submission| {
                 if submission.witness_shard_requested.is_some() && submission.server == server {
-                    conditional_delta(submission.batch_sent, submission.witness_shard_concluded)
+                    utils::option_delta_f64(
+                        submission.batch_sent,
+                        submission.witness_shard_concluded,
+                    )
                 } else {
                     None
                 }
@@ -127,7 +113,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Witness
 
     let witness = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(
+        utils::option_delta_f64(
             submission.witness_shard_concluded,
             submission.witness_acquired,
         )
@@ -138,7 +124,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     // Delivery shard
 
     let delivery_shard = Observable::from_samples(submissions.values().flatten(), |submission| {
-        conditional_delta(
+        utils::option_delta_f64(
             submission.witness_acquired,
             submission.delivery_shard_received,
         )
