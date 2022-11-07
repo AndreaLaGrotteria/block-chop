@@ -1,4 +1,5 @@
 use crate::{
+    heartbeat::{self, ServerEvent},
     order::Order,
     server::{Deduplicator, ServerSettings, TotalityManager, WitnessCache},
     system::{Directory, Membership},
@@ -41,6 +42,10 @@ impl Server {
         // Preprocess arguments
 
         let broker_listener = SessionListener::new(broker_listener);
+
+        // Stash `Identity` for later logging
+
+        let identity = keychain.keycard().identity();
 
         // Initialize components
 
@@ -108,6 +113,9 @@ impl Server {
         }
 
         // Assemble `Server`
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(ServerEvent::Booted { identity });
 
         Server {
             next_batch_outlet,

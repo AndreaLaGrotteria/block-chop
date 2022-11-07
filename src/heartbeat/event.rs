@@ -9,6 +9,13 @@ pub enum Event {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum ServerEvent {
+    // Local `Server` with identity `Identity` booted (this event should
+    // be logged only once per execution, and assumes that no two instances
+    // of `Server` will be run on the same `chop_chop` process)
+    Booted {
+        identity: Identity,
+    },
+
     // Local `Server` received `Batch`'s metadata (root, worker, ..)
     BatchAnnounced {
         root: Hash,
