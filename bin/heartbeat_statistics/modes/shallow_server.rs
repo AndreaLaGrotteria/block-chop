@@ -15,7 +15,12 @@ pub fn shallow_server(path: String, start: f32, duration: f32) {
 
     // Crop entries from front
 
-    let heartbeat_start = entries.first().unwrap().time;
+    let heartbeat_start = entries
+        .iter()
+        .filter(|entry| !entry.event.is_boot())
+        .next()
+        .unwrap()
+        .time;
 
     let entries = entries
         .into_iter()
