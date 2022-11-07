@@ -2,7 +2,7 @@ use crate::heartbeat::Event;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub time: SystemTime,
     pub event: Event,

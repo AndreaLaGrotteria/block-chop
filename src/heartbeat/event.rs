@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 use talk::crypto::{primitives::hash::Hash, Identity};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Event {
     Server(ServerEvent),
     Broker(BrokerEvent),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum ServerEvent {
     // Local `Server` received `Batch`'s metadata (root, worker, ..)
     BatchAnnounced {
@@ -74,7 +74,7 @@ pub enum ServerEvent {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum BrokerEvent {
     // Local `Broker` begun executing `Broker::try_submit_batch`
     SubmissionStarted { root: Hash, server: Identity },
