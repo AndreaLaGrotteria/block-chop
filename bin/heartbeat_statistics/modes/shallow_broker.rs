@@ -3,7 +3,7 @@ use chop_chop::heartbeat::Entry;
 use rayon::slice::ParallelSliceMut;
 use std::{collections::BTreeSet, fs::File, io::Read, time::Duration};
 
-pub fn shallow_broker(path: String, drop_front: f32) {
+pub fn shallow_broker(path: String, start: f32, duration: f32) {
     // Load, deserialize and sort `Entry`ies by time
 
     let mut file = File::open(path).unwrap();
@@ -20,8 +20,10 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     let entries = entries
         .into_iter()
         .filter_map(|entry| {
-            if entry.time.duration_since(heartbeat_start).unwrap()
-                >= Duration::from_secs_f64(drop_front as f64)
+            let time = entry.time.duration_since(heartbeat_start).unwrap();
+
+            if time >= Duration::from_secs_f64(start as f64)
+                && time <= Duration::from_secs_f64((start + duration) as f64)
             {
                 Some(entry)
             } else {
