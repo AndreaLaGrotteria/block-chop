@@ -1,4 +1,7 @@
+mod observable;
 mod shallow_broker;
+
+use observable::Observable;
 
 fn main() {
     let args = lapp::parse_args(

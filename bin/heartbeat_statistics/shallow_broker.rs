@@ -1,3 +1,4 @@
+use crate::Observable;
 use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
 use rayon::slice::ParallelSliceMut;
 use std::{
@@ -24,17 +25,6 @@ struct BrokerSubmission {
     witness_sent: Option<SystemTime>,
     delivery_shard_received: Option<SystemTime>,
     submission_completed: Option<SystemTime>,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-struct Observable {
-    applicability: f64,
-    average: f64,
-    standard_deviation: f64,
-    median: f64,
-    min: f64,
-    max: f64,
 }
 
 pub fn shallow_broker(path: String, drop_front: f32) {
