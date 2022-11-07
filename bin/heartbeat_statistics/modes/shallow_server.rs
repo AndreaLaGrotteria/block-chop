@@ -17,7 +17,7 @@ pub fn shallow_server(path: String, start: f32, duration: f32) {
 
     let entries = entries
         .into_iter()
-        .filter(|entry| entry.event.is_boot())
+        .filter(|entry| !entry.event.is_boot())
         .collect::<Vec<_>>();
 
     // Crop entries from front
