@@ -26,7 +26,7 @@ fn main() {
     let shallow_broker = args.get_string_result("shallow-broker").ok();
     let shallow_server = args.get_string_result("shallow-server").ok();
 
-    let start = args.get_float_result("duration").unwrap_or(0.);
+    let start = args.get_float_result("start").unwrap_or(0.);
     let duration = args.get_float_result("duration").unwrap_or(1e6);
 
     if [&shallow_broker, &shallow_server]
