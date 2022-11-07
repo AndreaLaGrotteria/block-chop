@@ -1,13 +1,12 @@
 use crate::{BrokerSubmission, Observable};
-use chop_chop::heartbeat::{BrokerEvent, Entry, Event};
+use chop_chop::heartbeat::Entry;
 use rayon::slice::ParallelSliceMut;
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     fs::File,
     io::Read,
     time::{Duration, SystemTime},
 };
-use talk::crypto::{primitives::hash::Hash, Identity};
 
 pub fn shallow_broker(path: String, drop_front: f32) {
     // Load, deserialize and sort `Entry`ies by time
@@ -36,109 +35,11 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         })
         .collect::<Vec<_>>();
 
-    // Initialize table of `BrokerSubmission`s
+    // Parse `BrokerSubmission`s
 
-    let mut submissions: HashMap<(Hash, Identity), Vec<BrokerSubmission>> = HashMap::new();
+    let submissions = BrokerSubmission::parse(entries.iter());
 
-    fn last_submission(
-        submissions: &mut HashMap<(Hash, Identity), Vec<BrokerSubmission>>,
-        root: Hash,
-        server: Identity,
-    ) -> Option<&mut BrokerSubmission> {
-        submissions
-            .get_mut(&(root, server))
-            .and_then(|submissions| submissions.last_mut())
-    }
-
-    // Loop through `entries` to fill `submissions`
-
-    for entry in entries {
-        let time = entry.time;
-
-        let broker_event = match entry.event {
-            Event::Broker(event) => event,
-            _ => unreachable!(),
-        };
-
-        match broker_event {
-            BrokerEvent::SubmissionStarted { root, server } => {
-                submissions
-                    .entry((root, server))
-                    .or_default()
-                    .push(BrokerSubmission {
-                        root,
-                        server,
-                        submission_started: time,
-                        server_connected: None,
-                        batch_sent: None,
-                        witness_shard_requested: None,
-                        witness_shard_received: None,
-                        witness_shard_verified: None,
-                        witness_shard_waived: None,
-                        witness_shard_concluded: None,
-                        witness_acquired: None,
-                        witness_sent: None,
-                        delivery_shard_received: None,
-                        submission_completed: None,
-                    });
-            }
-            BrokerEvent::ServerConnected { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.server_connected = Some(time);
-                }
-            }
-            BrokerEvent::BatchSent { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.batch_sent = Some(time);
-                }
-            }
-            BrokerEvent::WitnessShardRequested { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_shard_requested = Some(time);
-                }
-            }
-            BrokerEvent::WitnessShardReceived { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_shard_received = Some(time);
-                }
-            }
-            BrokerEvent::WitnessShardVerified { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_shard_verified = Some(time);
-                }
-            }
-            BrokerEvent::WitnessShardWaived { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_shard_waived = Some(time);
-                }
-            }
-            BrokerEvent::WitnessShardConcluded { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_shard_concluded = Some(time);
-                }
-            }
-            BrokerEvent::WitnessAcquired { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_acquired = Some(time);
-                }
-            }
-            BrokerEvent::WitnessSent { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.witness_sent = Some(time);
-                }
-            }
-            BrokerEvent::DeliveryShardReceived { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.delivery_shard_received = Some(time);
-                }
-            }
-            BrokerEvent::SubmissionCompleted { root, server } => {
-                if let Some(submission) = last_submission(&mut submissions, root, server) {
-                    submission.submission_completed = Some(time);
-                }
-            }
-        }
-    }
+    // Derive membership
 
     let membership = submissions
         .keys()
