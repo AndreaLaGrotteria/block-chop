@@ -70,6 +70,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     });
 
     println!("Send times: {send:#?}");
+    println!();
 
     // Witness shard
 
@@ -110,6 +111,8 @@ pub fn shallow_broker(path: String, drop_front: f32) {
         println!("Witness shard times (verifiers, server {index}): {witness_shard_verifiers:#?}");
     }
 
+    println!();
+
     // Witness
 
     let witness = Observable::from_samples(submissions.values().flatten(), |submission| {
@@ -117,6 +120,7 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     });
 
     println!("Witness times: {witness:#?}");
+    println!();
 
     // Delivery shard
 
@@ -128,4 +132,20 @@ pub fn shallow_broker(path: String, drop_front: f32) {
     });
 
     println!("Delivery shard times: {delivery_shard:#?}");
+
+    for (index, server) in membership.iter().copied().enumerate() {
+        let delivery_shard =
+            Observable::from_samples(submissions.values().flatten(), |submission| {
+                if submission.server == server {
+                    utils::option_delta_f64(
+                        submission.witness_acquired,
+                        submission.delivery_shard_received,
+                    )
+                } else {
+                    None
+                }
+            });
+
+        println!("Delivery shard times (server {index}): {delivery_shard:#?}");
+    }
 }
