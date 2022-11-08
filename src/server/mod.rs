@@ -19,7 +19,7 @@ use totality_manager_settings::TotalityManagerSettings;
 use witness_cache::WitnessCache;
 use witness_cache_settings::WitnessCacheSettings;
 
-pub(crate) use batches::{CompressedBatch, MerkleBatch, PlainBatch};
+pub(crate) use batches::{CompressedBatch, InflatedBatch, MerkleBatch, PlainBatch};
 
 pub use server::Server;
 pub use server_settings::ServerSettings;

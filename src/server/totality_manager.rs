@@ -1,5 +1,5 @@
 use crate::{
-    server::{CompressedBatch, MerkleBatch, PlainBatch, TotalityManagerSettings},
+    server::{CompressedBatch, InflatedBatch, MerkleBatch, PlainBatch, TotalityManagerSettings},
     system::Membership,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -27,24 +27,34 @@ use tokio::{
 type CallInlet = MpscSender<Call>;
 type CallOutlet = MpscReceiver<Call>;
 
-type BatchInlet = MpscSender<Arc<CompressedBatch>>;
-type BatchOutlet = MpscReceiver<Arc<CompressedBatch>>;
+type InflatedBatchInlet = MpscSender<InflatedBatch>;
+type InflatedBatchOutlet = MpscReceiver<InflatedBatch>;
 
-type EntryInlet = MpscSender<(u64, Arc<CompressedBatch>)>;
+type EntryInlet = MpscSender<(u64, InflatedBatch)>;
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
-    pull_outlet: BatchOutlet,
+    pull_outlet: InflatedBatchOutlet,
     _fuse: Fuse,
 }
 
-struct Queue {
+struct DeliveryQueue {
+    offset: u64,
+    entries: VecDeque<Option<DeliveryItem>>,
+}
+
+enum DeliveryItem {
+    Compressed(Arc<CompressedBatch>),
+    Inflated(InflatedBatch),
+}
+
+struct TotalityQueue {
     offset: u64,
     entries: VecDeque<Option<Arc<CompressedBatch>>>,
 }
 
 enum Call {
-    Hit(Arc<CompressedBatch>),
+    Hit(CompressedBatch),
     Miss(Hash),
 }
 
@@ -109,7 +119,7 @@ impl TotalityManager {
 
         // Initialize common state
 
-        let totality_queue = Queue {
+        let totality_queue = TotalityQueue {
             offset: 0,
             entries: VecDeque::new(),
         };
@@ -160,7 +170,6 @@ impl TotalityManager {
     }
 
     pub async fn hit(&self, batch: CompressedBatch) {
-        let batch = Arc::new(batch);
         let _ = self.run_call_inlet.send(Call::Hit(batch)).await;
     }
 
@@ -168,24 +177,22 @@ impl TotalityManager {
         let _ = self.run_call_inlet.send(Call::Miss(root)).await;
     }
 
-    pub async fn pull(&mut self) -> PlainBatch {
+    pub async fn pull(&mut self) -> InflatedBatch {
         // The `Fuse` to `TotalityManager::run` is owned by
         // `self`, so `pull_inlet` cannot have been dropped
-        let compressed_batch = self.pull_outlet.recv().await.unwrap();
-
-        PlainBatch::from_compressed(&compressed_batch).unwrap()
+        self.pull_outlet.recv().await.unwrap()
     }
 
     async fn run(
         membership: Arc<Membership>,
-        totality_queue: Arc<Mutex<Queue>>,
+        totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
         connector: Arc<SessionConnector>,
         mut run_call_outlet: CallOutlet,
-        pull_inlet: BatchInlet,
+        pull_inlet: InflatedBatchInlet,
         settings: TotalityManagerSettings,
     ) {
-        let mut delivery_queue = Queue {
+        let mut delivery_queue = DeliveryQueue {
             offset: 0,
             entries: VecDeque::new(),
         };
@@ -208,16 +215,18 @@ impl TotalityManager {
                     };
 
                     match call {
-                        Call::Hit(batch) => {
-                            // Make `batch` available to other servers and stage it for delivery
+                        Call::Hit(compressed_batch) => {
+                            // Inflate and stage `compressed_batch` for delivery
 
-                            delivery_queue.entries.push_back(Some(batch.clone()));
+                            let compressed_batch = Arc::new(compressed_batch);
+
+                            delivery_queue.entries.push_back(Some(DeliveryItem::Compressed(compressed_batch.clone())));
 
                             totality_queue
                                 .lock()
                                 .unwrap()
                                 .entries
-                                .push_back(Some(batch));
+                                .push_back(Some(compressed_batch));
                         }
 
                         Call::Miss(root) => {
@@ -246,12 +255,14 @@ impl TotalityManager {
                 }
 
                 entry = run_entry_outlet.recv() => {
-                    let (height, batch) = if let Some(entry) = entry {
+                    let (height, inflated_batch) = if let Some(entry) = entry {
                         entry
                     } else {
                         // `TotalityManager` has dropped, shutdown
                         return;
                     };
+
+                    let delivery_item = DeliveryItem::Inflated(inflated_batch);
 
                     // Only `Some` elements are `pop_front()`ed from `delivery_queue`,
                     // and `None` elements in `delivery_queue` are set to `Some` only
@@ -260,7 +271,7 @@ impl TotalityManager {
                     // `delivery_queue`, and no entry in `run_entry_outlet` is duplicated.
                     // As a result, the `height`-th element of `delivery_queue` is
                     // guaranteed to still be available (and `None`).
-                    *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(batch);
+                    *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(delivery_item);
                 }
 
                 _ = time::sleep(settings.wake_interval) => {}
@@ -270,10 +281,18 @@ impl TotalityManager {
             // (block on the first `None` element to preserve batch ordering)
 
             while let Some(Some(_)) = delivery_queue.entries.front() {
-                let batch = delivery_queue.entries.pop_front().unwrap().unwrap();
+                let delivery_item = delivery_queue.entries.pop_front().unwrap().unwrap();
                 delivery_queue.offset += 1;
 
-                let _ = pull_inlet.send(batch).await;
+                let inflated_batch = match delivery_item {
+                    DeliveryItem::Compressed(compressed_batch) => {
+                        let plain_batch = PlainBatch::from_compressed(&compressed_batch).unwrap();
+                        InflatedBatch::from_plain(plain_batch).unwrap()
+                    }
+                    DeliveryItem::Inflated(inflated_batch) => inflated_batch,
+                };
+
+                let _ = pull_inlet.send(inflated_batch).await;
             }
 
             // Every `settings.collect_interval`, garbage collect `totality_queue`
@@ -376,7 +395,7 @@ impl TotalityManager {
         root: Hash,
         server: Identity,
         connector: Arc<SessionConnector>,
-    ) -> Result<Arc<CompressedBatch>, Top<QueryError>> {
+    ) -> Result<InflatedBatch, Top<QueryError>> {
         let mut session = connector
             .connect(server)
             .await
@@ -420,10 +439,7 @@ impl TotalityManager {
         session.end();
 
         if merkle_batch.root() == root {
-            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
-            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
-
-            Ok(Arc::new(compressed_batch))
+            Ok(InflatedBatch::from_merkle(merkle_batch))
         } else {
             QueryError::RootMismatch.fail()
         }
@@ -461,7 +477,7 @@ impl TotalityManager {
     }
 
     async fn listen(
-        totality_queue: Arc<Mutex<Queue>>,
+        totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
         mut listener: SessionListener,
     ) {
@@ -482,7 +498,7 @@ impl TotalityManager {
     async fn serve(
         server: Identity,
         mut session: Session,
-        totality_queue: Arc<Mutex<Queue>>,
+        totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
     ) -> Result<(), Top<ServeError>> {
         let request = session
@@ -584,7 +600,7 @@ mod tests {
 
             let batch = totality_manager.pull().await;
 
-            assert_eq!(batch.root(), Some(root));
+            assert_eq!(batch.root(), root);
         }
     }
 
@@ -630,8 +646,8 @@ mod tests {
             let hitter_batch = hitter.pull().await;
             let misser_batch = misser.pull().await;
 
-            assert_eq!(hitter_batch.root(), Some(root));
-            assert_eq!(misser_batch.root(), Some(root));
+            assert_eq!(hitter_batch.root(), root);
+            assert_eq!(misser_batch.root(), root);
         }
     }
 
@@ -685,7 +701,7 @@ mod tests {
 
             for totality_manager in totality_managers.iter_mut() {
                 let batch = totality_manager.pull().await;
-                assert_eq!(batch.root(), Some(root));
+                assert_eq!(batch.root(), root);
             }
         }
     }
