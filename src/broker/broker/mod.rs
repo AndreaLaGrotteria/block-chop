@@ -1,5 +1,6 @@
 use crate::{
     broker::{BrokerSettings, Response},
+    heartbeat::{self, BrokerEvent},
     system::Membership,
     Directory,
 };
@@ -90,6 +91,11 @@ impl Broker {
             connector,
             settings.clone(),
         ));
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::Booted {
+            identity: broker_identity,
+        });
 
         Ok(Broker {
             sender,

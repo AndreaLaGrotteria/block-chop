@@ -39,7 +39,7 @@ required-features = [ "benchmark" ]
 
 [[bin]]
 name = "heartbeat_statistics"
-path = "bin/heartbeat_statistics.rs"
+path = "bin/heartbeat_statistics/main.rs"
 required-features = [ "benchmark" ]
 
 [features]

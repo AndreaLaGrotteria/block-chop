@@ -2,7 +2,7 @@ use crate::{
     broadcast::{Entry, Message},
     server::{DeduplicatorSettings, Duplicate, MerkleBatch},
 };
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{future::pending, stream::FuturesOrdered, StreamExt};
 use log::warn;
 use oh_snap::Snap;
 use std::{
@@ -72,9 +72,13 @@ impl Deduplicator {
     }
 
     pub async fn pull(&mut self) -> (MerkleBatch, Vec<Duplicate>) {
-        // `self` holds the `Fuse` to all tasks,
-        // so this is guaranteed to succeed.
-        self.pull_outlet.recv().await.unwrap()
+        if let Some(deduplicated_batch) = self.pull_outlet.recv().await {
+            deduplicated_batch
+        } else {
+            // `Server` has dropped, wait indefinitely for the call
+            // to `pull` to be cancelled by some `Fuse`
+            pending().await
+        }
     }
 
     async fn run(

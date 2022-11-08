@@ -1,4 +1,8 @@
-use crate::{broker::LoadBrokerSettings, system::Membership};
+use crate::{
+    broker::LoadBrokerSettings,
+    heartbeat::{self, BrokerEvent},
+    system::Membership,
+};
 use std::sync::Arc;
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
@@ -36,6 +40,11 @@ impl LoadBroker {
             batches.into_iter().collect(),
             settings.clone(),
         ));
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::Booted {
+            identity: broker_identity,
+        });
 
         LoadBroker { _fuse: fuse }
     }
