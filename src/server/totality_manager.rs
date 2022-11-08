@@ -1,5 +1,5 @@
 use crate::{
-    server::{MerkleBatch, TotalityManagerSettings},
+    server::{CompressedBatch, MerkleBatch, PlainBatch, TotalityManagerSettings},
     system::Membership,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -27,10 +27,10 @@ use tokio::{
 type CallInlet = MpscSender<Call>;
 type CallOutlet = MpscReceiver<Call>;
 
-type BatchInlet = MpscSender<MerkleBatch>;
-type BatchOutlet = MpscReceiver<MerkleBatch>;
+type BatchInlet = MpscSender<Arc<CompressedBatch>>;
+type BatchOutlet = MpscReceiver<Arc<CompressedBatch>>;
 
-type EntryInlet = MpscSender<(u64, MerkleBatch)>;
+type EntryInlet = MpscSender<(u64, Arc<CompressedBatch>)>;
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
@@ -38,18 +38,13 @@ pub(in crate::server) struct TotalityManager {
     _fuse: Fuse,
 }
 
-struct DeliveryQueue {
+struct Queue {
     offset: u64,
-    entries: VecDeque<Option<MerkleBatch>>,
-}
-
-struct TotalityQueue {
-    offset: u64,
-    entries: VecDeque<Option<Arc<Vec<u8>>>>,
+    entries: VecDeque<Option<Arc<CompressedBatch>>>,
 }
 
 enum Call {
-    Hit(Vec<u8>, MerkleBatch),
+    Hit(Arc<CompressedBatch>),
     Miss(Hash),
 }
 
@@ -70,8 +65,10 @@ enum QueryError {
     #[doom(description("Failed to deserialize: {}", source))]
     #[doom(wrap(deserialize_failed))]
     DeserializeFailed { source: Box<bincode::ErrorKind> },
-    #[doom(description("Failed to expand batch"))]
-    ExpandFailed,
+    #[doom(description("Failed to decompress `CompressedBatch` into `PlainBatch`"))]
+    DecompressFailed,
+    #[doom(description("Failed to expand `PlainBatch` into `MerkleBatch`"))]
+    MerkleFailed,
     #[doom(description("Root mismatch"))]
     RootMismatch,
 }
@@ -112,7 +109,7 @@ impl TotalityManager {
 
         // Initialize common state
 
-        let totality_queue = TotalityQueue {
+        let totality_queue = Queue {
             offset: 0,
             entries: VecDeque::new(),
         };
@@ -162,30 +159,33 @@ impl TotalityManager {
         }
     }
 
-    pub async fn hit(&self, raw_batch: Vec<u8>, batch: MerkleBatch) {
-        let _ = self.run_call_inlet.send(Call::Hit(raw_batch, batch)).await;
+    pub async fn hit(&self, batch: CompressedBatch) {
+        let batch = Arc::new(batch);
+        let _ = self.run_call_inlet.send(Call::Hit(batch)).await;
     }
 
     pub async fn miss(&self, root: Hash) {
         let _ = self.run_call_inlet.send(Call::Miss(root)).await;
     }
 
-    pub async fn pull(&mut self) -> MerkleBatch {
+    pub async fn pull(&mut self) -> PlainBatch {
         // The `Fuse` to `TotalityManager::run` is owned by
         // `self`, so `pull_inlet` cannot have been dropped
-        self.pull_outlet.recv().await.unwrap()
+        let compressed_batch = self.pull_outlet.recv().await.unwrap();
+
+        PlainBatch::from_compressed(&compressed_batch).unwrap()
     }
 
     async fn run(
         membership: Arc<Membership>,
-        totality_queue: Arc<Mutex<TotalityQueue>>,
+        totality_queue: Arc<Mutex<Queue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
         connector: Arc<SessionConnector>,
         mut run_call_outlet: CallOutlet,
         pull_inlet: BatchInlet,
         settings: TotalityManagerSettings,
     ) {
-        let mut delivery_queue = DeliveryQueue {
+        let mut delivery_queue = Queue {
             offset: 0,
             entries: VecDeque::new(),
         };
@@ -208,17 +208,16 @@ impl TotalityManager {
                     };
 
                     match call {
-                        Call::Hit(raw_batch, batch) => {
-                            // Make `raw_batch` available to other servers,
-                            // stage `batch` for delivery
+                        Call::Hit(batch) => {
+                            // Make `batch` available to other servers and stage it for delivery
 
-                            delivery_queue.entries.push_back(Some(batch));
+                            delivery_queue.entries.push_back(Some(batch.clone()));
 
                             totality_queue
                                 .lock()
                                 .unwrap()
                                 .entries
-                                .push_back(Some(Arc::new(raw_batch)));
+                                .push_back(Some(batch));
                         }
 
                         Call::Miss(root) => {
@@ -377,7 +376,7 @@ impl TotalityManager {
         root: Hash,
         server: Identity,
         connector: Arc<SessionConnector>,
-    ) -> Result<MerkleBatch, Top<QueryError>> {
+    ) -> Result<Arc<CompressedBatch>, Top<QueryError>> {
         let mut session = connector
             .connect(server)
             .await
@@ -404,21 +403,27 @@ impl TotalityManager {
             .pot(QueryError::ConnectionError, here!())?;
 
         // Expand using a blocking task to avoid clogging the event loop
-        let batch = task::spawn_blocking(move || -> Result<MerkleBatch, Top<QueryError>> {
-            let batch = bincode::deserialize(batch.as_slice())
+        let merkle_batch = task::spawn_blocking(move || -> Result<MerkleBatch, Top<QueryError>> {
+            let compressed_batch = bincode::deserialize::<CompressedBatch>(batch.as_slice())
                 .map_err(QueryError::deserialize_failed)
                 .map_err(Doom::into_top)
                 .spot(here!())?;
 
-            MerkleBatch::expand_unverified(batch).pot(QueryError::ExpandFailed, here!())
+            let plain_batch = PlainBatch::from_compressed(&compressed_batch)
+                .pot(QueryError::DecompressFailed, here!())?;
+
+            MerkleBatch::from_plain(&plain_batch).pot(QueryError::MerkleFailed, here!())
         })
         .await
         .unwrap()?;
 
         session.end();
 
-        if batch.root() == root {
-            Ok(batch)
+        if merkle_batch.root() == root {
+            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+
+            Ok(Arc::new(compressed_batch))
         } else {
             QueryError::RootMismatch.fail()
         }
@@ -456,7 +461,7 @@ impl TotalityManager {
     }
 
     async fn listen(
-        totality_queue: Arc<Mutex<TotalityQueue>>,
+        totality_queue: Arc<Mutex<Queue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
         mut listener: SessionListener,
     ) {
@@ -477,7 +482,7 @@ impl TotalityManager {
     async fn serve(
         server: Identity,
         mut session: Session,
-        totality_queue: Arc<Mutex<TotalityQueue>>,
+        totality_queue: Arc<Mutex<Queue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
     ) -> Result<(), Top<ServeError>> {
         let request = session
@@ -506,13 +511,15 @@ impl TotalityManager {
                 };
 
                 if let Some(batch) = batch {
+                    let raw_batch = bincode::serialize::<CompressedBatch>(batch.as_ref()).unwrap();
+
                     session
                         .send_plain(&true)
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
 
                     session
-                        .send_raw_bytes(batch.as_slice())
+                        .send_raw_bytes(raw_batch.as_slice())
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
                 } else {
@@ -567,16 +574,17 @@ mod tests {
 
         for _ in 0..128 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
-
             let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+
             let root = merkle_batch.root();
 
-            totality_manager.hit(raw_batch, merkle_batch).await;
+            totality_manager.hit(compressed_batch).await;
 
             let batch = totality_manager.pull().await;
 
-            assert_eq!(batch.root(), root);
+            assert_eq!(batch.root(), Some(root));
         }
     }
 
@@ -610,19 +618,20 @@ mod tests {
 
         for _ in 0..128 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
-
             let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+
             let root = merkle_batch.root();
 
-            hitter.hit(raw_batch, merkle_batch).await;
+            hitter.hit(compressed_batch).await;
             misser.miss(root).await;
 
             let hitter_batch = hitter.pull().await;
             let misser_batch = misser.pull().await;
 
-            assert_eq!(hitter_batch.root(), root);
-            assert_eq!(misser_batch.root(), root);
+            assert_eq!(hitter_batch.root(), Some(root));
+            assert_eq!(misser_batch.root(), Some(root));
         }
     }
 
@@ -656,9 +665,10 @@ mod tests {
 
         for _ in 0..1024 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
-
             let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+
             let root = merkle_batch.root();
 
             totality_managers.shuffle(&mut rand::thread_rng());
@@ -666,7 +676,7 @@ mod tests {
             let hitters = rand::random::<usize>() % 16 + 1;
 
             for hitter in &totality_managers[0..hitters] {
-                hitter.hit(raw_batch.clone(), merkle_batch.clone()).await;
+                hitter.hit(compressed_batch.clone()).await;
             }
 
             for misser in &totality_managers[hitters..] {
@@ -675,7 +685,7 @@ mod tests {
 
             for totality_manager in totality_managers.iter_mut() {
                 let batch = totality_manager.pull().await;
-                assert_eq!(batch.root(), root);
+                assert_eq!(batch.root(), Some(root));
             }
         }
     }

@@ -86,7 +86,7 @@ impl Server {
                             // `expected_batch` was never edited since compression:
                             // its `root()` is guaranteed to be `Some`
                             Some(batch) if batch.root().unwrap() == root =>
-                                totality_manager.hit(todo!(), todo!()).await,
+                                totality_manager.hit(batch).await,
                             _ => {
                                 warn!("Batch {:#?} missing from `TotalityManager`.", root);
                                 totality_manager.miss(root).await
@@ -100,7 +100,7 @@ impl Server {
                 }
 
                 batch = totality_manager.pull() => {
-                    deduplicator.push(batch).await;
+                    deduplicator.push(todo!()).await;
                 }
 
                 (batch, duplicates) = deduplicator.pull() => {
