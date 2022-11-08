@@ -100,11 +100,6 @@ impl PlainBatch {
         self.entries.as_slice()
     }
 
-    pub fn entries_mut(&mut self) -> &mut [Option<Entry>] {
-        self.root = None;
-        self.entries.as_mut_slice()
-    }
-
     pub fn unwrap(self) -> Vec<Option<Entry>> {
         self.entries
     }
