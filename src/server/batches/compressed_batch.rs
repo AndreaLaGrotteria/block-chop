@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, Message},
-    server::batches::{MerkleBatch, PlainBatch},
+    server::batches::PlainBatch,
 };
 use serde::{Deserialize, Serialize};
 use talk::crypto::primitives::hash::Hash;
@@ -26,21 +26,16 @@ impl CompressedBatch {
     pub fn root(&self) -> Option<Hash> {
         self.root
     }
-}
 
-impl From<PlainBatch> for CompressedBatch {
-    fn from(plain_batch: PlainBatch) -> Self {
-        let PlainBatch {
-            root,
-            entries,
-            sequence_mode,
-        } = plain_batch;
+    pub fn from_plain(plain_batch: &PlainBatch) -> Self {
+        let root = plain_batch.root;
+        let sequence_mode = plain_batch.sequence_mode;
 
-        let mut ids = Vec::with_capacity(entries.len());
-        let mut messages = Vec::with_capacity(entries.len());
+        let mut ids = Vec::with_capacity(plain_batch.entries.len());
+        let mut messages = Vec::with_capacity(plain_batch.entries.len());
         let mut deltas = Vec::new();
 
-        for (index, entry) in entries.into_iter().enumerate() {
+        for (index, entry) in plain_batch.entries.iter().cloned().enumerate() {
             if let Some(Entry {
                 id,
                 sequence,
@@ -50,7 +45,7 @@ impl From<PlainBatch> for CompressedBatch {
                 ids.push(id);
                 messages.push(message);
 
-                if sequence != sequence_mode {
+                if sequence != plain_batch.sequence_mode {
                     deltas.push(Delta::Nudge { index, sequence });
                 }
             } else {
@@ -69,11 +64,5 @@ impl From<PlainBatch> for CompressedBatch {
             messages,
             deltas,
         }
-    }
-}
-
-impl From<MerkleBatch> for CompressedBatch {
-    fn from(merkle_batch: MerkleBatch) -> Self {
-        CompressedBatch::from(PlainBatch::from(merkle_batch))
     }
 }

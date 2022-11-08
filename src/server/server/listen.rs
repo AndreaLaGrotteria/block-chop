@@ -5,7 +5,9 @@ use crate::{
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
-    server::{BrokerSlot, MerkleBatch, Server, ServerSettings, WitnessCache},
+    server::{
+        BrokerSlot, CompressedBatch, MerkleBatch, PlainBatch, Server, ServerSettings, WitnessCache,
+    },
     system::{Directory, Membership},
     warn,
 };
@@ -192,7 +194,8 @@ impl Server {
 
         // Compress and store `merkle_batch`, retrieve a copy of the delivery shard outlet
 
-        let compressed_batch = merkle_batch.into();
+        let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+        let compressed_batch = CompressedBatch::from_plain(&plain_batch);
 
         let mut last_delivery_shard;
 

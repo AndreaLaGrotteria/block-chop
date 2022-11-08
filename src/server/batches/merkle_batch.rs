@@ -1,7 +1,7 @@
 use crate::{
     broadcast::{Batch as BroadcastBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
-    server::batches::{CompressedBatch, PlainBatch},
+    server::batches::PlainBatch,
     system::Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -219,6 +219,17 @@ impl MerkleBatch {
         })
     }
 
+    pub fn from_plain(plain_batch: &PlainBatch) -> Result<Self, Top<MerkleBatchError>> {
+        if plain_batch.entries.is_empty() {
+            return MerkleBatchError::EmptyBatch.fail().spot(here!());
+        }
+
+        Ok(MerkleBatch {
+            entries: Vector::new(plain_batch.entries.clone()).unwrap(),
+            sequence_mode: plain_batch.sequence_mode,
+        })
+    }
+
     pub fn root(&self) -> Hash {
         self.entries.root()
     }
@@ -233,21 +244,6 @@ impl MerkleBatch {
 
     pub fn unwrap(self) -> Vec<Option<Entry>> {
         Vec::from(self.entries)
-    }
-}
-
-impl From<PlainBatch> for MerkleBatch {
-    fn from(plain_batch: PlainBatch) -> Self {
-        MerkleBatch {
-            entries: Vector::new(plain_batch.entries).unwrap(),
-            sequence_mode: plain_batch.sequence_mode,
-        }
-    }
-}
-
-impl From<CompressedBatch> for MerkleBatch {
-    fn from(compressed_batch: CompressedBatch) -> Self {
-        MerkleBatch::from(PlainBatch::from(compressed_batch))
     }
 }
 
