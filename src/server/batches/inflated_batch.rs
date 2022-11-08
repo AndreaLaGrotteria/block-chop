@@ -67,4 +67,11 @@ impl InflatedBatch {
             self.0 = BatchStore::Merkle(merkle_batch)
         }
     }
+
+    pub fn unwrap(self) -> Vec<Option<Entry>> {
+        match self.0 {
+            BatchStore::Merkle(merkle_batch) => merkle_batch.unwrap(),
+            BatchStore::Plain(plain_batch) => plain_batch.unwrap(),
+        }
+    }
 }

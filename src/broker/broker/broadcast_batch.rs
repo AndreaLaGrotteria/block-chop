@@ -310,7 +310,7 @@ impl<'a> WitnessCollector<'a> {
 mod tests {
     use super::*;
     use crate::{
-        broadcast::{test::null_batch, Straggler},
+        broadcast::{test::null_batch},
         broker::submission::Submission,
         crypto::statements::BatchWitness,
         server::MerkleBatch,
@@ -321,7 +321,6 @@ mod tests {
         crypto::{primitives::hash::hash, KeyChain},
         net::{test::TestConnector, SessionConnector},
     };
-    use varcram::VarCram;
 
     #[tokio::test]
     async fn broker_broadcast_0_faulty() {

@@ -9,7 +9,7 @@ use crate::{
     heartbeat::{self, ServerEvent},
     order::Order,
     server::{
-        BrokerSlot, Deduplicator, Duplicate, MerkleBatch, Server, TotalityManager, WitnessCache,
+        BrokerSlot, Deduplicator, Duplicate, InflatedBatch, Server, TotalityManager, WitnessCache,
     },
     system::Membership,
     Entry,
@@ -107,7 +107,7 @@ impl Server {
                     // Process `batch` to obtain amended root and amendments
 
                     let (amended_root, amendments) =
-                        Self::burst_batch(todo!(), duplicates, &mut next_batch_inlet).await;
+                        Self::burst_batch(batch, duplicates, &mut next_batch_inlet).await;
 
                     // Assemble and post `DeliveryShard`to the broker slot's inlet
 
@@ -178,7 +178,7 @@ impl Server {
     }
 
     async fn burst_batch(
-        mut batch: MerkleBatch,
+        mut batch: InflatedBatch,
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
@@ -197,7 +197,6 @@ impl Server {
 
             let index = batch
                 .entries()
-                .items()
                 .binary_search_by(|entry| match entry {
                     // Before processing, all elements of `batch.entries` are `Some`.
                     // Moreover, `duplicates` is sorted by id. As a result, if `entry`
@@ -214,7 +213,7 @@ impl Server {
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
-                    let mut entry = batch.entries().items()[index].clone().unwrap();
+                    let mut entry = batch.entries()[index].clone().unwrap();
                     entry.sequence = *sequence;
                     batch.entries_mut().set(index, Some(entry)).unwrap();
 

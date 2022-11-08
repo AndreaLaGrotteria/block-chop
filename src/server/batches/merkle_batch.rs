@@ -234,16 +234,12 @@ impl MerkleBatch {
         self.entries.root()
     }
 
-    pub fn entries(&self) -> &Vector<Option<Entry>, PACKING> {
-        &self.entries
-    }
-
     pub fn entries_mut(&mut self) -> &mut Vector<Option<Entry>, PACKING> {
         &mut self.entries
     }
 
     pub fn unwrap(self) -> Vec<Option<Entry>> {
-        Vec::from(self.entries)
+        self.entries.into()
     }
 }
 
@@ -280,6 +276,10 @@ mod tests {
                 MerkleBatch::expand_unverified(broadcast_batch).unwrap();
 
             entries
+        }
+
+        pub fn entries(&self) -> &Vector<Option<Entry>, PACKING> {
+            &self.entries
         }
     }
 }
