@@ -120,7 +120,11 @@ async fn main() {
     } else if let Some(hotstuff) = hotstuff {
         Arc::new(HotStuff::connect(&hotstuff.parse().unwrap()).await.unwrap())
     } else if let Some(bftsmart) = bftsmart {
-        Arc::new(BftSmart::connect(server_index as u32, &bftsmart.parse().unwrap()).await.unwrap())
+        Arc::new(
+            BftSmart::connect(server_index as u32, &bftsmart.parse().unwrap())
+                .await
+                .unwrap(),
+        )
     } else {
         unreachable!()
     };
