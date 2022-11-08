@@ -100,14 +100,14 @@ impl Server {
                 }
 
                 batch = totality_manager.pull() => {
-                    deduplicator.push(todo!()).await;
+                    deduplicator.push(batch).await;
                 }
 
                 (batch, duplicates) = deduplicator.pull() => {
                     // Process `batch` to obtain amended root and amendments
 
                     let (amended_root, amendments) =
-                        Self::burst_batch(batch, duplicates, &mut next_batch_inlet).await;
+                        Self::burst_batch(todo!(), duplicates, &mut next_batch_inlet).await;
 
                     // Assemble and post `DeliveryShard`to the broker slot's inlet
 
