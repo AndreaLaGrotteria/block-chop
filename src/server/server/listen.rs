@@ -195,7 +195,10 @@ impl Server {
         // Compress and store `merkle_batch`, retrieve a copy of the delivery shard outlet
 
         let plain_batch = PlainBatch::from_merkle(&merkle_batch);
+        drop(merkle_batch);
+
         let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+        drop(plain_batch);
 
         let mut last_delivery_shard;
 
