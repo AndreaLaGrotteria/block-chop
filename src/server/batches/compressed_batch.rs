@@ -1,7 +1,4 @@
-use crate::{
-    broadcast::{Entry, Message},
-    server::batches::PlainBatch,
-};
+use crate::broadcast::{Batch as BroadcastBatch, Message};
 use serde::{Deserialize, Serialize};
 use talk::crypto::primitives::hash::Hash;
 use varcram::VarCram;
@@ -17,52 +14,32 @@ pub(crate) struct CompressedBatch {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(in crate::server::batches) enum Delta {
-    Nudge { index: usize, sequence: u64 },
-    Drop { index: usize },
+pub(in crate::server::batches) struct Delta {
+    pub(in crate::server::batches) id: u64,
+    pub(in crate::server::batches) sequence: u64,
 }
 
 impl CompressedBatch {
-    pub fn root(&self) -> Option<Hash> {
-        self.root
-    }
-
-    pub fn from_plain(plain_batch: &PlainBatch) -> Self {
-        let root = plain_batch.root;
-        let sequence_mode = plain_batch.sequence_mode;
-
-        let mut ids = Vec::with_capacity(plain_batch.entries.len());
-        let mut messages = Vec::with_capacity(plain_batch.entries.len());
-        let mut deltas = Vec::new();
-
-        for (index, entry) in plain_batch.entries.iter().cloned().enumerate() {
-            if let Some(Entry {
-                id,
-                sequence,
-                message,
-            }) = entry
-            {
-                ids.push(id);
-                messages.push(message);
-
-                if sequence != plain_batch.sequence_mode {
-                    deltas.push(Delta::Nudge { index, sequence });
-                }
-            } else {
-                ids.push(Default::default());
-                messages.push(Default::default());
-                deltas.push(Delta::Drop { index });
-            }
-        }
-
-        let ids = VarCram::cram(ids.as_slice());
+    pub(in crate::server) fn from_broadcast(root: Hash, broadcast_batch: BroadcastBatch) -> Self {
+        let deltas = broadcast_batch
+            .stragglers
+            .into_iter()
+            .map(|straggler| Delta {
+                id: straggler.id,
+                sequence: straggler.sequence,
+            })
+            .collect::<Vec<_>>();
 
         CompressedBatch {
-            root,
-            ids,
-            sequence_mode,
-            messages,
+            root: Some(root),
+            ids: broadcast_batch.ids,
+            sequence_mode: broadcast_batch.raise,
+            messages: broadcast_batch.messages,
             deltas,
         }
+    }
+
+    pub fn root(&self) -> Option<Hash> {
+        self.root
     }
 }

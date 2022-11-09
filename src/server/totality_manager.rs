@@ -590,9 +590,9 @@ mod tests {
 
         for _ in 0..128 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
-            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
-            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
             let root = merkle_batch.root();
 
@@ -634,9 +634,9 @@ mod tests {
 
         for _ in 0..128 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
-            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
-            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
             let root = merkle_batch.root();
 
@@ -681,9 +681,9 @@ mod tests {
 
         for _ in 0..1024 {
             let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
-            let merkle_batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
-            let plain_batch = PlainBatch::from_merkle(&merkle_batch);
-            let compressed_batch = CompressedBatch::from_plain(&plain_batch);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
             let root = merkle_batch.root();
 

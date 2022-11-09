@@ -11,7 +11,6 @@ use zebra::vector::Vector;
 #[derive(Clone)]
 pub(crate) struct MerkleBatch {
     pub(in crate::server::batches) entries: Vector<Option<Entry>, PACKING>,
-    pub(in crate::server::batches) sequence_mode: u64,
 }
 
 #[derive(Doom)]
@@ -37,7 +36,7 @@ pub(crate) enum MerkleBatchError {
 impl MerkleBatch {
     pub fn expand_verified(
         directory: &Directory,
-        broadcast_batch: BroadcastBatch,
+        broadcast_batch: &BroadcastBatch,
     ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
@@ -51,7 +50,7 @@ impl MerkleBatch {
             return MerkleBatchError::EmptyBatch.fail().spot(here!());
         }
 
-        let messages = broadcast_batch.messages;
+        let messages = &broadcast_batch.messages;
 
         if messages.len() != ids.len() {
             return MerkleBatchError::LengthMismatch.fail().spot(here!());
@@ -130,7 +129,7 @@ impl MerkleBatch {
 
         let entries = ids
             .into_iter()
-            .zip(messages)
+            .zip(messages.iter().cloned())
             .map(|(id, message)| {
                 Some(Entry {
                     id,
@@ -165,14 +164,11 @@ impl MerkleBatch {
             entries.set(index, entry).unwrap();
         }
 
-        Ok(MerkleBatch {
-            entries,
-            sequence_mode: raise,
-        })
+        Ok(MerkleBatch { entries })
     }
 
     pub fn expand_unverified(
-        broadcast_batch: BroadcastBatch,
+        broadcast_batch: &BroadcastBatch,
     ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
@@ -182,7 +178,7 @@ impl MerkleBatch {
             .ok_or(MerkleBatchError::MalformedIds.into_top())
             .spot(here!())?;
 
-        let messages = broadcast_batch.messages;
+        let messages = &broadcast_batch.messages;
         let raise = broadcast_batch.raise;
 
         let mut stragglers = broadcast_batch.stragglers.iter().peekable();
@@ -191,7 +187,7 @@ impl MerkleBatch {
 
         let entries = ids
             .into_iter()
-            .zip(messages)
+            .zip(messages.iter().cloned())
             .map(|(id, message)| {
                 let sequence = if stragglers
                     .peek()
@@ -213,10 +209,7 @@ impl MerkleBatch {
 
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
-        Ok(MerkleBatch {
-            entries,
-            sequence_mode: raise,
-        })
+        Ok(MerkleBatch { entries })
     }
 
     pub fn from_plain(plain_batch: &PlainBatch) -> Result<Self, Top<MerkleBatchError>> {
@@ -226,7 +219,6 @@ impl MerkleBatch {
 
         Ok(MerkleBatch {
             entries: Vector::new(plain_batch.entries.clone()).unwrap(),
-            sequence_mode: plain_batch.sequence_mode,
         })
     }
 
@@ -261,19 +253,14 @@ mod tests {
             let mut sequence_histogram = sequence_histogram.into_iter().collect::<Vec<_>>();
             sequence_histogram.sort_unstable_by_key(|(_, height)| *height);
 
-            let (sequence_mode, _) = *sequence_histogram.last().unwrap();
-
-            MerkleBatch {
-                entries,
-                sequence_mode,
-            }
+            MerkleBatch { entries }
         }
 
         pub(crate) fn expanded_batch_entries(
             broadcast_batch: BroadcastBatch,
         ) -> Vector<Option<Entry>, PACKING> {
             let MerkleBatch { entries, .. } =
-                MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+                MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
 
             entries
         }

@@ -184,7 +184,7 @@ mod tests {
 
         let (root, batch) = Batch::assemble(requests.clone());
 
-        let merkle_batch = MerkleBatch::expand_verified(&directory, batch.clone()).unwrap();
+        let merkle_batch = MerkleBatch::expand_verified(&directory, &batch).unwrap();
 
         assert_eq!(merkle_batch.root(), root);
 

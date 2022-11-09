@@ -5,9 +5,7 @@ use crate::{
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
-    server::{
-        BrokerSlot, CompressedBatch, MerkleBatch, PlainBatch, Server, ServerSettings, WitnessCache,
-    },
+    server::{BrokerSlot, CompressedBatch, MerkleBatch, Server, ServerSettings, WitnessCache},
     system::{Directory, Membership},
     warn,
 };
@@ -164,15 +162,17 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionStarted { root, verify });
 
-        let merkle_batch = {
+        let (broadcast_batch, merkle_batch) = {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
             task::spawn_blocking(move || {
-                if verify {
-                    MerkleBatch::expand_verified(&directory, broadcast_batch)
+                let merkle_batch = if verify {
+                    MerkleBatch::expand_verified(&directory, &broadcast_batch)
                 } else {
-                    MerkleBatch::expand_unverified(broadcast_batch)
-                }
+                    MerkleBatch::expand_unverified(&broadcast_batch)
+                };
+
+                merkle_batch.map(|merkle_batch| (broadcast_batch, merkle_batch))
             })
             .await
             .unwrap()
@@ -198,11 +198,7 @@ impl Server {
 
         // Compress and store `merkle_batch`, retrieve a copy of the delivery shard outlet
 
-        let plain_batch = PlainBatch::from_merkle(&merkle_batch);
-        drop(merkle_batch);
-
-        let compressed_batch = CompressedBatch::from_plain(&plain_batch);
-        drop(plain_batch);
+        let compressed_batch = CompressedBatch::from_broadcast(root, broadcast_batch);
 
         let mut last_delivery_shard;
 
@@ -399,7 +395,7 @@ mod tests {
             session.receive::<Option<MultiSignature>>().await.unwrap();
         }
 
-        let mut batch = MerkleBatch::expand_unverified(broadcast_batch).unwrap();
+        let mut batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
 
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitnessStatement {
