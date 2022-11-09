@@ -310,11 +310,8 @@ impl<'a> WitnessCollector<'a> {
 mod tests {
     use super::*;
     use crate::{
-        broadcast::{test::null_batch},
-        broker::submission::Submission,
-        crypto::statements::BatchWitness,
-        server::MerkleBatch,
-        system::test::generate_system,
+        broadcast::test::null_batch, broker::submission::Submission,
+        crypto::statements::BatchWitness, server::MerkleBatch, system::test::generate_system,
     };
     use std::time::Duration;
     use talk::{
