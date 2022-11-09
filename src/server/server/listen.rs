@@ -126,6 +126,8 @@ impl Server {
             .map_err(Doom::into_top)
             .spot(here!())?;
 
+        drop(raw_batch);
+
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchDeserialized {
             root,
