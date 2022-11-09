@@ -118,6 +118,8 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
+        session.free_receive_buffer();
+
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchReceived { root });
 
