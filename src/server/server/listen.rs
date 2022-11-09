@@ -196,7 +196,9 @@ impl Server {
             return ServeError::RootMismatch.fail().spot(here!());
         }
 
-        // Compress and store `merkle_batch`, retrieve a copy of the delivery shard outlet
+        drop(merkle_batch);
+
+        // Convert and store `broadcast_batch`, retrieve a copy of the delivery shard outlet
 
         let compressed_batch = CompressedBatch::from_broadcast(root, broadcast_batch);
 
