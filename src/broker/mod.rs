@@ -6,6 +6,7 @@ mod load_batch;
 mod load_broker;
 #[cfg(feature = "benchmark")]
 mod load_broker_settings;
+mod lockstep;
 mod reduction;
 mod request;
 mod response;
@@ -23,5 +24,6 @@ pub(crate) use response::Response;
 
 use batch::Batch;
 use load_batch::LoadBatch;
+use lockstep::Lockstep;
 use reduction::Reduction;
 use submission::Submission;
