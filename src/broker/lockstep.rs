@@ -4,9 +4,9 @@ use tokio::sync::mpsc::UnboundedSender;
 type UsizeInlet = UnboundedSender<usize>;
 
 pub(in crate::broker) struct Lockstep {
-    index: usize,
-    lock_promise: Promise<()>,
-    free_inlet: UsizeInlet,
+    pub index: usize,
+    pub lock_promise: Promise<()>,
+    pub free_inlet: UsizeInlet,
 }
 
 impl Lockstep {

@@ -1,14 +1,15 @@
 use crate::{
-    broker::{LoadBatch, LoadBrokerSettings},
+    broker::{LoadBatch, LoadBrokerSettings, Lockstep},
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
-    sync::fuse::Fuse,
+    sync::{fuse::Fuse, promise::Promise},
 };
+use tokio::sync::mpsc;
 
 pub struct LoadBroker {
     _fuse: Fuse,
@@ -30,10 +31,36 @@ impl LoadBroker {
 
         let batches_per_flow = flows.first().unwrap().len();
 
-        let mut flows = flows
+        let (mut flows, (lock_solvers, free_outlets)): (Vec<_>, (Vec<_>, Vec<_>)) = flows
             .into_iter()
-            .map(|flow| flow.into_iter())
-            .collect::<Vec<_>>();
+            .map(|flow| {
+                let (lock_promises, lock_solvers): (Vec<_>, Vec<_>) =
+                    iter::repeat_with(Promise::pending).take(flow.len()).unzip();
+
+                let (free_inlet, free_outlet) = mpsc::unbounded_channel();
+
+                let flow = flow
+                    .into_iter()
+                    .zip(lock_promises)
+                    .enumerate()
+                    .map(|(index, ((root, raw_batch), lock_promise))| {
+                        let lockstep = Lockstep {
+                            index,
+                            lock_promise,
+                            free_inlet: free_inlet.clone(),
+                        };
+
+                        LoadBatch {
+                            root,
+                            raw_batch,
+                            lockstep,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                (flow.into_iter(), (lock_solvers, free_outlet))
+            })
+            .unzip();
 
         let mut batches = Vec::with_capacity(flows.len() * batches_per_flow);
 
@@ -43,14 +70,17 @@ impl LoadBroker {
             }
         }
 
-        let batches = batches
-            .into_iter()
-            .map(|(root, raw_batch)| LoadBatch { root, raw_batch })
-            .collect::<Vec<_>>();
-
         // Spawn tasks
 
         let fuse = Fuse::new();
+
+        for (lock_solvers, free_outlet) in lock_solvers.into_iter().zip(free_outlets) {
+            fuse.spawn(LoadBroker::lockstep(
+                lock_solvers,
+                free_outlet,
+                settings.lockstep_delta,
+            ));
+        }
 
         fuse.spawn(LoadBroker::broadcast_batches(
             membership.clone(),
@@ -71,6 +101,7 @@ impl LoadBroker {
 
 mod broadcast_batch;
 mod broadcast_batches;
+mod lockstep;
 mod submit_batch;
 
 #[cfg(test)]
