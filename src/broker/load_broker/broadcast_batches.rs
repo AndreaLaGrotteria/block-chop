@@ -64,9 +64,6 @@ impl LoadBroker {
                     break 'submission;
                 };
 
-                let batch_root = load_batch.root;
-                let raw_batch = load_batch.raw_batch;
-
                 let worker_index = match available_workers.try_recv() {
                     Ok(index) => index,
                     Err(mpsc::error::TryRecvError::Empty) => {
@@ -96,8 +93,7 @@ impl LoadBroker {
                             broker_identity,
                             worker_index,
                             sequence,
-                            batch_root,
-                            raw_batch,
+                            load_batch,
                             membership,
                             connector,
                             settings,
