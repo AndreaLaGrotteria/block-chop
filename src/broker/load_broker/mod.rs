@@ -1,5 +1,5 @@
 use crate::{
-    broker::LoadBrokerSettings,
+    broker::{LoadBatch, LoadBrokerSettings},
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
@@ -43,6 +43,11 @@ impl LoadBroker {
             }
         }
 
+        let batches = batches
+            .into_iter()
+            .map(|(root, raw_batch)| LoadBatch { root, raw_batch })
+            .collect::<Vec<_>>();
+
         // Spawn tasks
 
         let fuse = Fuse::new();
@@ -51,7 +56,7 @@ impl LoadBroker {
             membership.clone(),
             broker_identity,
             connector,
-            batches.into_iter().collect(),
+            batches,
             settings.clone(),
         ));
 

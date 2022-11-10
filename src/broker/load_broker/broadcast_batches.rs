@@ -1,15 +1,11 @@
 use crate::{
-    broker::{LoadBroker, LoadBrokerSettings},
+    broker::{LoadBatch, LoadBroker, LoadBrokerSettings},
     info,
     system::Membership,
     warn,
 };
 use std::{cmp, sync::Arc, time::Instant};
-use talk::{
-    crypto::{primitives::hash::Hash, Identity},
-    net::SessionConnector,
-    sync::fuse::Fuse,
-};
+use talk::{crypto::Identity, net::SessionConnector, sync::fuse::Fuse};
 use tokio::{sync::mpsc, time};
 
 impl LoadBroker {
@@ -17,7 +13,7 @@ impl LoadBroker {
         membership: Arc<Membership>,
         broker_identity: Identity,
         connector: SessionConnector,
-        batches: Vec<(Hash, Vec<u8>)>,
+        batches: Vec<LoadBatch>,
         settings: LoadBrokerSettings,
     ) {
         // Setup worker recycling
@@ -61,12 +57,15 @@ impl LoadBroker {
             let target = target as usize;
 
             while batch_index < target {
-                let (batch_root, raw_batch) = if let Some(submission) = submissions.next() {
+                let load_batch = if let Some(submission) = submissions.next() {
                     submission
                 } else {
                     // All batches submitted
                     break 'submission;
                 };
+
+                let batch_root = load_batch.root;
+                let raw_batch = load_batch.raw_batch;
 
                 let worker_index = match available_workers.try_recv() {
                     Ok(index) => index,

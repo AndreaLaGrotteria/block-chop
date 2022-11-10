@@ -1,6 +1,7 @@
 mod batch;
 mod broker;
 mod broker_settings;
+mod load_batch;
 #[cfg(feature = "benchmark")]
 mod load_broker;
 #[cfg(feature = "benchmark")]
@@ -21,5 +22,6 @@ pub(crate) use request::Request;
 pub(crate) use response::Response;
 
 use batch::Batch;
+use load_batch::LoadBatch;
 use reduction::Reduction;
 use submission::Submission;
