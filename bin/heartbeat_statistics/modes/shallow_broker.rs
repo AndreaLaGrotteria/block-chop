@@ -45,13 +45,15 @@ pub fn shallow_broker(path: String, start: f32, duration: f32) {
 
     // Derive membership
 
-    let membership = submissions
+    let mut membership = submissions
         .keys()
         .copied()
         .map(|(_, server)| server)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+
+    membership.sort();
 
     // Completion
 
