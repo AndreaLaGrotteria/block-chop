@@ -127,6 +127,10 @@ impl LoadBroker {
 
         let witness = witness_collector.finalize();
 
+        // Wait to improve dissemination
+
+        time::sleep(settings.dissemination_delay).await;
+
         // Wait to ensure lockstepped submission
 
         lockstep.lock().await;
