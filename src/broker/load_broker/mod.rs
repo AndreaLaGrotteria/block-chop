@@ -15,19 +15,33 @@ pub struct LoadBroker {
 }
 
 impl LoadBroker {
-    pub fn new<B>(
+    pub fn new(
         membership: Membership,
         broker_identity: Identity,
         connector: SessionConnector,
-        batches: B,
+        flows: Vec<Vec<(Hash, Vec<u8>)>>,
         settings: LoadBrokerSettings,
-    ) -> Self
-    where
-        B: IntoIterator<Item = (Hash, Vec<u8>)>,
-    {
+    ) -> Self {
         // Build `Arc`s
 
         let membership = Arc::new(membership);
+
+        // Prepare batches
+
+        let batches_per_flow = flows.first().unwrap().len();
+
+        let mut flows = flows
+            .into_iter()
+            .map(|flow| flow.into_iter())
+            .collect::<Vec<_>>();
+
+        let mut batches = Vec::with_capacity(flows.len() * batches_per_flow);
+
+        for _ in 0..batches_per_flow {
+            for flow in flows.iter_mut() {
+                batches.push(flow.next().unwrap())
+            }
+        }
 
         // Spawn tasks
 
@@ -61,7 +75,7 @@ mod tests {
         broadcast::{test::null_batch, Batch as BroadcastBatch},
         system::test::generate_system,
     };
-    use std::time::Duration;
+    use std::{iter, time::Duration};
     use talk::{
         crypto::KeyChain,
         net::{test::TestConnector, SessionConnector},
@@ -82,13 +96,19 @@ mod tests {
         let connector = TestConnector::new(keychain, connector_map.clone());
         let session_connector = SessionConnector::new(connector);
 
-        let batches = std::iter::repeat(to_raw(null_batch(&client_keychains, 30))).take(50);
+        let flows = iter::repeat(
+            iter::repeat(to_raw(null_batch(&client_keychains, 30)))
+                .take(5)
+                .collect::<Vec<_>>(),
+        )
+        .take(10)
+        .collect::<Vec<_>>();
 
         let _load_broker = LoadBroker::new(
             membership.clone(),
             broker_identity,
             session_connector,
-            batches,
+            flows,
             LoadBrokerSettings {
                 rate: 16.,
                 totality_timeout: Duration::from_secs(1),

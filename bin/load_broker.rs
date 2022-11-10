@@ -83,29 +83,30 @@ async fn main() {
 
     info!("Loading batches..");
 
-    let batches = (0..batches_per_flow)
-        .map(|batch_index| {
+    let flows = (flow_range_start..flow_range_end)
+        .map(|flow_index| {
             let flows_path = flows_path.clone();
 
-            (flow_range_start..flow_range_end).map(move |flow_index| {
-                let mut path = PathBuf::from(flows_path.clone());
-                path.push(format!("flow-{flow_index:02}"));
-                path.push(format!("batch-{batch_index:05}.raw"));
+            (0..batches_per_flow)
+                .map(move |batch_index| {
+                    let mut path = PathBuf::from(flows_path.clone());
+                    path.push(format!("flow-{flow_index:02}"));
+                    path.push(format!("batch-{batch_index:05}.raw"));
 
-                let mut file = File::open(path).unwrap();
+                    let mut file = File::open(path).unwrap();
 
-                let mut root = [0u8; HASH_LENGTH];
-                file.read_exact(&mut root).unwrap();
+                    let mut root = [0u8; HASH_LENGTH];
+                    file.read_exact(&mut root).unwrap();
 
-                let root = Hash::from_bytes(root);
+                    let root = Hash::from_bytes(root);
 
-                let mut batch = Vec::new();
-                file.read_to_end(&mut batch).unwrap();
+                    let mut batch = Vec::new();
+                    file.read_to_end(&mut batch).unwrap();
 
-                (root, batch)
-            })
+                    (root, batch)
+                })
+                .collect::<Vec<_>>()
         })
-        .flatten()
         .collect::<Vec<_>>();
 
     // Rendezvous with servers and brokers
@@ -133,7 +134,7 @@ async fn main() {
         membership,
         broker_identity,
         broker_connector,
-        batches,
+        flows,
         LoadBrokerSettings {
             rate,
             workers: cmp::max((rate * 30.) as u16, 1),
