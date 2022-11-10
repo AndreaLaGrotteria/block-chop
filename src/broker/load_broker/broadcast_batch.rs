@@ -127,11 +127,18 @@ impl LoadBroker {
 
         let witness = witness_collector.finalize();
 
-        // Wait to improve dissemination
+        // Wait for `settings.dissemination_delay` to improve dissemination
+        // to slower servers (this reduces the rate at which servers need to
+        // use the `TotalityManager` in order to retrieve the batch)
 
         time::sleep(settings.dissemination_delay).await;
 
-        // Wait to ensure lockstepped submission
+        // Wait on `lockstep` to ensure lockstepped submission (this reduces,
+        // but does not remove, the rate at which servers observe duplicates)
+        // Note: additionally waiting for `settings.lockstep_margin` reduces
+        // the probability that two witnesses in independent `Session`s will
+        // overtake each other in-flight, thus causing causally-dependent
+        // batches to be submitted to `Order` in the wrong order.
 
         lockstep.lock().await;
         time::sleep(settings.lockstep_margin).await;

@@ -19,16 +19,23 @@ impl LoadBroker {
         mut free_outlet: UsizeOutlet,
         lockstep_delta: usize,
     ) {
+        // Initialize `State`s (initially, all `Locked`)
+
         let mut states = lock_solvers
             .into_iter()
             .map(|lock_solver| State::Locked(lock_solver))
             .collect::<Vec<_>>();
+
+        // `unlock()` the first `lockstep_delta` `states`
 
         for index in 0..lockstep_delta {
             if let Some(state) = states.get_mut(index) {
                 state.unlock();
             }
         }
+
+        // Progressively unlock `states`: when the first `n` `states` are
+        // first `Freed`, `unlock()` the `n + lockstep_delta`-th `State`
 
         let mut head = 0;
 

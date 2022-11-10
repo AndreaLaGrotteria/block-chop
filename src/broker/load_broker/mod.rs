@@ -3,16 +3,27 @@ use crate::{
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
-use std::{iter, sync::Arc};
+use std::{collections::VecDeque, iter, sync::Arc};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::SessionConnector,
-    sync::{fuse::Fuse, promise::Promise},
+    sync::{
+        fuse::Fuse,
+        promise::{Promise, Solver},
+    },
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, UnboundedReceiver};
+
+type UsizeOutlet = UnboundedReceiver<usize>;
 
 pub struct LoadBroker {
     _fuse: Fuse,
+}
+
+struct Flow {
+    batches: VecDeque<LoadBatch>,
+    lock_solvers: Vec<Solver<()>>,
+    free_outlet: UsizeOutlet,
 }
 
 impl LoadBroker {
@@ -31,15 +42,21 @@ impl LoadBroker {
 
         let batches_per_flow = flows.first().unwrap().len();
 
-        let (mut flows, (lock_solvers, free_outlets)): (Vec<_>, (Vec<_>, Vec<_>)) = flows
+        let mut flows = flows
             .into_iter()
-            .map(|flow| {
+            .map(|batches| {
+                // Initialize lock `Promise`s and free channel
+
                 let (lock_promises, lock_solvers): (Vec<_>, Vec<_>) =
-                    iter::repeat_with(Promise::pending).take(flow.len()).unzip();
+                    iter::repeat_with(Promise::pending)
+                        .take(batches.len())
+                        .unzip();
 
                 let (free_inlet, free_outlet) = mpsc::unbounded_channel();
 
-                let flow = flow
+                // Convert `batches` into `LoadBatch`es
+
+                let batches = batches
                     .into_iter()
                     .zip(lock_promises)
                     .enumerate()
@@ -56,17 +73,24 @@ impl LoadBroker {
                             lockstep,
                         }
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<VecDeque<_>>();
 
-                (flow.into_iter(), (lock_solvers, free_outlet))
+                Flow {
+                    batches,
+                    lock_solvers,
+                    free_outlet,
+                }
             })
-            .unzip();
+            .collect::<Vec<_>>();
+
+        // Vectorize the transposition of `flows.batch`es: one batch per flow in a
+        // round-robin fashion until all batches are organized in a single vector
 
         let mut batches = Vec::with_capacity(flows.len() * batches_per_flow);
 
         for _ in 0..batches_per_flow {
             for flow in flows.iter_mut() {
-                batches.push(flow.next().unwrap())
+                batches.push(flow.batches.pop_front().unwrap());
             }
         }
 
@@ -74,10 +98,10 @@ impl LoadBroker {
 
         let fuse = Fuse::new();
 
-        for (lock_solvers, free_outlet) in lock_solvers.into_iter().zip(free_outlets) {
+        for flow in flows {
             fuse.spawn(LoadBroker::lockstep(
-                lock_solvers,
-                free_outlet,
+                flow.lock_solvers,
+                flow.free_outlet,
                 settings.lockstep_delta,
             ));
         }
