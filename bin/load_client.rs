@@ -1,16 +1,7 @@
-use chop_chop::{client::load, Directory, Passepartout};
+use chop_chop::{client, Directory, Passepartout};
 use log::info;
-use std::{
-    future,
-    io::{self, Write},
-    time::Duration,
-};
-use talk::{
-    crypto::KeyChain,
-    link::{
-        rendezvous::{Client as RendezvousClient},
-    },
-};
+use std::time::Duration;
+use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
 const CLIENTS_PER_BROKER: usize = 4_000_000;
@@ -54,6 +45,13 @@ async fn main() {
         Directory::load(directory_path).unwrap()
     };
 
+    // `Client` preprocessing
+
+    let range = (honest_broker_index * CLIENTS_PER_BROKER) as u64
+        ..((honest_broker_index + 1) * CLIENTS_PER_BROKER) as u64;
+
+    let (keychains, broadcasts) = client::preprocess(directory, passepartout, range.clone());
+
     // Rendezvous with servers and brokers
 
     info!("Rendezvous-ing with servers, load brokers..");
@@ -89,24 +87,15 @@ async fn main() {
 
     info!("Starting load client..");
 
-    let range =
-        (honest_broker_index * CLIENTS_PER_BROKER) as u64..((honest_broker_index + 1) * CLIENTS_PER_BROKER) as u64;
-        
-    load(
-        directory,
-        passepartout,
+    client::load_with(
         "0.0.0.0:10000",
         &broker_address,
         range,
         rate,
+        broadcasts,
+        keychains,
     )
     .await;
 
-    println!(" .. done! `LoadClient` running!");
-
-    // Wait indefinitely
-
-    println!("\n    [Hit Ctrl + C to stop this daemon]  ");
-    io::stdout().flush().unwrap();
-    future::pending::<()>().await;
+    info!("Load client finished.");
 }

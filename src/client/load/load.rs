@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, Message},
-    broker::{Request, Response},
+    broker::{Request as BrokerRequest, Response},
     crypto::statements::{
         Broadcast as BroadcastStatement, Reduction as ReductionStatement,
         ReductionAuthentication as ReductionAuthenticationStatement,
@@ -11,35 +11,19 @@ use crate::{
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{iter, net::ToSocketAddrs, ops::Range, sync::Arc, time::Duration};
 use talk::{
+    crypto::KeyChain,
     net::{DatagramDispatcher, DatagramDispatcherSettings},
     sync::fuse::Fuse,
 };
 use tokio::time;
 
-pub async fn load<A>(
+pub struct Request(BrokerRequest);
+
+pub fn preprocess(
     directory: Directory,
     passepartout: Passepartout,
-    bind_address: A,
-    broker_address: A,
     range: Range<u64>,
-    rate: f64,
-) where
-    A: Clone + ToSocketAddrs,
-{
-    info!("Setting up dispatcher..");
-
-    let dispatcher = DatagramDispatcher::<Request, Response>::bind(
-        bind_address,
-        DatagramDispatcherSettings {
-            maximum_packet_rate: 393216.,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-
-    let (sender, mut receiver) = dispatcher.split();
-    let sender = Arc::new(sender);
-
+) -> (Vec<KeyChain>, Vec<Request>) {
     info!("Loading keychains..");
 
     let keychains = range
@@ -52,7 +36,95 @@ pub async fn load<A>(
         })
         .collect::<Vec<_>>();
 
+    info!("Generating requests..");
+
+    let broadcasts = keychains
+        .par_iter()
+        .enumerate()
+        .map(|(index, keychain)| {
+            let id = range.start + (index as u64);
+
+            let mut message = Message::default();
+            message[0..8].copy_from_slice(id.to_be_bytes().as_slice());
+
+            let entry = Entry {
+                id,
+                sequence: 0,
+                message,
+            };
+
+            let statement = BroadcastStatement {
+                sequence: &entry.sequence,
+                message: &entry.message,
+            };
+
+            let signature = keychain.sign(&statement).unwrap();
+
+            let request = BrokerRequest::Broadcast {
+                entry,
+                signature,
+                height_record: None,
+                authentication: None,
+            };
+
+            Request(request)
+        })
+        .collect::<Vec<_>>();
+
+    (keychains, broadcasts)
+}
+
+pub async fn load<A>(
+    directory: Directory,
+    passepartout: Passepartout,
+    bind_address: A,
+    broker_address: A,
+    range: Range<u64>,
+    rate: f64,
+) where
+    A: Clone + ToSocketAddrs,
+{
+    let (keychains, broadcasts) = preprocess(directory, passepartout, range.clone());
+    load_with(
+        bind_address,
+        broker_address,
+        range,
+        rate,
+        broadcasts,
+        keychains,
+    )
+    .await;
+}
+
+pub async fn load_with<A>(
+    bind_address: A,
+    broker_address: A,
+    range: Range<u64>,
+    rate: f64,
+    broadcasts: Vec<Request>,
+    keychains: Vec<KeyChain>,
+) where
+    A: Clone + ToSocketAddrs,
+{
+    info!("Setting up dispatcher..");
+
     let keychains = Arc::new(keychains);
+    let broadcasts = broadcasts
+        .into_iter()
+        .map(|request| request.0)
+        .collect::<Vec<_>>();
+
+    let dispatcher = DatagramDispatcher::<BrokerRequest, Response>::bind(
+        bind_address,
+        DatagramDispatcherSettings {
+            maximum_packet_rate: 393216.,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let (sender, mut receiver) = dispatcher.split();
+    let sender = Arc::new(sender);
 
     info!("Spawning receiving task..");
 
@@ -86,7 +158,7 @@ pub async fn load<A>(
                             let authentication =
                                 keychain.sign(&reduction_authentication_statement).unwrap();
 
-                            let request = Request::Reduction {
+                            let request = BrokerRequest::Reduction {
                                 root,
                                 id,
                                 multisignature,
@@ -101,39 +173,6 @@ pub async fn load<A>(
             }
         });
     }
-
-    info!("Generating requests..");
-
-    let broadcasts = keychains
-        .par_iter()
-        .enumerate()
-        .map(|(index, keychain)| {
-            let id = range.start + (index as u64);
-
-            let mut message = Message::default();
-            message[0..8].copy_from_slice(id.to_be_bytes().as_slice());
-
-            let entry = Entry {
-                id,
-                sequence: 0,
-                message,
-            };
-
-            let statement = BroadcastStatement {
-                sequence: &entry.sequence,
-                message: &entry.message,
-            };
-
-            let signature = keychain.sign(&statement).unwrap();
-
-            Request::Broadcast {
-                entry,
-                signature,
-                height_record: None,
-                authentication: None,
-            }
-        })
-        .collect::<Vec<_>>();
 
     info!("Pacing requests..");
 

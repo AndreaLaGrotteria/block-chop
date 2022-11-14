@@ -84,13 +84,11 @@ async fn main() {
     let rendezvous_client = RendezvousClient::new(rendezvous_address, Default::default());
 
     rendezvous_client
-        .advertise_port(keychain.keycard().identity(), port).await;
+        .advertise_port(keychain.keycard().identity(), port)
+        .await;
 
     rendezvous_client
-        .publish_card(
-            keychain.keycard(),
-            Some(1 + honest_broker_index as u32),
-        )
+        .publish_card(keychain.keycard(), Some(1 + honest_broker_index as u32))
         .await
         .unwrap();
 
