@@ -36,7 +36,7 @@ impl LoadBroker {
         let mut witness_shard_inlet = Some(witness_shard_inlet);
         let mut delivery_shard_inlet = Some(delivery_shard_inlet);
 
-        let mut agent = settings.submission_schedule.agent();
+        let mut agent = settings.resubmission_schedule.agent();
 
         while let Err(error) = Broker::try_submit_batch(
             broker_identity,

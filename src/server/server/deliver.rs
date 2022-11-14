@@ -6,12 +6,14 @@ use crate::{
         },
         Certificate,
     },
+    heartbeat::{self, ServerEvent},
     order::Order,
-    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager},
+    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
     system::Membership,
     Entry,
 };
 use doomstack::{here, Doom, ResultExt, Top};
+use log::warn;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
@@ -37,6 +39,7 @@ impl Server {
         membership: Membership,
         broadcast: Arc<dyn Order>,
         broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
+        witness_cache: Arc<Mutex<WitnessCache>>,
         mut totality_manager: TotalityManager,
         mut deduplicator: Deduplicator,
         mut next_batch_inlet: BurstInlet,
@@ -50,7 +53,12 @@ impl Server {
                 submission = broadcast.deliver() => {
                     // Parse `submission` to obtain broker identity and batch root
 
-                    if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref()) {
+                    if let Ok((broker, worker, root)) = Self::parse_submission(submission.as_slice(), &membership, broker_slots.as_ref(), witness_cache.as_ref()) {
+                        #[cfg(feature = "benchmark")]
+                        heartbeat::log(ServerEvent::BatchOrdered {
+                            root
+                        });
+
                         // Retrieve broker sequence number, expected batch, and delivery shard inlet
 
                         let (sequence, expected_batch, delivery_shard_inlet) = {
@@ -75,7 +83,10 @@ impl Server {
                         match expected_batch {
                             Some((raw_batch, batch)) if batch.root() == root =>
                                 totality_manager.hit(raw_batch, batch).await,
-                            _ => totality_manager.miss(root).await,
+                            _ => {
+                                warn!("Batch {:#?} missing from `TotalityManager`.", root);
+                                totality_manager.miss(root).await
+                            }
                         };
 
                         // Push batch metadata to `pending_deliveries`
@@ -126,6 +137,7 @@ impl Server {
         submission: &[u8],
         membership: &Membership,
         broker_slots: &Mutex<HashMap<(Identity, u16), BrokerSlot>>,
+        witness_cache: &Mutex<WitnessCache>,
     ) -> Result<(Identity, u16, Hash), Top<ParseSubmissionError>> {
         let (broker, worker, root, witness) =
             bincode::deserialize::<(Identity, u16, Hash, Certificate)>(submission)
@@ -140,17 +152,23 @@ impl Server {
             .or_default()
             .next_sequence;
 
-        witness
-            .verify_plurality(
-                &membership,
-                &BatchWitnessStatement {
-                    broker: &broker,
-                    worker: &worker,
-                    sequence: &sequence,
-                    root: &root,
-                },
-            )
-            .pot(ParseSubmissionError::WitnessInvalid, here!())?;
+        if !witness_cache
+            .lock()
+            .unwrap()
+            .contains(&broker, &worker, &sequence, &root, &witness)
+        {
+            witness
+                .verify_plurality(
+                    &membership,
+                    &BatchWitnessStatement {
+                        broker: &broker,
+                        worker: &worker,
+                        sequence: &sequence,
+                        root: &root,
+                    },
+                )
+                .pot(ParseSubmissionError::WitnessInvalid, here!())?;
+        }
 
         Ok((broker, worker, root))
     }
@@ -160,10 +178,15 @@ impl Server {
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
-        // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`,
-        // store `Ignore` elements of `duplicates` for later removal
+        // Stash statistics for later logging
 
-        let mut to_ignore = Vec::new();
+        #[cfg(feature = "benchmark")]
+        let unamended_root = batch.entries.root();
+
+        // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
+        // `Ignore` and `Nudge` elements of `duplicates` for later removal
+
+        let mut to_omit = Vec::new();
 
         for duplicate in duplicates.iter() {
             // Locate `duplicate` within `batch`
@@ -183,13 +206,15 @@ impl Server {
 
             match duplicate {
                 Duplicate::Ignore { .. } => {
-                    to_ignore.push(index);
+                    to_omit.push(index);
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
                     let mut entry = batch.entries.items()[index].clone().unwrap();
                     entry.sequence = *sequence;
                     batch.entries.set(index, Some(entry)).unwrap();
+
+                    to_omit.push(index);
                 }
                 Duplicate::Drop { .. } => {
                     batch.entries.set(index, None).unwrap();
@@ -199,17 +224,23 @@ impl Server {
 
         let amended_root = batch.root();
 
-        // Extract `batch`'s entries, remove all `Ignore` duplicates
+        // Extract `batch`'s entries, remove all duplicates in `to_omit`
 
         let mut entries = Vec::from(batch.entries);
 
-        for ignore in to_ignore {
+        for ignore in to_omit {
             entries[ignore] = None;
         }
 
         // Send `entries` to `next_batch`
 
         let _ = next_batch_inlet.send(entries).await;
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(ServerEvent::BatchDelivered {
+            root: unamended_root,
+            duplicates: duplicates.len() as u32,
+        });
 
         // Return `amended_root` and all elements of `duplicates` (`Nudge`
         // and `Drop`) that can be transformed into `Amendment`s

@@ -10,10 +10,7 @@ use talk::{
     net::SessionConnector,
     sync::fuse::Fuse,
 };
-use tokio::{
-    sync::mpsc::{self},
-    time::{self},
-};
+use tokio::{sync::mpsc, time};
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batches(
@@ -36,47 +33,57 @@ impl LoadBroker {
 
         // Execute submission loop
 
-        let mut submissions = batches.into_iter().enumerate();
-        let mut last_tick = Instant::now();
+        let mut submissions = batches.into_iter();
+
+        let submission_start = Instant::now();
+        let mut batch_index = 0;
 
         let fuse = Fuse::new();
 
         'submission: loop {
-            let sleep_time = settings
-                .minimum_rate_window
-                .saturating_sub(last_tick.elapsed());
+            time::sleep(settings.submission_interval).await;
 
-            if !sleep_time.is_zero() {
-                time::sleep(sleep_time).await;
-            } else {
-                warn!(
-                    "Submission lagged by {:?}.",
-                    last_tick
-                        .elapsed()
-                        .saturating_sub(settings.minimum_rate_window)
-                );
-            }
+            // Target number of submitted batches is computed as the integral of:
+            //  - Linear increase to `settings.rate` in `settings.warmup` (hence
+            //    the quadratic term `1/2 * acceleration * time^2`);
+            //  - Constant `settings.rate` after `settings.warmup` (hence the
+            //    linear term `speed * time`).
 
-            let window = last_tick.elapsed();
-            last_tick = Instant::now();
+            let run_time = submission_start.elapsed();
+            let warmup_time = cmp::min(run_time, settings.warmup);
+            let cruise_time = run_time.saturating_sub(settings.warmup);
 
-            let submission_allowance = (cmp::min(window, settings.maximum_rate_window)
-                .as_secs_f64()
-                * settings.rate) as usize;
+            let target = 0.5
+                * (settings.rate / settings.warmup.as_secs_f64())
+                * warmup_time.as_secs_f64().powi(2)
+                + settings.rate * cruise_time.as_secs_f64();
 
-            for _ in 0..submission_allowance {
-                let (index, (batch_root, raw_batch)) = if let Some(submission) = submissions.next()
-                {
+            let target = target as usize;
+
+            while batch_index < target {
+                let (batch_root, raw_batch) = if let Some(submission) = submissions.next() {
                     submission
                 } else {
                     // All batches submitted
                     break 'submission;
                 };
 
-                let worker_index = available_workers.recv().await.unwrap();
+                let worker_index = match available_workers.try_recv() {
+                    Ok(index) => index,
+                    Err(mpsc::error::TryRecvError::Empty) => {
+                        let choke_start = Instant::now();
+                        let index = available_workers.recv().await.unwrap();
+
+                        warn!("Waited {:?} to get a worker.", choke_start.elapsed());
+
+                        index
+                    }
+                    Err(mpsc::error::TryRecvError::Disconnected) => unreachable!(),
+                };
+
                 let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
-                info!("Sending batch {}.", index);
+                info!("Sending batch {}.", batch_index);
 
                 {
                     let membership = membership.clone();
@@ -103,6 +110,8 @@ impl LoadBroker {
                 }
 
                 *next_sequence += 1;
+
+                batch_index += 1;
             }
         }
 

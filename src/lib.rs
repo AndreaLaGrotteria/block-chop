@@ -4,6 +4,8 @@ static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[cfg(feature = "benchmark")]
 pub mod applications;
 pub mod client;
+#[cfg(feature = "benchmark")]
+pub mod heartbeat;
 
 mod broadcast;
 mod broker;

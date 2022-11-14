@@ -2,7 +2,8 @@ use crate::{
     broadcast::{Entry, Message},
     server::{Batch, DeduplicatorSettings, Duplicate},
 };
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{future::pending, stream::FuturesOrdered, StreamExt};
+use log::warn;
 use oh_snap::Snap;
 use std::{
     cmp, iter,
@@ -71,9 +72,13 @@ impl Deduplicator {
     }
 
     pub async fn pull(&mut self) -> (Batch, Vec<Duplicate>) {
-        // `self` holds the `Fuse` to all tasks,
-        // so this is guaranteed to succeed.
-        self.pull_outlet.recv().await.unwrap()
+        if let Some(deduplicated_batch) = self.pull_outlet.recv().await {
+            deduplicated_batch
+        } else {
+            // `Server` has dropped, wait indefinitely for the call
+            // to `pull` to be cancelled by some `Fuse`
+            pending().await
+        }
     }
 
     async fn run(
@@ -127,15 +132,21 @@ impl Deduplicator {
                 let mut process_snap_tasks = FuturesOrdered::new();
                 let mut process_tail_task = None; // This will hold the handle to the `process_tail` task..
 
-                for (index, (process_outlet, join_duplicates_burst_inlet)) in process_outlets
-                    .into_iter()
-                    .zip(join_duplicates_burst_inlets)
-                    .enumerate()
+                let core_ids = core_affinity::get_core_ids().unwrap();
+
+                for (index, ((process_outlet, join_duplicates_burst_inlet), core_id)) in
+                    process_outlets
+                        .into_iter()
+                        .zip(join_duplicates_burst_inlets)
+                        .zip(core_ids)
+                        .enumerate()
                 {
                     if index < settings.tasks {
                         let snap = snaps.next().unwrap();
 
                         process_snap_tasks.push_back(task::spawn_blocking(move || {
+                            core_affinity::set_for_current(core_id);
+
                             Deduplicator::process_snap(
                                 snap,
                                 process_outlet,
@@ -145,6 +156,8 @@ impl Deduplicator {
                     } else {
                         // .. which is always set here (although the compiler cannot tell)..
                         process_tail_task = Some(task::spawn_blocking(move || {
+                            core_affinity::set_for_current(core_id);
+
                             Deduplicator::process_tail(
                                 capacity as u64,
                                 process_outlet,
@@ -406,6 +419,14 @@ impl Deduplicator {
                     duplicates.extend(duplicates_burst.next().unwrap());
                 }
 
+                if !duplicates.is_empty() {
+                    warn!(
+                        "Batch {:#?} had {} duplicates.",
+                        batch.entries.root(),
+                        duplicates.len()
+                    );
+                }
+
                 let _ = pull_inlet.send((batch, duplicates)).await;
             }
         }
@@ -641,7 +662,7 @@ mod tests {
 
     fn build_entry(id: u64, sequence: u64, message: u64) -> Entry {
         let mut buffer = Message::default();
-        buffer[0..8].copy_from_slice(&message.to_be_bytes()[..]);
+        buffer.bytes[0..8].copy_from_slice(&message.to_be_bytes()[..]);
 
         Entry {
             id,
