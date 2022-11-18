@@ -3,7 +3,11 @@ use crate::{
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
-use std::{collections::VecDeque, iter, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    iter,
+    sync::Arc,
+};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
     net::PlexConnector,
@@ -27,7 +31,7 @@ struct Flow {
 }
 
 impl LoadBroker {
-    pub fn new(
+    pub async fn new(
         membership: Membership,
         broker_identity: Identity,
         connector: PlexConnector,
@@ -37,6 +41,25 @@ impl LoadBroker {
         // Build `Arc`s
 
         let membership = Arc::new(membership);
+
+        // Fill `connector`
+
+        connector
+            .fill(membership.servers().keys().copied(), settings.fill_interval)
+            .await;
+
+        // Compile multiplexes
+
+        let mut multiplexes = HashMap::new();
+
+        for server in membership.servers().keys().copied() {
+            multiplexes.insert(server, connector.multiplexes_to(server).await);
+        }
+
+        let mut multiplexes = multiplexes
+            .into_iter()
+            .map(|(server, multiplexes)| (server, multiplexes.into_iter().cycle()))
+            .collect::<HashMap<_, _>>();
 
         // Prepare batches
 
@@ -54,6 +77,22 @@ impl LoadBroker {
 
                 let (free_inlet, free_outlet) = mpsc::unbounded_channel();
 
+                // Compute affinity map
+
+                let affinities = membership
+                    .servers()
+                    .keys()
+                    .copied()
+                    .map(|server| {
+                        (
+                            server,
+                            multiplexes.get_mut(&server).unwrap().next().unwrap(),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                let affinities = Arc::new(affinities);
+
                 // Convert `batches` into `LoadBatch`es
 
                 let batches = batches
@@ -61,6 +100,8 @@ impl LoadBroker {
                     .zip(lock_promises)
                     .enumerate()
                     .map(|(index, ((root, raw_batch), lock_promise))| {
+                        let affinities = affinities.clone();
+
                         let lockstep = Lockstep {
                             index,
                             lock_promise,
@@ -70,6 +111,7 @@ impl LoadBroker {
                         LoadBatch {
                             root,
                             raw_batch,
+                            affinities,
                             lockstep,
                         }
                     })

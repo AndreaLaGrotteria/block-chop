@@ -4,6 +4,7 @@ use talk::time::{sleep_schedules::CappedExponential, SleepSchedule};
 #[derive(Debug, Clone)]
 pub struct LoadBrokerSettings {
     pub rate: f64,
+    pub fill_interval: Duration,
     pub warmup: Duration,
     pub dissemination_delay: Duration,
     pub lockstep_delta: usize,
@@ -19,6 +20,7 @@ impl Default for LoadBrokerSettings {
     fn default() -> Self {
         LoadBrokerSettings {
             rate: 16.,
+            fill_interval: Duration::from_millis(100),
             warmup: Duration::from_secs(15),
             dissemination_delay: Duration::from_secs(3),
             lockstep_delta: 32,
