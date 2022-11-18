@@ -5,14 +5,14 @@ use crate::{
     warn,
 };
 use std::{cmp, sync::Arc, time::Instant};
-use talk::{crypto::Identity, net::SessionConnector, sync::fuse::Fuse};
+use talk::{crypto::Identity, net::PlexConnector, sync::fuse::Fuse};
 use tokio::{sync::mpsc, time};
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn broadcast_batches(
         membership: Arc<Membership>,
         broker_identity: Identity,
-        connector: SessionConnector,
+        connector: PlexConnector,
         batches: Vec<LoadBatch>,
         settings: LoadBrokerSettings,
     ) {

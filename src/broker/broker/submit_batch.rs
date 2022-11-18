@@ -13,7 +13,7 @@ use talk::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
         Identity, KeyCard,
     },
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{board::Board, promise::Promise},
 };
 use tokio::sync::mpsc::Sender as MpscSender;
@@ -39,7 +39,7 @@ impl Broker {
         root: Hash,
         broadcast_batch: Arc<BroadcastBatch>,
         server: KeyCard,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
         mut witness: Board<Certificate>,
@@ -80,7 +80,7 @@ impl Broker {
         root: Hash,
         raw_batch: &[u8],
         server: &KeyCard,
-        connector: &SessionConnector,
+        connector: &PlexConnector,
         verify: &mut Promise<bool>,
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
         witness: &mut Board<Certificate>,
@@ -96,7 +96,7 @@ impl Broker {
 
         // Send request
 
-        let mut session = connector
+        let mut plex = connector
             .connect(server.identity())
             .await
             .pot(TrySubmitError::ConnectFailed, here!())?;
@@ -107,13 +107,11 @@ impl Broker {
             server: server.identity(),
         });
 
-        session
-            .send(&(worker_index, sequence, root))
+        plex.send(&(worker_index, sequence, root))
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        session
-            .send_raw_bytes(&raw_batch)
+        plex.send_raw_bytes(&raw_batch)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -138,8 +136,7 @@ impl Broker {
         // (possibly invalid yet authentic) reply to the witness shard
         // request has already been processed.
         if verify && witness_shard_inlet.is_some() {
-            session
-                .send(&true)
+            plex.send(&true)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -149,7 +146,7 @@ impl Broker {
                 server: server.identity(),
             });
 
-            let witness_shard = session
+            let witness_shard = plex
                 .receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
@@ -190,8 +187,7 @@ impl Broker {
                     .await;
             }
         } else {
-            session
-                .send(&false)
+            plex.send(&false)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -201,8 +197,7 @@ impl Broker {
                 server: server.identity(),
             });
 
-            session
-                .receive::<Option<MultiSignature>>()
+            plex.receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -231,8 +226,7 @@ impl Broker {
             server: server.identity(),
         });
 
-        session
-            .send(witness)
+        plex.send(witness)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -244,7 +238,7 @@ impl Broker {
 
         // Collect delivery shard
 
-        let delivery_shard = session
+        let delivery_shard = plex
             .receive::<DeliveryShard>()
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
@@ -260,8 +254,6 @@ impl Broker {
             .unwrap()
             .send((server.identity(), delivery_shard))
             .await;
-
-        session.end();
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::SubmissionCompleted {

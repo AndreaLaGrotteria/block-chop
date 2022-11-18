@@ -11,7 +11,7 @@ use std::{
 };
 use talk::{
     crypto::KeyChain,
-    net::{Connector, Listener, SessionListener},
+    net::{Connector, Listener, PlexListener},
     sync::fuse::Fuse,
 };
 use tokio::sync::{mpsc, mpsc::Receiver as MpscReceiver};
@@ -41,7 +41,8 @@ impl Server {
     {
         // Preprocess arguments
 
-        let broker_listener = SessionListener::new(broker_listener);
+        let broker_listener =
+            PlexListener::new(broker_listener, settings.broker_listener_settings.clone());
 
         // Stash `Identity` for later logging
 

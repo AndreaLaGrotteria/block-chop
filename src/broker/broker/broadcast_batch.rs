@@ -12,7 +12,7 @@ use talk::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
         Identity,
     },
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{board::Board, fuse::Fuse, promise::Promise},
 };
 use tokio::{
@@ -37,7 +37,7 @@ impl Broker {
         broker_batch: &mut BrokerBatch,
         broadcast_batch: BroadcastBatch,
         membership: Arc<Membership>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         settings: BrokerSettings,
     ) -> (u64, Certificate) {
         // Preprocess arguments
@@ -316,7 +316,7 @@ mod tests {
     use std::time::Duration;
     use talk::{
         crypto::{primitives::hash::hash, KeyChain},
-        net::{test::TestConnector, SessionConnector},
+        net::{test::TestConnector, PlexConnector},
     };
 
     #[tokio::test]
@@ -327,7 +327,7 @@ mod tests {
         let broker = KeyChain::random();
 
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
-        let session_connector = Arc::new(SessionConnector::new(connector));
+        let plex_connector = Arc::new(PlexConnector::new(connector, Default::default()));
 
         let (_, broadcast_batch) = null_batch(&clients_keychains, 1);
         let entries = MerkleBatch::expanded_batch_entries(broadcast_batch.clone());
@@ -367,7 +367,7 @@ mod tests {
             &mut broker_batch,
             broadcast_batch,
             membership.clone(),
-            session_connector,
+            plex_connector,
             BrokerSettings {
                 totality_timeout: Duration::from_millis(100),
                 ..Default::default()
@@ -399,7 +399,7 @@ mod tests {
         let broker = KeyChain::random();
 
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
-        let session_connector = Arc::new(SessionConnector::new(connector));
+        let plex_connector = Arc::new(PlexConnector::new(connector, Default::default()));
 
         let (_, broadcast_batch) = null_batch(&clients, 1);
         let entries = MerkleBatch::expanded_batch_entries(broadcast_batch.clone());
@@ -439,7 +439,7 @@ mod tests {
             &mut broker_batch,
             broadcast_batch,
             membership.clone(),
-            session_connector,
+            plex_connector,
             BrokerSettings {
                 totality_timeout: Duration::from_millis(100),
                 ..Default::default()

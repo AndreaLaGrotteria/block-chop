@@ -8,7 +8,7 @@ use rand::{seq::SliceRandom, thread_rng};
 use std::sync::Arc;
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{board::Board, fuse::Fuse, promise::Promise},
 };
 use tokio::{
@@ -31,7 +31,7 @@ impl LoadBroker {
         sequence: u64,
         load_batch: LoadBatch,
         membership: Arc<Membership>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         settings: LoadBrokerSettings,
     ) {
         // Preprocess arguments
@@ -136,7 +136,7 @@ impl LoadBroker {
         // Wait on `lockstep` to ensure lockstepped submission (this reduces,
         // but does not remove, the rate at which servers observe duplicates)
         // Note: additionally waiting for `settings.lockstep_margin` reduces
-        // the probability that two witnesses in independent `Session`s will
+        // the probability that two witnesses in independent `Plex`es will
         // overtake each other in-flight, thus causing causally-dependent
         // batches to be submitted to `Order` in the wrong order.
 

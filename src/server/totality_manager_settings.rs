@@ -1,4 +1,5 @@
 use std::time::Duration;
+use talk::net::{PlexConnectorSettings, PlexListenerSettings};
 
 #[derive(Debug, Clone)]
 pub(in crate::server) struct TotalityManagerSettings {
@@ -8,6 +9,9 @@ pub(in crate::server) struct TotalityManagerSettings {
     pub update_interval: Duration,
     pub collect_interval: Duration,
     pub wake_interval: Duration,
+
+    pub connector_settings: PlexConnectorSettings,
+    pub listener_settings: PlexListenerSettings,
 }
 
 impl Default for TotalityManagerSettings {
@@ -18,6 +22,8 @@ impl Default for TotalityManagerSettings {
             update_interval: Duration::from_secs(1),
             collect_interval: Duration::from_millis(500),
             wake_interval: Duration::from_millis(200),
+            connector_settings: Default::default(),
+            listener_settings: Default::default(),
         }
     }
 }

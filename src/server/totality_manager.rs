@@ -16,7 +16,7 @@ use std::{
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
-    net::{Connector, Listener, Session, SessionConnector, SessionListener},
+    net::{Connector, Listener, Plex, PlexConnector, PlexListener},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -112,10 +112,10 @@ impl TotalityManager {
 
         let membership = Arc::new(membership);
 
-        let connector = SessionConnector::new(connector);
+        let connector = PlexConnector::new(connector, settings.connector_settings.clone());
         let connector = Arc::new(connector);
 
-        let listener = SessionListener::new(listener);
+        let listener = PlexListener::new(listener, settings.listener_settings.clone());
 
         // Initialize common state
 
@@ -187,7 +187,7 @@ impl TotalityManager {
         membership: Arc<Membership>,
         totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         mut run_call_outlet: CallOutlet,
         pull_inlet: InflatedBatchInlet,
         settings: TotalityManagerSettings,
@@ -343,7 +343,7 @@ impl TotalityManager {
         height: u64,
         root: Hash,
         membership: Arc<Membership>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         run_entry_inlet: EntryInlet,
         settings: TotalityManagerSettings,
     ) {
@@ -394,29 +394,27 @@ impl TotalityManager {
         height: u64,
         root: Hash,
         server: Identity,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
     ) -> Result<InflatedBatch, Top<QueryError>> {
-        let mut session = connector
+        let mut plex = connector
             .connect(server)
             .await
             .pot(QueryError::ConnectFailed, here!())?;
 
-        session
-            .send_plain(&Request::Query(height))
+        plex.send_plain(&Request::Query(height))
             .await
             .pot(QueryError::ConnectionError, here!())?;
 
-        let hit = session
+        let hit = plex
             .receive_plain::<bool>()
             .await
             .pot(QueryError::ConnectionError, here!())?;
 
         if !hit {
-            session.end();
             return QueryError::BatchUnavailable.fail().spot(here!());
         }
 
-        let batch = session
+        let batch = plex
             .receive_raw_bytes()
             .await
             .pot(QueryError::ConnectionError, here!())?;
@@ -436,8 +434,6 @@ impl TotalityManager {
         .await
         .unwrap()?;
 
-        session.end();
-
         if merkle_batch.root() == root {
             Ok(InflatedBatch::from_merkle(merkle_batch))
         } else {
@@ -448,7 +444,7 @@ impl TotalityManager {
     fn update(
         height: u64,
         membership: Arc<Membership>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         fuse: &Fuse,
     ) {
         for server in membership.servers().keys().copied() {
@@ -459,19 +455,16 @@ impl TotalityManager {
     async fn release(
         server: Identity,
         height: u64,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
     ) -> Result<(), Top<ReleaseError>> {
-        let mut session = connector
+        let mut plex = connector
             .connect(server)
             .await
             .pot(ReleaseError::ConnectFailed, here!())?;
 
-        session
-            .send_plain(&Request::Release(height))
+        plex.send_plain(&Request::Release(height))
             .await
             .pot(ReleaseError::ConnectionError, here!())?;
-
-        session.end();
 
         Ok(())
     }
@@ -479,16 +472,16 @@ impl TotalityManager {
     async fn listen(
         totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
-        mut listener: SessionListener,
+        mut listener: PlexListener,
     ) {
         let fuse = Fuse::new();
 
         loop {
-            let (server, session) = listener.accept().await;
+            let (server, plex) = listener.accept().await;
 
             fuse.spawn(TotalityManager::serve(
                 server,
-                session,
+                plex,
                 totality_queue.clone(),
                 vector_clock.clone(),
             ));
@@ -497,11 +490,11 @@ impl TotalityManager {
 
     async fn serve(
         server: Identity,
-        mut session: Session,
+        mut plex: Plex,
         totality_queue: Arc<Mutex<TotalityQueue>>,
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
     ) -> Result<(), Top<ServeError>> {
-        let request = session
+        let request = plex
             .receive_plain::<Request>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
@@ -529,18 +522,15 @@ impl TotalityManager {
                 if let Some(batch) = batch {
                     let raw_batch = bincode::serialize::<CompressedBatch>(batch.as_ref()).unwrap();
 
-                    session
-                        .send_plain(&true)
+                    plex.send_plain(&true)
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
 
-                    session
-                        .send_raw_bytes(raw_batch.as_slice())
+                    plex.send_raw_bytes(raw_batch.as_slice())
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
                 } else {
-                    session
-                        .send_plain(&false)
+                    plex.send_plain(&false)
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
                 }
@@ -552,8 +542,6 @@ impl TotalityManager {
                 }
             }
         }
-
-        session.end();
 
         Ok(())
     }

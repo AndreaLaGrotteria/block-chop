@@ -10,7 +10,7 @@ use talk::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
         Identity, KeyCard,
     },
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{board::Board, promise::Promise},
 };
 use tokio::sync::mpsc::Sender as MpscSender;
@@ -26,7 +26,7 @@ impl LoadBroker {
         root: Hash,
         raw_batch: Arc<Vec<u8>>,
         server: KeyCard,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
         mut witness: Board<Certificate>,

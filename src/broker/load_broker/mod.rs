@@ -6,7 +6,7 @@ use crate::{
 use std::{collections::VecDeque, iter, sync::Arc};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{
         fuse::Fuse,
         promise::{Promise, Solver},
@@ -30,7 +30,7 @@ impl LoadBroker {
     pub fn new(
         membership: Membership,
         broker_identity: Identity,
-        connector: SessionConnector,
+        connector: PlexConnector,
         flows: Vec<Vec<(Hash, Vec<u8>)>>,
         settings: LoadBrokerSettings,
     ) -> Self {
@@ -138,7 +138,7 @@ mod tests {
     use std::{iter, time::Duration};
     use talk::{
         crypto::KeyChain,
-        net::{test::TestConnector, SessionConnector},
+        net::{test::TestConnector, PlexConnector},
     };
     use tokio::time;
 
@@ -154,7 +154,7 @@ mod tests {
         let keychain = KeyChain::random();
         let broker_identity = keychain.keycard().identity();
         let connector = TestConnector::new(keychain, connector_map.clone());
-        let session_connector = SessionConnector::new(connector);
+        let plex_connector = PlexConnector::new(connector, Default::default());
 
         let flows = iter::repeat(
             iter::repeat(to_raw(null_batch(&client_keychains, 30)))
@@ -167,7 +167,7 @@ mod tests {
         let _load_broker = LoadBroker::new(
             membership.clone(),
             broker_identity,
-            session_connector,
+            plex_connector,
             flows,
             LoadBrokerSettings {
                 rate: 16.,
