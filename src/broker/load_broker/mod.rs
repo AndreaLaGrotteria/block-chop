@@ -42,6 +42,12 @@ impl LoadBroker {
 
         let membership = Arc::new(membership);
 
+        // Fill `connector`
+
+        connector
+            .fill(membership.servers().keys().copied(), settings.fill_interval)
+            .await;
+
         // Compile multiplexes
 
         let mut multiplexes = HashMap::new();
