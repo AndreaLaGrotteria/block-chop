@@ -39,6 +39,7 @@ impl LoadBroker {
         let LoadBatch {
             root,
             raw_batch,
+            affinities,
             mut lockstep,
         } = load_batch;
 
@@ -88,6 +89,7 @@ impl LoadBroker {
                 raw_batch.clone(),
                 server.clone(),
                 connector.clone(),
+                affinities.clone(),
                 verify,
                 witness_shard_inlet.clone(),
                 witness_board.clone(),

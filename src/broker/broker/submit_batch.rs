@@ -7,13 +7,13 @@ use crate::{
     warn, BrokerSettings,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
         Identity, KeyCard,
     },
-    net::PlexConnector,
+    net::{MultiplexId, PlexConnector},
     sync::{board::Board, promise::Promise},
 };
 use tokio::sync::mpsc::Sender as MpscSender;
@@ -61,6 +61,7 @@ impl Broker {
             raw_batch.as_slice(),
             &server,
             connector.as_ref(),
+            None,
             &mut verify,
             &mut witness_shard_inlet,
             &mut witness,
@@ -81,6 +82,7 @@ impl Broker {
         raw_batch: &[u8],
         server: &KeyCard,
         connector: &PlexConnector,
+        affinities: Option<&HashMap<Identity, MultiplexId>>,
         verify: &mut Promise<bool>,
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
         witness: &mut Board<Certificate>,
@@ -96,10 +98,19 @@ impl Broker {
 
         // Send request
 
-        let mut plex = connector
-            .connect(server.identity())
-            .await
-            .pot(TrySubmitError::ConnectFailed, here!())?;
+        let mut plex = if let Some(affinities) = affinities {
+            let (_, plex) = connector
+                .connect_with_affinity(server.identity(), affinities[&server.identity()])
+                .await
+                .pot(TrySubmitError::ConnectFailed, here!())?;
+
+            plex
+        } else {
+            connector
+                .connect(server.identity())
+                .await
+                .pot(TrySubmitError::ConnectFailed, here!())?
+        };
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::ServerConnected {

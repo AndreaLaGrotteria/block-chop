@@ -141,7 +141,8 @@ async fn main() {
             workers: cmp::max((rate * 30.) as u16, 1),
             ..Default::default()
         },
-    );
+    )
+    .await;
 
     info!(" .. done! `LoadBroker` running!");
 
