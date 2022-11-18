@@ -99,10 +99,14 @@ impl Broker {
         // Send request
 
         let mut plex = if let Some(affinities) = affinities {
-            let (_, plex) = connector
+            let (multiplex_id, plex) = connector
                 .connect_with_affinity(server.identity(), affinities[&server.identity()])
                 .await
                 .pot(TrySubmitError::ConnectFailed, here!())?;
+
+            if multiplex_id != affinities[&server.identity()] {
+                warn!("Impossible to establish `Plex` with desired affinity.");
+            }
 
             plex
         } else {
