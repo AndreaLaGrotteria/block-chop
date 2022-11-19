@@ -78,17 +78,13 @@ async fn main() {
 
     let connect_dispatcher = ConnectDispatcher::new(connector);
     let broker_connector = connect_dispatcher.register("broker".to_string());
+
     let plex_connector_settings = PlexConnectorSettings {
-        connections_per_remote: 50,
+        connections_per_remote: 32,
         ..Default::default()
     };
+
     let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
-    broker_connector
-        .fill(
-            membership.servers().keys().cloned(),
-            Duration::from_millis(100),
-        )
-        .await;
 
     // Load batches
 
