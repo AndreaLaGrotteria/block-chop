@@ -8,7 +8,7 @@ use crate::{
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use log::info;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -43,7 +43,7 @@ impl Broker {
         connector: Arc<PlexConnector>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
-        mut witness: Board<Certificate>,
+        mut witness: Board<(Certificate, Instant)>,
         delivery_shard_inlet: DeliveryShardInlet,
         settings: BrokerSettings,
     ) {
@@ -88,7 +88,7 @@ impl Broker {
         affinities: Option<&HashMap<Identity, MultiplexId>>,
         verify: &mut Promise<bool>,
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
-        witness: &mut Board<Certificate>,
+        witness: &mut Board<(Certificate, Instant)>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
         flow_index: usize,
         batch_index: usize,
@@ -232,7 +232,7 @@ impl Broker {
 
         // Send witness
 
-        let witness = if let Some(witness) = witness.as_ref().await {
+        let (witness, witness_post_time) = if let Some(witness) = witness.as_ref().await {
             witness
         } else {
             // `Broker` has dropped. Idle waiting for task to be cancelled.
@@ -247,7 +247,8 @@ impl Broker {
         });
 
         info!(
-            "Sending witness {:?}:{flow_index}:{batch_index}",
+            "(With a delay of {:?}) Sending witness {:?}:{flow_index}:{batch_index}",
+            witness_post_time.elapsed(),
             server.identity()
         );
 

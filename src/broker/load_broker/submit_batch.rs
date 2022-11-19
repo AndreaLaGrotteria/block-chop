@@ -4,7 +4,7 @@ use crate::{
     crypto::Certificate,
     warn,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -30,7 +30,7 @@ impl LoadBroker {
         affinities: Arc<HashMap<Identity, MultiplexId>>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
-        mut witness: Board<Certificate>,
+        mut witness: Board<(Certificate, Instant)>,
         delivery_shard_inlet: DeliveryShardInlet,
         settings: LoadBrokerSettings,
         flow_index: usize,

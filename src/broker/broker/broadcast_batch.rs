@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
@@ -126,7 +126,7 @@ impl Broker {
         }
 
         let witness = witness_collector.finalize();
-        witness_poster.post(witness);
+        witness_poster.post((witness, Instant::now()));
 
         // Collect and aggregate (f + 1) `DeliveryShard`s:
         //  - Collect `DeliveryShard`s until the same set of `Amendment`s is

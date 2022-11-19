@@ -4,9 +4,8 @@ use crate::{
     warn, Membership,
 };
 use futures::future::join_all;
-use log::info;
 use rand::{seq::SliceRandom, thread_rng};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
     net::PlexConnector,
@@ -149,7 +148,7 @@ impl LoadBroker {
 
         lockstep.lock().await;
         time::sleep(settings.lockstep_margin).await;
-        witness_poster.post(witness);
+        witness_poster.post((witness, Instant::now()));
 
         lockstep.free();
 
