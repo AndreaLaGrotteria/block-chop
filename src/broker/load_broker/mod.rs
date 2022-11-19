@@ -3,6 +3,7 @@ use crate::{
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
+use log::info;
 use std::{
     collections::{HashMap, VecDeque},
     iter,
@@ -43,6 +44,8 @@ impl LoadBroker {
         let membership = Arc::new(membership);
 
         // Fill `connector`
+
+        info!("Filling `PlexConnector`..");
 
         connector
             .fill(membership.servers().keys().copied(), settings.fill_interval)
