@@ -98,6 +98,8 @@ impl LoadBroker {
                 witness_board.clone(),
                 delivery_shard_inlet.clone(),
                 settings.clone(),
+                flow_index,
+                batch_index,
             ));
 
             submit_tasks.push(handle);
@@ -147,8 +149,6 @@ impl LoadBroker {
 
         lockstep.lock().await;
         time::sleep(settings.lockstep_margin).await;
-
-        info!("Posting witness {flow_index}:{batch_index}");
         witness_poster.post(witness);
 
         lockstep.free();

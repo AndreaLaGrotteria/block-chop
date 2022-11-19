@@ -33,6 +33,8 @@ impl LoadBroker {
         mut witness: Board<Certificate>,
         delivery_shard_inlet: DeliveryShardInlet,
         settings: LoadBrokerSettings,
+        flow_index: usize,
+        batch_index: usize,
     ) {
         let mut witness_shard_inlet = Some(witness_shard_inlet);
         let mut delivery_shard_inlet = Some(delivery_shard_inlet);
@@ -52,6 +54,8 @@ impl LoadBroker {
             &mut witness_shard_inlet,
             &mut witness,
             &mut delivery_shard_inlet,
+            flow_index,
+            batch_index,
         )
         .await
         {

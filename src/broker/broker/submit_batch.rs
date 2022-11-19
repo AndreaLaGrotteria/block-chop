@@ -7,6 +7,7 @@ use crate::{
     warn, BrokerSettings,
 };
 use doomstack::{here, Doom, ResultExt, Top};
+use log::info;
 use std::{collections::HashMap, sync::Arc};
 use talk::{
     crypto::{
@@ -66,6 +67,8 @@ impl Broker {
             &mut witness_shard_inlet,
             &mut witness,
             &mut delivery_shard_inlet,
+            0,
+            0,
         )
         .await
         {
@@ -87,6 +90,8 @@ impl Broker {
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
         witness: &mut Board<Certificate>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
+        flow_index: usize,
+        batch_index: usize,
     ) -> Result<(), Top<TrySubmitError>> {
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::SubmissionStarted {
@@ -240,6 +245,11 @@ impl Broker {
             root,
             server: server.identity(),
         });
+
+        info!(
+            "Sending witness {:?}:{flow_index}:{batch_index}",
+            server.identity()
+        );
 
         plex.send(witness)
             .await
