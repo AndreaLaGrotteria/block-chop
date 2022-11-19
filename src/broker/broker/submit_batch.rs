@@ -232,6 +232,8 @@ impl Broker {
 
         // Send witness
 
+        let start_wait_for_witness = Instant::now();
+
         let (witness, witness_post_time) = if let Some(witness) = witness.as_ref().await {
             witness
         } else {
@@ -247,8 +249,9 @@ impl Broker {
         });
 
         info!(
-            "(With a delay of {:?}) Sending witness {:?}:{flow_index}:{batch_index}",
+            "(With a delay of {:?}:{:?}) Sending witness {:?}:{flow_index}:{batch_index}",
             witness_post_time.elapsed(),
+            start_wait_for_witness.elapsed(),
             server.identity()
         );
 
