@@ -70,7 +70,8 @@ impl LoadBroker {
 
         let mut flows = flows
             .into_iter()
-            .map(|batches| {
+            .enumerate()
+            .map(|(flow_index, batches)| {
                 // Initialize lock `Promise`s and free channel
 
                 let (lock_promises, lock_solvers): (Vec<_>, Vec<_>) =
@@ -102,11 +103,11 @@ impl LoadBroker {
                     .into_iter()
                     .zip(lock_promises)
                     .enumerate()
-                    .map(|(index, ((root, raw_batch), lock_promise))| {
+                    .map(|(batch_index, ((root, raw_batch), lock_promise))| {
                         let affinities = affinities.clone();
 
                         let lockstep = Lockstep {
-                            index,
+                            index: batch_index,
                             lock_promise,
                             free_inlet: free_inlet.clone(),
                         };
@@ -116,6 +117,8 @@ impl LoadBroker {
                             raw_batch,
                             affinities,
                             lockstep,
+                            flow_index,
+                            batch_index,
                         }
                     })
                     .collect::<VecDeque<_>>();

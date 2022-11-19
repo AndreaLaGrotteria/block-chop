@@ -4,6 +4,7 @@ use crate::{
     warn, Membership,
 };
 use futures::future::join_all;
+use log::info;
 use rand::{seq::SliceRandom, thread_rng};
 use std::sync::Arc;
 use talk::{
@@ -41,6 +42,8 @@ impl LoadBroker {
             raw_batch,
             affinities,
             mut lockstep,
+            flow_index,
+            batch_index,
         } = load_batch;
 
         let raw_batch = Arc::new(raw_batch);
@@ -145,6 +148,7 @@ impl LoadBroker {
         lockstep.lock().await;
         time::sleep(settings.lockstep_margin).await;
 
+        info!("Posting witness {flow_index}:{batch_index}");
         witness_poster.post(witness);
 
         lockstep.free();

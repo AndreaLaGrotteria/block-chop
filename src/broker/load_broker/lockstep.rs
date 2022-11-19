@@ -1,5 +1,4 @@
 use crate::broker::LoadBroker;
-use log::info;
 use std::mem;
 use talk::sync::promise::Solver;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -14,7 +13,7 @@ enum State {
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn lockstep(
-        flow_id: usize,
+        _flow_id: usize,
         lock_solvers: Vec<Solver<()>>,
         mut free_outlet: UsizeOutlet,
         lockstep_delta: usize,
@@ -30,7 +29,6 @@ impl LoadBroker {
 
         for index in 0..lockstep_delta {
             if let Some(state) = states.get_mut(index) {
-                info!("Unlocking {flow_id}:{index}");
                 state.unlock();
             }
         }
@@ -52,7 +50,6 @@ impl LoadBroker {
 
             while let Some(State::Freed) = states.get(head) {
                 if let Some(state) = states.get_mut(head + lockstep_delta) {
-                    info!("Unlocking {flow_id}:{}", head + lockstep_delta);
                     state.unlock();
                 }
 

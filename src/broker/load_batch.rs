@@ -10,4 +10,6 @@ pub(in crate::broker) struct LoadBatch {
     pub raw_batch: Vec<u8>,
     pub affinities: Arc<HashMap<Identity, MultiplexId>>,
     pub lockstep: Lockstep,
+    pub flow_index: usize,
+    pub batch_index: usize,
 }
