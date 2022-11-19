@@ -140,8 +140,9 @@ impl LoadBroker {
 
         let fuse = Fuse::new();
 
-        for flow in flows {
+        for (id, flow) in flows.into_iter().enumerate() {
             fuse.spawn(LoadBroker::lockstep(
+                id,
                 flow.lock_solvers,
                 flow.free_outlet,
                 settings.lockstep_delta,

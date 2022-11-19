@@ -19,7 +19,8 @@ use talk::{
     link::{
         context::ConnectDispatcher,
         rendezvous::{Client as RendezvousClient, Connector as RendezvousConnector},
-    }, net::{PlexConnectorSettings, PlexConnector},
+    },
+    net::{PlexConnector, PlexConnectorSettings},
 };
 use tokio::time;
 
@@ -82,7 +83,12 @@ async fn main() {
         ..Default::default()
     };
     let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
-    broker_connector.fill(membership.servers().keys().cloned(), Duration::from_millis(100)).await;
+    broker_connector
+        .fill(
+            membership.servers().keys().cloned(),
+            Duration::from_millis(100),
+        )
+        .await;
 
     // Load batches
 
