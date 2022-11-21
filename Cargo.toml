@@ -96,6 +96,8 @@ rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1" }
 statistical = { version = "1.0.0", optional = true }
 
+chrono = { version = "0.4.22"}
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

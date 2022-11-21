@@ -8,7 +8,9 @@ use crate::{
     },
     heartbeat::{self, ServerEvent},
     order::Order,
-    server::{Batch, BrokerSlot, Deduplicator, Duplicate, Server, TotalityManager, WitnessCache},
+    server::{
+        BrokerSlot, Deduplicator, Duplicate, InflatedBatch, Server, TotalityManager, WitnessCache,
+    },
     system::Membership,
     Entry,
 };
@@ -81,8 +83,10 @@ impl Server {
                         // available to other servers. Otherwise, retrieve the appropriate batch.
 
                         match expected_batch {
-                            Some((raw_batch, batch)) if batch.root() == root =>
-                                totality_manager.hit(raw_batch, batch).await,
+                            // `expected_batch` was never edited since compression:
+                            // its `root()` is guaranteed to be `Some`
+                            Some(batch) if batch.root().unwrap() == root =>
+                                totality_manager.hit(batch).await,
                             _ => {
                                 warn!("Batch {:#?} missing from `TotalityManager`.", root);
                                 totality_manager.miss(root).await
@@ -174,14 +178,14 @@ impl Server {
     }
 
     async fn burst_batch(
-        mut batch: Batch,
+        mut batch: InflatedBatch,
         duplicates: Vec<Duplicate>,
         next_batch_inlet: &mut BurstInlet,
     ) -> (Hash, Vec<Amendment>) {
         // Stash statistics for later logging
 
         #[cfg(feature = "benchmark")]
-        let unamended_root = batch.entries.root();
+        let unamended_root = batch.root();
 
         // Apply `Nudge` and `Drop` elements of `duplicates` to `batch`, store
         // `Ignore` and `Nudge` elements of `duplicates` for later removal
@@ -192,8 +196,7 @@ impl Server {
             // Locate `duplicate` within `batch`
 
             let index = batch
-                .entries
-                .items()
+                .entries()
                 .binary_search_by(|entry| match entry {
                     // Before processing, all elements of `batch.entries` are `Some`.
                     // Moreover, `duplicates` is sorted by id. As a result, if `entry`
@@ -210,14 +213,14 @@ impl Server {
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
-                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    let mut entry = batch.entries()[index].clone().unwrap();
                     entry.sequence = *sequence;
-                    batch.entries.set(index, Some(entry)).unwrap();
+                    batch.entries_mut().set(index, Some(entry)).unwrap();
 
                     to_omit.push(index);
                 }
                 Duplicate::Drop { .. } => {
-                    batch.entries.set(index, None).unwrap();
+                    batch.entries_mut().set(index, None).unwrap();
                 }
             }
         }
@@ -226,7 +229,7 @@ impl Server {
 
         // Extract `batch`'s entries, remove all duplicates in `to_omit`
 
-        let mut entries = Vec::from(batch.entries);
+        let mut entries = batch.unwrap();
 
         for ignore in to_omit {
             entries[ignore] = None;

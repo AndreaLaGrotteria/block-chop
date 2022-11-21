@@ -5,7 +5,9 @@ use talk::time::{sleep_schedules::CappedExponential, SleepSchedule};
 pub struct LoadBrokerSettings {
     pub rate: f64,
     pub warmup: Duration,
-    pub lockstep_delay: Duration,
+    pub dissemination_delay: Duration,
+    pub lockstep_delta: usize,
+    pub lockstep_margin: Duration,
     pub witnessing_timeout: Duration,
     pub totality_timeout: Duration,
     pub workers: u16,
@@ -18,7 +20,9 @@ impl Default for LoadBrokerSettings {
         LoadBrokerSettings {
             rate: 16.,
             warmup: Duration::from_secs(15),
-            lockstep_delay: Duration::from_secs(5),
+            dissemination_delay: Duration::from_secs(3),
+            lockstep_delta: 32,
+            lockstep_margin: Duration::from_secs(1),
             witnessing_timeout: Duration::from_secs(15),
             totality_timeout: Duration::from_secs(60),
             workers: 32768,

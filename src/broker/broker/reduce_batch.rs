@@ -1,6 +1,6 @@
 use crate::{
-    broadcast::{CompressedBatch, Straggler},
-    broker::{Batch, BatchStatus, Broker, BrokerSettings, Reduction},
+    broadcast::{Batch as BroadcastBatch, Straggler},
+    broker::{Batch as BrokerBatch, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     debug, info,
     system::Directory,
@@ -39,10 +39,10 @@ enum StreamReductionCommand {
 impl Broker {
     pub(in crate::broker::broker) async fn reduce_batch(
         directory: Arc<Directory>,
-        batch: &mut Batch,
+        broker_batch: &mut BrokerBatch,
         mut reduction_outlet: ReductionOutlet,
         settings: &BrokerSettings,
-    ) -> CompressedBatch {
+    ) -> BroadcastBatch {
         // Spawn the stream reduction task
 
         let (command_inlet, command_outlet) = mpsc::unbounded_channel();
@@ -51,7 +51,7 @@ impl Broker {
 
         let stream_reduction_task = fuse.spawn(Broker::stream_reduction(
             directory.clone(),
-            batch.entries.root(),
+            broker_batch.entries.root(),
             command_outlet,
         ));
 
@@ -63,12 +63,12 @@ impl Broker {
 
         info!(
             "Collecting reductions for root {:#?}..",
-            batch.entries.root(),
+            broker_batch.entries.root(),
         );
 
         let reduction_deadline = Instant::now() + settings.reduction_timeout;
 
-        let mut pending_reducers = batch
+        let mut pending_reducers = broker_batch
             .submissions
             .iter()
             .map(|submission| submission.entry.id)
@@ -103,7 +103,7 @@ impl Broker {
                 _ = time::sleep(settings.reduction_interval) => None,
             } {
                 // Filter out reductions for other batches
-                if reduction.root != batch.entries.root() {
+                if reduction.root != broker_batch.entries.root() {
                     continue;
                 }
 
@@ -112,7 +112,7 @@ impl Broker {
                 if pending_reducers.remove(&reduction.id) {
                     debug!(
                         "Received reduction for {:#?} from id {}.",
-                        batch.entries.root(),
+                        broker_batch.entries.root(),
                         reduction.id,
                     );
 
@@ -144,22 +144,22 @@ impl Broker {
 
         // Collect and sort straggler ids (both late and Byzantine)
 
-        info!("Building compressed batch..");
+        info!("Building broadcast batch..");
 
         let mut straggler_ids = pending_reducers.into_iter().collect::<Vec<_>>();
         straggler_ids.extend(byzantines);
 
         straggler_ids.par_sort_unstable();
 
-        // Build `CompressedBatch` fields and update `batch.entries` to account for stragglers
+        // Build `BroadcastBatch` fields and update `batch.entries` to account for stragglers
 
         let mut straggler_ids = straggler_ids.into_iter().peekable();
 
-        let mut ids = Vec::with_capacity(batch.submissions.len());
-        let mut messages = Vec::with_capacity(batch.submissions.len());
+        let mut ids = Vec::with_capacity(broker_batch.submissions.len());
+        let mut messages = Vec::with_capacity(broker_batch.submissions.len());
         let mut stragglers = Vec::with_capacity(straggler_ids.len());
 
-        for (index, submission) in batch.submissions.iter().enumerate() {
+        for (index, submission) in broker_batch.submissions.iter().enumerate() {
             ids.push(submission.entry.id);
             messages.push(submission.entry.message.clone());
 
@@ -177,7 +177,7 @@ impl Broker {
                     signature: submission.signature,
                 });
 
-                batch
+                broker_batch
                     .entries
                     .set(index, Some(submission.entry.clone()))
                     .unwrap();
@@ -185,20 +185,18 @@ impl Broker {
         }
 
         let ids = VarCram::cram(ids.as_slice());
-        let raise = batch.raise;
+        let raise = broker_batch.raise;
 
-        batch.status = BatchStatus::Submitting;
-
-        // Assemble and return `CompressedBatch`
+        // Assemble and return `BroadcastBatch`
 
         info!(
-            "Built compressed batch (root {:#?}, {} messages, {} stragglers).",
-            batch.entries.root(),
+            "Built broadcast batch (root {:#?}, {} messages, {} stragglers).",
+            broker_batch.entries.root(),
             messages.len(),
             stragglers.len(),
         );
 
-        CompressedBatch {
+        BroadcastBatch {
             ids,
             messages,
             raise,

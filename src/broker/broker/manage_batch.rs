@@ -29,17 +29,17 @@ impl Broker {
         worker_recycler: IndexInlet,
         settings: BrokerSettings,
     ) {
-        let mut batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
+        let mut broker_batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
 
-        let compressed_batch =
-            Broker::reduce_batch(directory, &mut batch, reduction_outlet, &settings).await;
+        let broadcast_batch =
+            Broker::reduce_batch(directory, &mut broker_batch, reduction_outlet, &settings).await;
 
         let (height, delivery_certificate) = Broker::broadcast_batch(
             broker_identity,
             worker_index,
             sequence,
-            &mut batch,
-            compressed_batch,
+            &mut broker_batch,
+            broadcast_batch,
             membership.clone(),
             connector,
             settings.clone(),
@@ -50,7 +50,8 @@ impl Broker {
 
         debug!("Got height and delivery certificate!");
 
-        Broker::disseminate_deliveries(batch, height, delivery_certificate, sender.as_ref()).await;
+        Broker::disseminate_deliveries(broker_batch, height, delivery_certificate, sender.as_ref())
+            .await;
     }
 }
 

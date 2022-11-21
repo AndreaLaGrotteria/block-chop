@@ -1,6 +1,6 @@
 use crate::{
     broadcast::{Entry, PACKING},
-    broker::{Batch, BatchStatus, Broker, Response, Submission},
+    broker::{Batch, Broker, Response, Submission},
     crypto::records::Height as HeightRecord,
     info,
 };
@@ -79,7 +79,6 @@ impl Broker {
         // Assemble and return `Batch`
 
         Batch {
-            status: BatchStatus::Reducing,
             submissions,
             raise,
             entries,

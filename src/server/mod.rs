@@ -1,4 +1,4 @@
-mod batch;
+mod batches;
 mod broker_slot;
 mod deduplicator;
 mod deduplicator_settings;
@@ -19,7 +19,7 @@ use totality_manager_settings::TotalityManagerSettings;
 use witness_cache::WitnessCache;
 use witness_cache_settings::WitnessCacheSettings;
 
-pub(crate) use batch::Batch;
+pub(crate) use batches::{CompressedBatch, InflatedBatch, MerkleBatch, PlainBatch};
 
 pub use server::Server;
 pub use server_settings::ServerSettings;

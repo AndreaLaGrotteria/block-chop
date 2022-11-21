@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{CompressedBatch, DeliveryShard},
+    broadcast::{Batch as BroadcastBatch, DeliveryShard},
     broker::Broker,
     crypto::{statements::BatchWitness, Certificate},
     debug,
@@ -37,7 +37,7 @@ impl Broker {
         worker_index: u16,
         sequence: u64,
         root: Hash,
-        compressed_batch: Arc<CompressedBatch>,
+        broadcast_batch: Arc<BroadcastBatch>,
         server: KeyCard,
         connector: Arc<SessionConnector>,
         mut verify: Promise<bool>,
@@ -46,7 +46,7 @@ impl Broker {
         delivery_shard_inlet: DeliveryShardInlet,
         settings: BrokerSettings,
     ) {
-        let raw_batch = bincode::serialize(compressed_batch.as_ref()).unwrap();
+        let raw_batch = bincode::serialize(broadcast_batch.as_ref()).unwrap();
 
         let mut witness_shard_inlet = Some(witness_shard_inlet);
         let mut delivery_shard_inlet = Some(delivery_shard_inlet);

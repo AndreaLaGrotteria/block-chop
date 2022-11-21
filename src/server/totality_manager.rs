@@ -1,5 +1,5 @@
 use crate::{
-    server::{Batch, TotalityManagerSettings},
+    server::{CompressedBatch, InflatedBatch, MerkleBatch, PlainBatch, TotalityManagerSettings},
     system::Membership,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -27,29 +27,34 @@ use tokio::{
 type CallInlet = MpscSender<Call>;
 type CallOutlet = MpscReceiver<Call>;
 
-type BatchInlet = MpscSender<Batch>;
-type BatchOutlet = MpscReceiver<Batch>;
+type InflatedBatchInlet = MpscSender<InflatedBatch>;
+type InflatedBatchOutlet = MpscReceiver<InflatedBatch>;
 
-type EntryInlet = MpscSender<(u64, Batch)>;
+type EntryInlet = MpscSender<(u64, InflatedBatch)>;
 
 pub(in crate::server) struct TotalityManager {
     run_call_inlet: CallInlet,
-    pull_outlet: BatchOutlet,
+    pull_outlet: InflatedBatchOutlet,
     _fuse: Fuse,
 }
 
 struct DeliveryQueue {
     offset: u64,
-    entries: VecDeque<Option<Batch>>,
+    entries: VecDeque<Option<DeliveryItem>>,
+}
+
+enum DeliveryItem {
+    Compressed(Arc<CompressedBatch>),
+    Inflated(InflatedBatch),
 }
 
 struct TotalityQueue {
     offset: u64,
-    entries: VecDeque<Option<Arc<Vec<u8>>>>,
+    entries: VecDeque<Option<Arc<CompressedBatch>>>,
 }
 
 enum Call {
-    Hit(Vec<u8>, Batch),
+    Hit(CompressedBatch),
     Miss(Hash),
 }
 
@@ -70,8 +75,10 @@ enum QueryError {
     #[doom(description("Failed to deserialize: {}", source))]
     #[doom(wrap(deserialize_failed))]
     DeserializeFailed { source: Box<bincode::ErrorKind> },
-    #[doom(description("Failed to expand batch"))]
-    ExpandFailed,
+    #[doom(description("Failed to decompress `CompressedBatch` into `PlainBatch`"))]
+    DecompressFailed,
+    #[doom(description("Failed to expand `PlainBatch` into `MerkleBatch`"))]
+    MerkleFailed,
     #[doom(description("Root mismatch"))]
     RootMismatch,
 }
@@ -162,18 +169,15 @@ impl TotalityManager {
         }
     }
 
-    pub async fn hit(&self, compressed_batch: Vec<u8>, batch: Batch) {
-        let _ = self
-            .run_call_inlet
-            .send(Call::Hit(compressed_batch, batch))
-            .await;
+    pub async fn hit(&self, batch: CompressedBatch) {
+        let _ = self.run_call_inlet.send(Call::Hit(batch)).await;
     }
 
     pub async fn miss(&self, root: Hash) {
         let _ = self.run_call_inlet.send(Call::Miss(root)).await;
     }
 
-    pub async fn pull(&mut self) -> Batch {
+    pub async fn pull(&mut self) -> InflatedBatch {
         // The `Fuse` to `TotalityManager::run` is owned by
         // `self`, so `pull_inlet` cannot have been dropped
         self.pull_outlet.recv().await.unwrap()
@@ -185,7 +189,7 @@ impl TotalityManager {
         vector_clock: Arc<HashMap<Identity, AtomicU64>>,
         connector: Arc<SessionConnector>,
         mut run_call_outlet: CallOutlet,
-        pull_inlet: BatchInlet,
+        pull_inlet: InflatedBatchInlet,
         settings: TotalityManagerSettings,
     ) {
         let mut delivery_queue = DeliveryQueue {
@@ -211,17 +215,18 @@ impl TotalityManager {
                     };
 
                     match call {
-                        Call::Hit(compressed_batch, batch) => {
-                            // Make `compressed_batch` available to other servers,
-                            // stage `batch` for delivery
+                        Call::Hit(compressed_batch) => {
+                            // Inflate and stage `compressed_batch` for delivery
 
-                            delivery_queue.entries.push_back(Some(batch));
+                            let compressed_batch = Arc::new(compressed_batch);
+
+                            delivery_queue.entries.push_back(Some(DeliveryItem::Compressed(compressed_batch.clone())));
 
                             totality_queue
                                 .lock()
                                 .unwrap()
                                 .entries
-                                .push_back(Some(Arc::new(compressed_batch)));
+                                .push_back(Some(compressed_batch));
                         }
 
                         Call::Miss(root) => {
@@ -250,12 +255,14 @@ impl TotalityManager {
                 }
 
                 entry = run_entry_outlet.recv() => {
-                    let (height, batch) = if let Some(entry) = entry {
+                    let (height, inflated_batch) = if let Some(entry) = entry {
                         entry
                     } else {
                         // `TotalityManager` has dropped, shutdown
                         return;
                     };
+
+                    let delivery_item = DeliveryItem::Inflated(inflated_batch);
 
                     // Only `Some` elements are `pop_front()`ed from `delivery_queue`,
                     // and `None` elements in `delivery_queue` are set to `Some` only
@@ -264,7 +271,7 @@ impl TotalityManager {
                     // `delivery_queue`, and no entry in `run_entry_outlet` is duplicated.
                     // As a result, the `height`-th element of `delivery_queue` is
                     // guaranteed to still be available (and `None`).
-                    *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(batch);
+                    *delivery_queue.entries.get_mut((height - delivery_queue.offset) as usize).unwrap() = Some(delivery_item);
                 }
 
                 _ = time::sleep(settings.wake_interval) => {}
@@ -274,10 +281,18 @@ impl TotalityManager {
             // (block on the first `None` element to preserve batch ordering)
 
             while let Some(Some(_)) = delivery_queue.entries.front() {
-                let batch = delivery_queue.entries.pop_front().unwrap().unwrap();
+                let delivery_item = delivery_queue.entries.pop_front().unwrap().unwrap();
                 delivery_queue.offset += 1;
 
-                let _ = pull_inlet.send(batch).await;
+                let inflated_batch = match delivery_item {
+                    DeliveryItem::Compressed(compressed_batch) => {
+                        let plain_batch = PlainBatch::from_compressed(&compressed_batch).unwrap();
+                        InflatedBatch::from_plain(plain_batch).unwrap()
+                    }
+                    DeliveryItem::Inflated(inflated_batch) => inflated_batch,
+                };
+
+                let _ = pull_inlet.send(inflated_batch).await;
             }
 
             // Every `settings.collect_interval`, garbage collect `totality_queue`
@@ -380,7 +395,7 @@ impl TotalityManager {
         root: Hash,
         server: Identity,
         connector: Arc<SessionConnector>,
-    ) -> Result<Batch, Top<QueryError>> {
+    ) -> Result<InflatedBatch, Top<QueryError>> {
         let mut session = connector
             .connect(server)
             .await
@@ -407,21 +422,24 @@ impl TotalityManager {
             .pot(QueryError::ConnectionError, here!())?;
 
         // Expand using a blocking task to avoid clogging the event loop
-        let batch = task::spawn_blocking(move || -> Result<Batch, Top<QueryError>> {
-            let batch = bincode::deserialize(batch.as_slice())
+        let merkle_batch = task::spawn_blocking(move || -> Result<MerkleBatch, Top<QueryError>> {
+            let compressed_batch = bincode::deserialize::<CompressedBatch>(batch.as_slice())
                 .map_err(QueryError::deserialize_failed)
                 .map_err(Doom::into_top)
                 .spot(here!())?;
 
-            Batch::expand_unverified(batch).pot(QueryError::ExpandFailed, here!())
+            let plain_batch = PlainBatch::from_compressed(&compressed_batch)
+                .pot(QueryError::DecompressFailed, here!())?;
+
+            MerkleBatch::from_plain(&plain_batch).pot(QueryError::MerkleFailed, here!())
         })
         .await
         .unwrap()?;
 
         session.end();
 
-        if batch.root() == root {
-            Ok(batch)
+        if merkle_batch.root() == root {
+            Ok(InflatedBatch::from_merkle(merkle_batch))
         } else {
             QueryError::RootMismatch.fail()
         }
@@ -509,13 +527,15 @@ impl TotalityManager {
                 };
 
                 if let Some(batch) = batch {
+                    let raw_batch = bincode::serialize::<CompressedBatch>(batch.as_ref()).unwrap();
+
                     session
                         .send_plain(&true)
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
 
                     session
-                        .send_raw_bytes(batch.as_slice())
+                        .send_raw_bytes(raw_batch.as_slice())
                         .await
                         .pot(ServeError::ConnectionError, here!())?;
                 } else {
@@ -569,15 +589,14 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let root = merkle_batch.root();
 
-            totality_manager
-                .hit(serialized_compressed_batch, batch)
-                .await;
+            totality_manager.hit(compressed_batch).await;
 
             let batch = totality_manager.pull().await;
 
@@ -614,13 +633,14 @@ mod tests {
         );
 
         for _ in 0..128 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let root = merkle_batch.root();
 
-            hitter.hit(serialized_compressed_batch, batch).await;
+            hitter.hit(compressed_batch).await;
             misser.miss(root).await;
 
             let hitter_batch = hitter.pull().await;
@@ -660,20 +680,19 @@ mod tests {
             .collect::<Vec<_>>();
 
         for _ in 0..1024 {
-            let (_, compressed_batch) = random_unauthenticated_batch(128, 32);
-            let serialized_compressed_batch = bincode::serialize(&compressed_batch).unwrap();
+            let (_, broadcast_batch) = random_unauthenticated_batch(128, 32);
+            let merkle_batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+            let compressed_batch =
+                CompressedBatch::from_broadcast(merkle_batch.root(), broadcast_batch);
 
-            let batch = Batch::expand_unverified(compressed_batch).unwrap();
-            let root = batch.root();
+            let root = merkle_batch.root();
 
             totality_managers.shuffle(&mut rand::thread_rng());
 
             let hitters = rand::random::<usize>() % 16 + 1;
 
             for hitter in &totality_managers[0..hitters] {
-                hitter
-                    .hit(serialized_compressed_batch.clone(), batch.clone())
-                    .await;
+                hitter.hit(compressed_batch.clone()).await;
             }
 
             for misser in &totality_managers[hitters..] {

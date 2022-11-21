@@ -1,6 +1,7 @@
 use chop_chop::{
     heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
 };
+use chrono::{Timelike, Utc};
 use futures::stream::StreamExt;
 use log::info;
 use signal_hook::consts::signal::*;
@@ -9,6 +10,7 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{BufWriter, Write},
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -240,10 +242,20 @@ async fn main() {
 
     info!("`Ctrl + C` detected, shutting down..");
 
-    // Save `heartbeat` data (if necessary)
-
     if let Some(heartbeat_path) = heartbeat_path {
-        info!("Saving `heartbeat` data to {heartbeat_path}..");
+        let time = Utc::now();
+
+        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+
+        heartbeat_path.push(format!(
+            "heartbeat-server{}-{}h{}m{}s.bin",
+            server_index,
+            time.hour(),
+            time.minute(),
+            time.second()
+        ));
+
+        println!("Saving heartbeat data to {}", heartbeat_path.display());
 
         let entries = heartbeat::flush();
 

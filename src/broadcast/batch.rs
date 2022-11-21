@@ -18,8 +18,8 @@ use varcram::VarCram;
 #[cfg(feature = "benchmark")]
 use zebra::vector::Vector;
 
-#[derive(Serialize, Deserialize)]
-pub struct CompressedBatch {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Batch {
     pub ids: VarCram,
     pub messages: Vec<Message>,
     pub raise: u64,
@@ -27,9 +27,9 @@ pub struct CompressedBatch {
     pub stragglers: Vec<Straggler>,
 }
 
-impl CompressedBatch {
+impl Batch {
     #[cfg(feature = "benchmark")]
-    pub fn assemble<R>(requests: R) -> (Hash, CompressedBatch)
+    pub fn assemble<R>(requests: R) -> (Hash, Batch)
     where
         R: IntoIterator<Item = (Entry, KeyChain, bool)>,
     {
@@ -118,7 +118,7 @@ impl CompressedBatch {
             entries.set(index, Some(entry)).unwrap();
         }
 
-        let compressed_batch = CompressedBatch {
+        let batch = Batch {
             ids,
             messages,
             raise,
@@ -126,7 +126,7 @@ impl CompressedBatch {
             stragglers,
         };
 
-        (entries.root(), compressed_batch)
+        (entries.root(), batch)
     }
 
     #[cfg(feature = "benchmark")]
@@ -134,7 +134,7 @@ impl CompressedBatch {
         directory: &Directory,
         passepartout: &Passepartout,
         size: usize,
-    ) -> (Hash, CompressedBatch) {
+    ) -> (Hash, Batch) {
         let requests = index::sample(&mut rand::thread_rng(), directory.capacity(), size)
             .into_iter()
             .map(|id| {
@@ -152,14 +152,14 @@ impl CompressedBatch {
                 (entry, keychain, true)
             });
 
-        CompressedBatch::assemble(requests)
+        Batch::assemble(requests)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{server::Batch as ServerBatch, system::test::generate_system};
+    use crate::{server::MerkleBatch, system::test::generate_system};
 
     #[tokio::test]
     #[cfg(feature = "benchmark")]
@@ -182,25 +182,24 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let (root, compressed_batch) = CompressedBatch::assemble(requests.clone());
+        let (root, batch) = Batch::assemble(requests.clone());
 
-        let server_batch =
-            ServerBatch::expand_verified(&directory, compressed_batch.clone()).unwrap();
+        let merkle_batch = MerkleBatch::expand_verified(&directory, &batch).unwrap();
 
-        assert_eq!(server_batch.root(), root);
+        assert_eq!(merkle_batch.root(), root);
 
         requests.sort_unstable_by_key(|(entry, ..)| entry.id);
 
         for ((mut reference, _, reduce), expanded) in requests.into_iter().zip(
-            server_batch
-                .entries
+            merkle_batch
+                .entries()
                 .items()
                 .iter()
                 .cloned()
                 .map(Option::unwrap),
         ) {
             if reduce {
-                reference.sequence = compressed_batch.raise;
+                reference.sequence = batch.raise;
             }
 
             assert_eq!(reference, expanded);

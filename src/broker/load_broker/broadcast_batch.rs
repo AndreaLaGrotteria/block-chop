@@ -1,16 +1,13 @@
 use crate::{
-    broker::{LoadBroker, LoadBrokerSettings},
+    broker::{LoadBatch, LoadBroker, LoadBrokerSettings},
     crypto::Certificate,
     warn, Membership,
 };
 use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 use talk::{
-    crypto::{
-        primitives::{hash::Hash, multi::Signature as MultiSignature},
-        Identity,
-    },
+    crypto::{primitives::multi::Signature as MultiSignature, Identity},
     net::SessionConnector,
     sync::{board::Board, fuse::Fuse, promise::Promise},
 };
@@ -32,17 +29,18 @@ impl LoadBroker {
         broker_identity: Identity,
         worker_index: u16,
         sequence: u64,
-        root: Hash,
-        raw_batch: Vec<u8>,
+        load_batch: LoadBatch,
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         settings: LoadBrokerSettings,
     ) {
-        // Record start time for submission lockstepping
-
-        let broadcast_start = Instant::now();
-
         // Preprocess arguments
+
+        let LoadBatch {
+            root,
+            raw_batch,
+            mut lockstep,
+        } = load_batch;
 
         let raw_batch = Arc::new(raw_batch);
 
@@ -129,24 +127,25 @@ impl LoadBroker {
 
         let witness = witness_collector.finalize();
 
-        // Round latency up to ensure submission lockstepping
+        // Wait for `settings.dissemination_delay` to improve dissemination
+        // to slower servers (this reduces the rate at which servers need to
+        // use the `TotalityManager` in order to retrieve the batch)
 
-        let lockstep_delay = settings
-            .lockstep_delay
-            .saturating_sub(broadcast_start.elapsed());
+        time::sleep(settings.dissemination_delay).await;
 
-        if !lockstep_delay.is_zero() {
-            time::sleep(lockstep_delay).await;
-        } else {
-            warn!(
-                "Broadcast delayed by {:?}: lockstep lost.",
-                broadcast_start
-                    .elapsed()
-                    .saturating_sub(settings.lockstep_delay)
-            );
-        }
+        // Wait on `lockstep` to ensure lockstepped submission (this reduces,
+        // but does not remove, the rate at which servers observe duplicates)
+        // Note: additionally waiting for `settings.lockstep_margin` reduces
+        // the probability that two witnesses in independent `Session`s will
+        // overtake each other in-flight, thus causing causally-dependent
+        // batches to be submitted to `Order` in the wrong order.
+
+        lockstep.lock().await;
+        time::sleep(settings.lockstep_margin).await;
 
         witness_poster.post(witness);
+
+        lockstep.free();
 
         // Wait until (f + 1) processes have replied with a delivery shard,
         // ensuring at least one correct process has delivered

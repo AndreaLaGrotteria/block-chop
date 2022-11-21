@@ -1,6 +1,7 @@
 use crate::{
-    broadcast::{CompressedBatch, Entry, PACKING},
+    broadcast::{Batch as BroadcastBatch, Entry, PACKING},
     crypto::statements::{Broadcast as BroadcastStatement, Reduction as ReductionStatement},
+    server::batches::PlainBatch,
     system::Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -8,12 +9,12 @@ use talk::crypto::primitives::{hash::Hash, sign::Signature};
 use zebra::vector::Vector;
 
 #[derive(Clone)]
-pub(crate) struct Batch {
-    pub entries: Vector<Option<Entry>, PACKING>,
+pub(crate) struct MerkleBatch {
+    pub(in crate::server::batches) entries: Vector<Option<Entry>, PACKING>,
 }
 
 #[derive(Doom)]
-pub(crate) enum BatchError {
+pub(crate) enum MerkleBatchError {
     #[doom(description("Malformed ids (invalid `VarCram`)"))]
     MalformedIds,
     #[doom(description("Empty batch"))]
@@ -32,27 +33,27 @@ pub(crate) enum BatchError {
     InvalidReduction,
 }
 
-impl Batch {
+impl MerkleBatch {
     pub fn expand_verified(
         directory: &Directory,
-        compressed_batch: CompressedBatch,
-    ) -> Result<Self, Top<BatchError>> {
+        broadcast_batch: &BroadcastBatch,
+    ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
-        let ids = compressed_batch
+        let ids = broadcast_batch
             .ids
             .uncram()
-            .ok_or(BatchError::MalformedIds.into_top())
+            .ok_or(MerkleBatchError::MalformedIds.into_top())
             .spot(here!())?;
 
         if ids.is_empty() {
-            return BatchError::EmptyBatch.fail().spot(here!());
+            return MerkleBatchError::EmptyBatch.fail().spot(here!());
         }
 
-        let messages = compressed_batch.messages;
+        let messages = &broadcast_batch.messages;
 
         if messages.len() != ids.len() {
-            return BatchError::LengthMismatch.fail().spot(here!());
+            return MerkleBatchError::LengthMismatch.fail().spot(here!());
         }
 
         // Verify that ids are strictly increasing
@@ -62,14 +63,14 @@ impl Batch {
                 if window[0] < window[1] {
                     Ok(())
                 } else {
-                    return BatchError::IdsUnsorted.fail().spot(here!());
+                    return MerkleBatchError::IdsUnsorted.fail().spot(here!());
                 }
             })
             .collect::<Result<_, _>>()?;
 
         // Separate stragglers from reducers
 
-        let mut stragglers = compressed_batch.stragglers.iter().peekable();
+        let mut stragglers = broadcast_batch.stragglers.iter().peekable();
 
         let mut reducer_multi_public_keys = Vec::with_capacity(ids.len());
 
@@ -83,7 +84,7 @@ impl Batch {
             if let Some(straggler) = stragglers.peek().filter(|straggler| straggler.id == id) {
                 let public_key = directory
                     .get_public_key(id)
-                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+                    .ok_or_else(|| MerkleBatchError::IdUnknown.into_top().spot(here!()))?;
 
                 let statement = BroadcastStatement {
                     sequence: &straggler.sequence,
@@ -107,7 +108,7 @@ impl Batch {
             } else {
                 let multi_public_key = directory
                     .get_multi_public_key(id)
-                    .ok_or_else(|| BatchError::IdUnknown.into_top().spot(here!()))?;
+                    .ok_or_else(|| MerkleBatchError::IdUnknown.into_top().spot(here!()))?;
 
                 reducer_multi_public_keys.push(multi_public_key.clone());
             }
@@ -120,15 +121,15 @@ impl Batch {
             straggler_statements.iter(),
             straggler_signatures,
         )
-        .pot(BatchError::InvalidStraggler, here!())?;
+        .pot(MerkleBatchError::InvalidStraggler, here!())?;
 
         // Build `Entry` Merkle tree
 
-        let raise = compressed_batch.raise;
+        let raise = broadcast_batch.raise;
 
         let entries = ids
             .into_iter()
-            .zip(messages)
+            .zip(messages.iter().cloned())
             .map(|(id, message)| {
                 Some(Entry {
                     id,
@@ -143,9 +144,9 @@ impl Batch {
         // Verify reducers' `MultiSignature`
 
         if !reducer_multi_public_keys.is_empty() {
-            let multisignature = compressed_batch
+            let multisignature = broadcast_batch
                 .multisignature
-                .ok_or(BatchError::MissingReduction.into_top())
+                .ok_or(MerkleBatchError::MissingReduction.into_top())
                 .spot(here!())?;
 
             let statement = ReductionStatement {
@@ -154,7 +155,7 @@ impl Batch {
 
             multisignature
                 .verify(reducer_multi_public_keys.iter(), &statement)
-                .pot(BatchError::InvalidReduction, here!())?;
+                .pot(MerkleBatchError::InvalidReduction, here!())?;
         }
 
         // Update straggler `entries`
@@ -163,28 +164,30 @@ impl Batch {
             entries.set(index, entry).unwrap();
         }
 
-        Ok(Batch { entries })
+        Ok(MerkleBatch { entries })
     }
 
-    pub fn expand_unverified(compressed_batch: CompressedBatch) -> Result<Self, Top<BatchError>> {
+    pub fn expand_unverified(
+        broadcast_batch: &BroadcastBatch,
+    ) -> Result<Self, Top<MerkleBatchError>> {
         // Extract ids and messages
 
-        let ids = compressed_batch
+        let ids = broadcast_batch
             .ids
             .uncram()
-            .ok_or(BatchError::MalformedIds.into_top())
+            .ok_or(MerkleBatchError::MalformedIds.into_top())
             .spot(here!())?;
 
-        let messages = compressed_batch.messages;
-        let raise = compressed_batch.raise;
+        let messages = &broadcast_batch.messages;
+        let raise = broadcast_batch.raise;
 
-        let mut stragglers = compressed_batch.stragglers.iter().peekable();
+        let mut stragglers = broadcast_batch.stragglers.iter().peekable();
 
         // Build `Entry` Merkle tree
 
         let entries = ids
             .into_iter()
-            .zip(messages)
+            .zip(messages.iter().cloned())
             .map(|(id, message)| {
                 let sequence = if stragglers
                     .peek()
@@ -206,24 +209,64 @@ impl Batch {
 
         let entries = Vector::<_, PACKING>::new(entries).unwrap();
 
-        Ok(Batch { entries })
+        Ok(MerkleBatch { entries })
+    }
+
+    pub fn from_plain(plain_batch: &PlainBatch) -> Result<Self, Top<MerkleBatchError>> {
+        if plain_batch.entries.is_empty() {
+            return MerkleBatchError::EmptyBatch.fail().spot(here!());
+        }
+
+        Ok(MerkleBatch {
+            entries: Vector::new(plain_batch.entries.clone()).unwrap(),
+        })
     }
 
     pub fn root(&self) -> Hash {
         self.entries.root()
+    }
+
+    pub fn entries_mut(&mut self) -> &mut Vector<Option<Entry>, PACKING> {
+        &mut self.entries
+    }
+
+    pub fn unwrap(self) -> Vec<Option<Entry>> {
+        self.entries.into()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
-    impl Batch {
+    impl MerkleBatch {
+        pub(crate) fn from_entries(entries: Vector<Option<Entry>, PACKING>) -> Self {
+            let mut sequence_histogram: HashMap<u64, usize> = HashMap::new();
+
+            for entry in entries.items() {
+                if let Some(entry) = entry {
+                    *sequence_histogram.entry(entry.sequence).or_default() += 1;
+                }
+            }
+
+            let mut sequence_histogram = sequence_histogram.into_iter().collect::<Vec<_>>();
+            sequence_histogram.sort_unstable_by_key(|(_, height)| *height);
+
+            MerkleBatch { entries }
+        }
+
         pub(crate) fn expanded_batch_entries(
-            compressed_batch: CompressedBatch,
+            broadcast_batch: BroadcastBatch,
         ) -> Vector<Option<Entry>, PACKING> {
-            let Batch { entries } = Batch::expand_unverified(compressed_batch).unwrap();
+            let MerkleBatch { entries, .. } =
+                MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
+
             entries
+        }
+
+        pub fn entries(&self) -> &Vector<Option<Entry>, PACKING> {
+            &self.entries
         }
     }
 }

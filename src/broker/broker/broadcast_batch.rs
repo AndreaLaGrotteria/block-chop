@@ -1,9 +1,6 @@
 use crate::{
-    broadcast::{Amendment, CompressedBatch, DeliveryShard},
-    broker::{
-        batch::{Batch, BatchStatus},
-        Broker,
-    },
+    broadcast::{Amendment, Batch as BroadcastBatch, DeliveryShard},
+    broker::{Batch as BrokerBatch, Broker},
     crypto::{statements::BatchDelivery, Certificate},
     warn, BrokerSettings, Membership,
 };
@@ -37,15 +34,15 @@ impl Broker {
         broker_identity: Identity,
         worker_index: u16,
         sequence: u64,
-        batch: &mut Batch,
-        compressed_batch: CompressedBatch,
+        broker_batch: &mut BrokerBatch,
+        broadcast_batch: BroadcastBatch,
         membership: Arc<Membership>,
         connector: Arc<SessionConnector>,
         settings: BrokerSettings,
     ) -> (u64, Certificate) {
         // Preprocess arguments
 
-        let compressed_batch = Arc::new(compressed_batch);
+        let broadcast_batch = Arc::new(broadcast_batch);
 
         // Shuffle servers
 
@@ -83,14 +80,14 @@ impl Broker {
                 Promise::solved(false) // Idler
             };
 
-            let root = batch.entries.root();
+            let root = broker_batch.entries.root();
 
             let handle = fuse.spawn(Broker::submit_batch(
                 broker_identity,
                 worker_index,
                 sequence,
                 root,
-                compressed_batch.clone(),
+                broadcast_batch.clone(),
                 server.clone(),
                 connector.clone(),
                 verify,
@@ -132,29 +129,31 @@ impl Broker {
         witness_poster.post(witness);
 
         // Collect and aggregate (f + 1) `DeliveryShard`s:
-        //  - Collect `DeliveryShard`s until the same set of `Amendment`s
-        //    is received (f + 1) times: that is necessarily the correct set
-        //    of amendments. Apply the correct set of `Amendment`s to `batch`.
+        //  - Collect `DeliveryShard`s until the same set of `Amendment`s is
+        //    received (f + 1) times: that is necessarily the correct set of
+        //    amendments. Apply the correct set of `Amendment`s to `broker_batch`.
         //  - Keep collecting `DeliveryShards` until (f + 1) `MultiSignature`s
-        //    are collected for `batch`'s amended root.
+        //    are collected for `broker_batch`'s amended root.
         //
-        //  Remark: because each delivery shard signs the root of `batch` after
-        //  the corresponding `Amendment`s are applied, it is impossible to verify
-        //  a `DeliverySnard`'s `MultiSignature` without applying its (possibly
-        //  spurious) `Amendments` to `batch`. To avoid doing so (`batch`
-        //  is large and would need to be cloned), `DeliveryShard`
-        // `MultiSignature`s are verified only when the correct set of
-        // `Amendment`s is determined and applied to `batch`. Because Byzantine
-        //  processes could have spuriously signed the correctly amended root,
-        //  additional `DeliveryShard`s might be required to assemble a delivery
-        //  certificate for `batch`.
+        // Remark: because each delivery shard signs the root of `broker_batch` after
+        // the corresponding `Amendment`s are applied, it is impossible to verify
+        // a `DeliverySnard`'s `MultiSignature` without applying its (possibly
+        // spurious) `Amendments` to `broker_batch`. To avoid doing so (`broker_batch`
+        // is large and would need to be cloned), `DeliveryShard` `MultiSignature`s
+        // are verified only when the correct set of `Amendment`s is determined and
+        // applied to `broker_batch`. Because Byzantine processes could have
+        // spuriously signed the correctly amended root, additional `DeliveryShard`s
+        // might be required to assemble a delivery certificate for `broker_batch`.
 
-        let (batch_height, shards) =
-            Self::collect_delivery_shards(batch, membership.as_ref(), &mut delivery_shard_outlet)
-                .await;
+        let (batch_height, shards) = Self::collect_delivery_shards(
+            broker_batch,
+            membership.as_ref(),
+            &mut delivery_shard_outlet,
+        )
+        .await;
 
         let certificate = Self::aggregate_delivery_shards(
-            batch.entries.root(),
+            broker_batch.entries.root(),
             batch_height,
             shards,
             membership.as_ref(),
@@ -162,9 +161,7 @@ impl Broker {
         )
         .await;
 
-        batch.status = BatchStatus::Delivered;
-
-        // Move `fuse` to a long-lived task, submitting `batch`
+        // Move `fuse` to a long-lived task, submitting `broker_batch`
         // to straggler servers until a timeout expires
 
         task::spawn(async move {
@@ -181,7 +178,7 @@ impl Broker {
     }
 
     async fn collect_delivery_shards(
-        batch: &mut Batch,
+        broker_batch: &mut BrokerBatch,
         membership: &Membership,
         delivery_shard_outlet: &mut DeliveryShardOutlet,
     ) -> (u64, Vec<(Identity, MultiSignature)>) {
@@ -199,33 +196,33 @@ impl Broker {
             if entry.len() >= membership.plurality() {
                 // `delivery_shard`'s `Amendment`s and height have collected (f + 1)
                 // (possibly incorrect) `MultiSignature`s: apply `delivery_sahrd.amendments`
-                // to `batch` and return `delivery_shard.height` with the correct
+                // to `broker_batch` and return `delivery_shard.height` with the correct
                 // `MultiSignature`s in `entry`.
 
                 let signature_shards = entry.clone();
 
-                // Apply `delivery_shard.amendments` to `batch`
+                // Apply `delivery_shard.amendments` to `broker_batch`
 
                 for amendment in delivery_shard.amendments.iter() {
                     match amendment {
                         Amendment::Nudge { id, sequence } => {
-                            let index = batch
+                            let index = broker_batch
                                 .submissions
                                 .binary_search_by(|probe| probe.entry.id.cmp(id))
                                 .unwrap();
 
                             // TODO: Streamline the following code when `Vector` supports in-place updates
-                            let mut entry = batch.entries.items()[index].clone().unwrap();
+                            let mut entry = broker_batch.entries.items()[index].clone().unwrap();
                             entry.sequence = *sequence;
-                            batch.entries.set(index, Some(entry)).unwrap();
+                            broker_batch.entries.set(index, Some(entry)).unwrap();
                         }
                         Amendment::Drop { id } => {
-                            let index = batch
+                            let index = broker_batch
                                 .submissions
                                 .binary_search_by(|probe| probe.entry.id.cmp(id))
                                 .unwrap();
 
-                            batch.entries.set(index, None).unwrap();
+                            broker_batch.entries.set(index, None).unwrap();
                         }
                     }
                 }
@@ -234,7 +231,7 @@ impl Broker {
 
                 let statement = BatchDelivery {
                     height: &delivery_shard.height,
-                    root: &batch.entries.root(),
+                    root: &broker_batch.entries.root(),
                 };
 
                 let signature_shards = signature_shards
@@ -311,47 +308,16 @@ impl<'a> WitnessCollector<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
-
     use crate::{
-        broadcast::{test::null_batch, Straggler},
-        broker::submission::Submission,
-        crypto::statements::BatchWitness,
-        server::Batch as ServerBatch,
-        system::test::generate_system,
+        broadcast::test::null_batch, broker::submission::Submission,
+        crypto::statements::BatchWitness, server::MerkleBatch, system::test::generate_system,
     };
-
+    use std::time::Duration;
     use talk::{
         crypto::{primitives::hash::hash, KeyChain},
         net::{test::TestConnector, SessionConnector},
     };
-
-    use varcram::VarCram;
-
-    impl Clone for Straggler {
-        fn clone(&self) -> Self {
-            Self {
-                id: self.id.clone(),
-                sequence: self.sequence.clone(),
-                signature: self.signature.clone(),
-            }
-        }
-    }
-
-    impl Clone for CompressedBatch {
-        fn clone(&self) -> Self {
-            let ids = VarCram::cram(self.ids.uncram().unwrap().clone().as_ref());
-            Self {
-                ids,
-                messages: self.messages.clone(),
-                raise: self.raise.clone(),
-                multisignature: self.multisignature.clone(),
-                stragglers: self.stragglers.clone(),
-            }
-        }
-    }
 
     #[tokio::test]
     async fn broker_broadcast_0_faulty() {
@@ -363,8 +329,8 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let session_connector = Arc::new(SessionConnector::new(connector));
 
-        let (_, compressed_batch) = null_batch(&clients_keychains, 1);
-        let entries = ServerBatch::expanded_batch_entries(compressed_batch.clone());
+        let (_, broadcast_batch) = null_batch(&clients_keychains, 1);
+        let entries = MerkleBatch::expanded_batch_entries(broadcast_batch.clone());
 
         let fake_signature = clients_keychains[0]
             .sign(&BatchWitness {
@@ -386,8 +352,7 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        let mut batch = Batch {
-            status: BatchStatus::Submitting,
+        let mut broker_batch = BrokerBatch {
             submissions,
             raise: 0,
             entries,
@@ -399,8 +364,8 @@ mod tests {
             broker.keycard().identity(),
             0,
             0,
-            &mut batch,
-            compressed_batch,
+            &mut broker_batch,
+            broadcast_batch,
             membership.clone(),
             session_connector,
             BrokerSettings {
@@ -412,7 +377,7 @@ mod tests {
 
         let statement = BatchDelivery {
             height: &height,
-            root: &batch.entries.root(),
+            root: &broker_batch.entries.root(),
         };
 
         certificate
@@ -436,8 +401,8 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let session_connector = Arc::new(SessionConnector::new(connector));
 
-        let (_, compressed_batch) = null_batch(&clients, 1);
-        let entries = ServerBatch::expanded_batch_entries(compressed_batch.clone());
+        let (_, broadcast_batch) = null_batch(&clients, 1);
+        let entries = MerkleBatch::expanded_batch_entries(broadcast_batch.clone());
 
         let fake_signature = clients[0]
             .sign(&BatchWitness {
@@ -459,8 +424,7 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        let mut batch = Batch {
-            status: BatchStatus::Submitting,
+        let mut broker_batch = BrokerBatch {
             submissions,
             raise: 0,
             entries,
@@ -472,8 +436,8 @@ mod tests {
             broker.keycard().identity(),
             0,
             0,
-            &mut batch,
-            compressed_batch,
+            &mut broker_batch,
+            broadcast_batch,
             membership.clone(),
             session_connector,
             BrokerSettings {
@@ -485,7 +449,7 @@ mod tests {
 
         let statement = BatchDelivery {
             height: &height,
-            root: &batch.entries.root(),
+            root: &broker_batch.entries.root(),
         };
 
         certificate

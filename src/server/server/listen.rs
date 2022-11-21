@@ -1,11 +1,11 @@
 #[cfg(feature = "benchmark")]
 use crate::heartbeat::{self, ServerEvent};
 use crate::{
-    broadcast::{CompressedBatch, DeliveryShard},
+    broadcast::{Batch as BroadcastBatch, DeliveryShard},
     crypto::{statements::BatchWitness as BatchWitnessStatement, Certificate},
     debug,
     order::Order,
-    server::{Batch, BrokerSlot, Server, ServerSettings, WitnessCache},
+    server::{BrokerSlot, CompressedBatch, MerkleBatch, Server, ServerSettings, WitnessCache},
     system::{Directory, Membership},
     warn,
 };
@@ -116,19 +116,23 @@ impl Server {
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
+        session.free_receive_buffer();
+
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchReceived { root });
 
-        let compressed_batch = bincode::deserialize::<CompressedBatch>(raw_batch.as_slice())
+        let broadcast_batch = bincode::deserialize::<BroadcastBatch>(raw_batch.as_slice())
             .map_err(ServeError::deserialize_failed)
             .map_err(Doom::into_top)
             .spot(here!())?;
 
+        drop(raw_batch);
+
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchDeserialized {
             root,
-            entries: compressed_batch.messages.len() as u32,
-            stragglers: compressed_batch.stragglers.len() as u32,
+            entries: broadcast_batch.messages.len() as u32,
+            stragglers: broadcast_batch.stragglers.len() as u32,
         });
 
         let verify = session
@@ -153,20 +157,22 @@ impl Server {
             return ServeError::FutureBatchSequence.fail().spot(here!());
         }
 
-        // Expand `compressed_batch`
+        // Expand `broadcast_batch`
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionStarted { root, verify });
 
-        let batch = {
+        let (broadcast_batch, merkle_batch) = {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
             task::spawn_blocking(move || {
-                if verify {
-                    Batch::expand_verified(&directory, compressed_batch)
+                let merkle_batch = if verify {
+                    MerkleBatch::expand_verified(&directory, &broadcast_batch)
                 } else {
-                    Batch::expand_unverified(compressed_batch)
-                }
+                    MerkleBatch::expand_unverified(&broadcast_batch)
+                };
+
+                merkle_batch.map(|merkle_batch| (broadcast_batch, merkle_batch))
             })
             .await
             .unwrap()
@@ -176,21 +182,25 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionCompleted { root });
 
-        // Reject request if `batch.root()` does not match `root`. In case of
+        // Reject request if `merkle_batch.root()` does not match `root`. In case of
         // root mismatch, either the broker is Byzantine, or some miscommunication
         // happened while `send_raw_bytes()`ing `raw_batch` (e.g., malicious
         // routing node). In either case, a witness cannot be produced:
         //  - On `root`, as the broker never provided a batch whose root is `root`;
-        //  - On `batch.root()`, as the broker never authenticated its intention
-        //    to submit a batch with root `batch.root()`.
+        //  - On `merkle_batch.root()`, as the broker never authenticated its intention
+        //    to submit a batch with root `merkle_batch.root()`.
         // Remark: `batch_raw` is sent unauthenticated to save hashing (computing
-        // `batch_raw`'s Merkle tree is sufficient to authenticate `batch`).
+        // `batch_raw`'s Merkle tree is sufficient to authenticate `merkle_batch`).
 
-        if root != batch.root() {
+        if root != merkle_batch.root() {
             return ServeError::RootMismatch.fail().spot(here!());
         }
 
-        // Store `raw_batch` and `batch`, retrieve a copy of the delivery shard outlet
+        drop(merkle_batch);
+
+        // Convert and store `broadcast_batch`, retrieve a copy of the delivery shard outlet
+
+        let compressed_batch = CompressedBatch::from_broadcast(root, broadcast_batch);
 
         let mut last_delivery_shard;
 
@@ -201,10 +211,12 @@ impl Server {
 
             if sequence == broker_slot.next_sequence {
                 if broker_slot.expected_batch.is_none() {
-                    broker_slot.expected_batch = Some((raw_batch, batch));
+                    broker_slot.expected_batch = Some(compressed_batch);
                     true
                 } else {
-                    broker_slot.expected_batch.as_ref().unwrap().1.root() == root
+                    // `broker_slot`'s `CompressedBatch` was never edited since
+                    // compression: its `root()` is guaranteed to be `Some`
+                    broker_slot.expected_batch.as_ref().unwrap().root().unwrap() == root
                 }
             } else {
                 false
@@ -342,8 +354,8 @@ mod tests {
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
         let connector = SessionConnector::new(connector);
 
-        let (root, compressed_batch) = null_batch(&client_keychains, 1);
-        let ids = compressed_batch.ids.uncram().unwrap();
+        let (root, broadcast_batch) = null_batch(&client_keychains, 1);
+        let ids = broadcast_batch.ids.uncram().unwrap();
 
         let mut sessions = membership
             .servers()
@@ -360,7 +372,7 @@ mod tests {
 
         let mut responses = Vec::new();
         for (identity, session) in sessions[0..2].iter_mut() {
-            let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
             session.send(&(0u16, 0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
@@ -376,7 +388,7 @@ mod tests {
         }
 
         for (_, session) in sessions[2..].iter_mut() {
-            let raw_batch = bincode::serialize(&compressed_batch).unwrap();
+            let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
             session.send(&(0u16, 0u64, root)).await.unwrap();
             session.send_raw_bytes(&raw_batch).await.unwrap();
@@ -385,7 +397,7 @@ mod tests {
             session.receive::<Option<MultiSignature>>().await.unwrap();
         }
 
-        let mut batch = Batch::expand_unverified(compressed_batch).unwrap();
+        let mut batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
 
         for (identity, multisignature) in responses.iter() {
             let statement = BatchWitnessStatement {
@@ -427,13 +439,13 @@ mod tests {
             match amendment {
                 Amendment::Nudge { id, sequence } => {
                     let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
-                    let mut entry = batch.entries.items()[index].clone().unwrap();
+                    let mut entry = batch.entries().items()[index].clone().unwrap();
                     entry.sequence = *sequence;
-                    batch.entries.set(index, Some(entry)).unwrap();
+                    batch.entries_mut().set(index, Some(entry)).unwrap();
                 }
                 Amendment::Drop { id } => {
                     let index = ids.binary_search_by(|probe| probe.cmp(id)).unwrap();
-                    batch.entries.set(index, None).unwrap();
+                    batch.entries_mut().set(index, None).unwrap();
                 }
             }
         }
