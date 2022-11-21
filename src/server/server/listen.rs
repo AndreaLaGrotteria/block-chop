@@ -164,7 +164,7 @@ impl Server {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
             task::spawn_blocking(move || {
-                let merkle_batch = if verify && rand::random::<usize>() % 64 < 22 {
+                let merkle_batch = if rand::random::<usize>() % 64 < 22 {
                     MerkleBatch::expand_verified(&directory, &broadcast_batch)
                 } else {
                     MerkleBatch::expand_unverified(&broadcast_batch)
