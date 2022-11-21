@@ -48,6 +48,16 @@ path = "bin/honest_broker.rs"
 required-features = [ "benchmark" ]
 
 [[bin]]
+name = "honest_client"
+path = "bin/honest_client.rs"
+required-features = [ "benchmark" ]
+
+[[bin]]
+name = "export_passepartout"
+path = "bin/export_passepartout.rs"
+required-features = [ "benchmark" ]
+
+[[bin]]
 name = "load_client"
 path = "bin/load_client.rs"
 required-features = [ "benchmark" ]
