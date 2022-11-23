@@ -107,29 +107,36 @@ impl LoadBroker {
         // Collect and aggregate and post (f + 1) witness shards:
         //  - Collect witness shards from `witness_shard_outlet` until
         //    (f + 1) shards are collected or a timeout expires.
-        //  - If the timeout expires, signal all backup verifiers to
-        //    request a witness shard, then collect the missing
-        //    witness shards from `witness_shard_outlet`.
+        //  - If the timeout expires, signal the missing amount of
+        //    backup verifiers to request a witness shard, and try again.
+        //  - If all backup verifiers have requested a witness shard
+        //    wait until at least (f + 1) shards are collected (this
+        //    is guaranteed to eventually succeed).
+        //  - Aggregate the plurality of witness shards into a witness.
 
         let mut witness_collector =
             WitnessCollector::new(membership.as_ref(), witness_shard_outlet);
 
-        match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
-            Ok(_) => {
-                backup_verify_solvers
-                    .into_iter()
-                    .for_each(|solver| solver.solve(false));
-            }
-            Err(_) => {
-                warn!("Timeout: could not collect witness without backup verifiers.");
+        let mut backup_verify_solvers = backup_verify_solvers.into_iter().peekable();
 
-                backup_verify_solvers
-                    .into_iter()
-                    .for_each(|solver| solver.solve(true));
+        while backup_verify_solvers.peek().is_some() {
+            match time::timeout(settings.witnessing_timeout, witness_collector.progress()).await {
+                Ok(_) => {
+                    for solver in &mut backup_verify_solvers {
+                        solver.solve(false);
+                    }
+                }
+                Err(_) => {
+                    warn!("Timeout: could not collect witness without backup verifiers.");
 
-                witness_collector.progress().await
+                    for solver in (&mut backup_verify_solvers).take(witness_collector.missing()) {
+                        solver.solve(true);
+                    }
+                }
             }
         }
+
+        witness_collector.progress().await;
 
         let witness = witness_collector.finalize();
 
@@ -186,6 +193,10 @@ impl<'a> WitnessCollector<'a> {
 
     fn succeeded(&self) -> bool {
         self.witness_shards.len() >= self.membership.plurality()
+    }
+
+    fn missing(&self) -> usize {
+        self.membership.plurality() - self.witness_shards.len()
     }
 
     async fn progress(&mut self) {
