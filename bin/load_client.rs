@@ -47,8 +47,8 @@ async fn main() {
 
     // `Client` preprocessing
 
-    let range = (honest_broker_index * CLIENTS_PER_BROKER) as u64
-        ..((honest_broker_index + 1) * CLIENTS_PER_BROKER) as u64;
+    let range = ((honest_broker_index+1) * CLIENTS_PER_BROKER) as u64
+        ..((honest_broker_index + 2) * CLIENTS_PER_BROKER) as u64;
 
     let (keychains, broadcasts) = client::preprocess(directory, passepartout, range.clone());
 
