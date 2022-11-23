@@ -13,6 +13,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity, KeyChain},
@@ -162,6 +163,8 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionStarted { root, verify });
 
+        let expansion_start = Instant::now();
+
         let (broadcast_batch, merkle_batch) = {
             let _permit = semaphore.acquire().await.unwrap(); // This limits concurrent expansion tasks
 
@@ -178,6 +181,10 @@ impl Server {
             .unwrap()
             .pot(ServeError::BatchInvalid, here!())?
         };
+
+        if expansion_start.elapsed() > Duration::from_secs(2) {
+            warn!("`BroadcastBatch` expansion took longer than 2 seconds.");
+        }
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchExpansionCompleted { root });
