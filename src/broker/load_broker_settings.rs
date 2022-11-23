@@ -25,7 +25,7 @@ impl Default for LoadBrokerSettings {
             dissemination_delay: Duration::from_secs(3),
             lockstep_delta: 32,
             lockstep_margin: Duration::from_secs(1),
-            witnessing_timeout: Duration::from_secs(15),
+            witnessing_timeout: Duration::from_secs(3),
             totality_timeout: Duration::from_secs(60),
             workers: 32768,
             submission_interval: Duration::from_millis(50),
