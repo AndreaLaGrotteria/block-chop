@@ -10,8 +10,7 @@ use talk::{
     link::{
         context::ConnectDispatcher,
         rendezvous::{Client as RendezvousClient, Connector as RendezvousConnector},
-    },
-    net::SessionConnector,
+    }, net::{PlexConnectorSettings, PlexConnector},
 };
 use tokio::time;
 
@@ -73,7 +72,13 @@ async fn main() {
 
     let connect_dispatcher = ConnectDispatcher::new(connector);
     let broker_connector = connect_dispatcher.register("broker".to_string());
-    let broker_connector = SessionConnector::new(broker_connector);
+
+    let plex_connector_settings = PlexConnectorSettings {
+        connections_per_remote: 32,
+        ..Default::default()
+    };
+
+    let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
 
     // Rendezvous with servers and brokers
 
