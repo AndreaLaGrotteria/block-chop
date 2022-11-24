@@ -1,5 +1,5 @@
 use crate::{observable::Observable, utils, ServerSubmission};
-use chop_chop::heartbeat::Entry;
+use chop_chop::heartbeat::{Entry, Event, ServerEvent};
 use rayon::slice::ParallelSliceMut;
 use std::{fs::File, io::Read, time::Duration};
 
@@ -42,6 +42,24 @@ pub fn shallow_server(path: String, start: f32, duration: f32) {
     // Parse `ServerSubmission`s
 
     let submissions = ServerSubmission::parse(entries.iter());
+
+    // Deliveries (to improve)
+
+    let deliveries = entries
+        .iter()
+        .map(|entry| {
+            if let Event::Server(ServerEvent::BatchDelivered { duplicates, .. }) = entry.event {
+                65536 - (duplicates as u64)
+            } else {
+                0
+            }
+        })
+        .sum::<u64>();
+
+    println!(
+        "Deliveries: {deliveries} ({:.02} Mops / s)",
+        (deliveries as f64) / (duration as f64) / 1e6
+    );
 
     // Reception
 
