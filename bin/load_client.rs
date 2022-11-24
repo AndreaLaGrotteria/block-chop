@@ -4,7 +4,9 @@ use std::time::Duration;
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
-const CLIENTS_PER_BROKER: usize = 4_000_000;
+const CLIENTS_PER_LOAD_CLIENT: usize = 1_000_000;
+const ID_START: u64 = 1_000_000;
+const ID_END: u64 = 65_000_000; // exclusive
 
 #[tokio::main]
 async fn main() {
@@ -18,6 +20,7 @@ async fn main() {
           <rendezvous_address> (string) address of `Rendezvous` server
           <honest_broker_index> (integer) index of the honest broker to connect to
           <rate> (float) number of operations per second to submit
+          <duration> (float) number of seconds to submit for
           <passepartout_path> (string) path to system `Passepartout`
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
@@ -27,6 +30,7 @@ async fn main() {
     let rendezvous_address = args.get_string("rendezvous_address");
     let honest_broker_index = args.get_integer("honest_broker_index") as usize;
     let rate = args.get_float("rate") as f64;
+    let duration = args.get_float("duration") as f64;
     let passepartout_path = args.get_string("passepartout_path");
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
@@ -47,10 +51,19 @@ async fn main() {
 
     // `Client` preprocessing
 
-    let range = ((honest_broker_index+1) * CLIENTS_PER_BROKER) as u64
-        ..((honest_broker_index + 2) * CLIENTS_PER_BROKER) as u64;
+    let range = (ID_START + (honest_broker_index * CLIENTS_PER_LOAD_CLIENT) as u64)
+        ..(ID_START + ((honest_broker_index + 1) * CLIENTS_PER_LOAD_CLIENT) as u64);
 
-    let (keychains, broadcasts) = client::preprocess(directory, passepartout, range.clone());
+    if range.end > ID_END {
+        panic!("Range out of bounds. Check that the honest_broker_index is in in [0, 64) ..");
+    }
+
+    let total_requests = (rate * duration) as usize;
+
+    info!("Total requests: {}", total_requests);
+
+    let (keychains, broadcasts) =
+        client::preprocess(directory, passepartout, range.clone(), total_requests);
 
     // Rendezvous with servers and brokers
 
@@ -84,6 +97,8 @@ async fn main() {
     }
 
     // Start `Client`
+
+    time::sleep(Duration::from_secs(5)).await;
 
     info!("Starting load client..");
 

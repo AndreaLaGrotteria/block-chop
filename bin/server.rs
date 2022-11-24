@@ -225,7 +225,7 @@ async fn main() {
             rates.push_front(rate);
 
             info!(
-                "{:.02} MOPps ({:.02} MOPps average, {} MOPs total).",
+                "{:.04} MOPps ({:.04} MOPps average, {} MOPs total).",
                 rate / 1e6,
                 (rates.iter().copied().take(AVERAGING_INTERVAL).sum::<f64>()
                     / std::cmp::min(rates.len(), AVERAGING_INTERVAL) as f64)

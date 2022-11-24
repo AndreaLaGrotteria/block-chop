@@ -23,6 +23,7 @@ pub fn preprocess(
     directory: Directory,
     passepartout: Passepartout,
     range: Range<u64>,
+    request_total: usize,
 ) -> (Vec<KeyChain>, Vec<Request>) {
     info!("Loading keychains..");
 
@@ -38,38 +39,47 @@ pub fn preprocess(
 
     info!("Generating requests..");
 
-    let broadcasts = keychains
-        .par_iter()
-        .enumerate()
-        .map(|(index, keychain)| {
-            let id = range.start + (index as u64);
+    let mut broadcasts = Vec::with_capacity(request_total);
 
-            let mut message = Message::default();
-            message.bytes[0..8].copy_from_slice(id.to_be_bytes().as_slice());
+    for sequence in 0..(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
 
-            let entry = Entry {
-                id,
-                sequence: 0,
-                message,
-            };
+        let new_broadcasts = keychains
+            .par_iter()
+            .enumerate()
+            .map(|(index, keychain)| {
+                let id = range.start + (index as u64);
 
-            let statement = BroadcastStatement {
-                sequence: &entry.sequence,
-                message: &entry.message,
-            };
+                let mut message = Message::default();
+                message.bytes[0..8].copy_from_slice((id + sequence).to_be_bytes().as_slice());
 
-            let signature = keychain.sign(&statement).unwrap();
+                let entry = Entry {
+                    id,
+                    sequence,
+                    message,
+                };
 
-            let request = BrokerRequest::Broadcast {
-                entry,
-                signature,
-                height_record: None,
-                authentication: None,
-            };
+                let statement = BroadcastStatement {
+                    sequence: &entry.sequence,
+                    message: &entry.message,
+                };
 
-            Request(request)
-        })
-        .collect::<Vec<_>>();
+                let signature = keychain.sign(&statement).unwrap();
+
+                let request = BrokerRequest::Broadcast {
+                    entry,
+                    signature,
+                    height_record: None,
+                    authentication: None,
+                };
+
+                Request(request)
+            })
+            .collect::<Vec<_>>();
+
+        broadcasts.extend(new_broadcasts);
+    }
+
+    broadcasts.truncate(request_total);
 
     (keychains, broadcasts)
 }
@@ -81,10 +91,11 @@ pub async fn load<A>(
     broker_address: A,
     range: Range<u64>,
     rate: f64,
+    request_total: usize,
 ) where
     A: Clone + ToSocketAddrs,
 {
-    let (keychains, broadcasts) = preprocess(directory, passepartout, range.clone());
+    let (keychains, broadcasts) = preprocess(directory, passepartout, range.clone(), request_total);
     load_with(
         bind_address,
         broker_address,
