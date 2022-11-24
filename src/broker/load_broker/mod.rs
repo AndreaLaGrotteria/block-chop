@@ -3,10 +3,15 @@ use crate::{
     heartbeat::{self, BrokerEvent},
     system::Membership,
 };
-use std::{collections::VecDeque, iter, sync::Arc};
+use log::info;
+use std::{
+    collections::{HashMap, VecDeque},
+    iter,
+    sync::Arc,
+};
 use talk::{
     crypto::{primitives::hash::Hash, Identity},
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{
         fuse::Fuse,
         promise::{Promise, Solver},
@@ -27,10 +32,10 @@ struct Flow {
 }
 
 impl LoadBroker {
-    pub fn new(
+    pub async fn new(
         membership: Membership,
         broker_identity: Identity,
-        connector: SessionConnector,
+        connector: PlexConnector,
         flows: Vec<Vec<(Hash, Vec<u8>)>>,
         settings: LoadBrokerSettings,
     ) -> Self {
@@ -38,13 +43,35 @@ impl LoadBroker {
 
         let membership = Arc::new(membership);
 
+        // Fill `connector`
+
+        info!("Filling `PlexConnector`..");
+
+        connector
+            .fill(membership.servers().keys().copied(), settings.fill_interval)
+            .await;
+
+        // Compile multiplexes
+
+        let mut multiplexes = HashMap::new();
+
+        for server in membership.servers().keys().copied() {
+            multiplexes.insert(server, connector.multiplexes_to(server).await);
+        }
+
+        let mut multiplexes = multiplexes
+            .into_iter()
+            .map(|(server, multiplexes)| (server, multiplexes.into_iter().cycle()))
+            .collect::<HashMap<_, _>>();
+
         // Prepare batches
 
         let batches_per_flow = flows.first().unwrap().len();
 
         let mut flows = flows
             .into_iter()
-            .map(|batches| {
+            .enumerate()
+            .map(|(flow_index, batches)| {
                 // Initialize lock `Promise`s and free channel
 
                 let (lock_promises, lock_solvers): (Vec<_>, Vec<_>) =
@@ -54,15 +81,33 @@ impl LoadBroker {
 
                 let (free_inlet, free_outlet) = mpsc::unbounded_channel();
 
+                // Compute affinity map
+
+                let affinities = membership
+                    .servers()
+                    .keys()
+                    .copied()
+                    .map(|server| {
+                        (
+                            server,
+                            multiplexes.get_mut(&server).unwrap().next().unwrap(),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                let affinities = Arc::new(affinities);
+
                 // Convert `batches` into `LoadBatch`es
 
                 let batches = batches
                     .into_iter()
                     .zip(lock_promises)
                     .enumerate()
-                    .map(|(index, ((root, raw_batch), lock_promise))| {
+                    .map(|(batch_index, ((root, raw_batch), lock_promise))| {
+                        let affinities = affinities.clone();
+
                         let lockstep = Lockstep {
-                            index,
+                            index: batch_index,
                             lock_promise,
                             free_inlet: free_inlet.clone(),
                         };
@@ -70,7 +115,10 @@ impl LoadBroker {
                         LoadBatch {
                             root,
                             raw_batch,
+                            affinities,
                             lockstep,
+                            flow_index,
+                            batch_index,
                         }
                     })
                     .collect::<VecDeque<_>>();
@@ -98,8 +146,9 @@ impl LoadBroker {
 
         let fuse = Fuse::new();
 
-        for flow in flows {
+        for (id, flow) in flows.into_iter().enumerate() {
             fuse.spawn(LoadBroker::lockstep(
+                id,
                 flow.lock_solvers,
                 flow.free_outlet,
                 settings.lockstep_delta,
@@ -138,7 +187,7 @@ mod tests {
     use std::{iter, time::Duration};
     use talk::{
         crypto::KeyChain,
-        net::{test::TestConnector, SessionConnector},
+        net::{test::TestConnector, PlexConnector},
     };
     use tokio::time;
 
@@ -154,7 +203,7 @@ mod tests {
         let keychain = KeyChain::random();
         let broker_identity = keychain.keycard().identity();
         let connector = TestConnector::new(keychain, connector_map.clone());
-        let session_connector = SessionConnector::new(connector);
+        let plex_connector = PlexConnector::new(connector, Default::default());
 
         let flows = iter::repeat(
             iter::repeat(to_raw(null_batch(&client_keychains, 30)))
@@ -167,7 +216,7 @@ mod tests {
         let _load_broker = LoadBroker::new(
             membership.clone(),
             broker_identity,
-            session_connector,
+            plex_connector,
             flows,
             LoadBrokerSettings {
                 rate: 16.,

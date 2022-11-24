@@ -17,7 +17,7 @@ use std::{
 };
 use talk::{
     crypto::{primitives::hash::Hash, Identity, KeyChain},
-    net::{Session, SessionListener},
+    net::{Plex, PlexListener},
     sync::fuse::Fuse,
 };
 use tokio::{sync::Semaphore, task};
@@ -49,7 +49,7 @@ impl Server {
         broadcast: Arc<dyn Order>,
         broker_slots: Arc<Mutex<HashMap<(Identity, u16), BrokerSlot>>>,
         witness_cache: Arc<Mutex<WitnessCache>>,
-        mut listener: SessionListener,
+        mut listener: PlexListener,
         settings: ServerSettings,
     ) {
         let membership = Arc::new(membership);
@@ -61,7 +61,7 @@ impl Server {
         let fuse = Fuse::new();
 
         loop {
-            let (broker, session) = listener.accept().await;
+            let (broker, plex) = listener.accept().await;
 
             let keychain = keychain.clone();
             let membership = membership.clone();
@@ -74,7 +74,7 @@ impl Server {
             fuse.spawn(async move {
                 if let Err(error) = Server::serve(
                     broker,
-                    session,
+                    plex,
                     keychain,
                     membership,
                     directory,
@@ -93,7 +93,7 @@ impl Server {
 
     async fn serve(
         broker: Identity,
-        mut session: Session,
+        mut plex: Plex,
         keychain: KeyChain,
         membership: Arc<Membership>,
         directory: Arc<Directory>,
@@ -104,7 +104,7 @@ impl Server {
     ) -> Result<(), Top<ServeError>> {
         // Receive broker request
 
-        let (worker, sequence, root) = session
+        let (worker, sequence, root) = plex
             .receive::<(u16, u64, Hash)>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
@@ -112,12 +112,10 @@ impl Server {
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchAnnounced { root });
 
-        let raw_batch = session
+        let raw_batch = plex
             .receive_raw_bytes()
             .await
             .pot(ServeError::ConnectionError, here!())?;
-
-        session.free_receive_buffer();
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchReceived { root });
@@ -136,7 +134,7 @@ impl Server {
             stragglers: broadcast_batch.stragglers.len() as u32,
         });
 
-        let verify = session
+        let verify = plex
             .receive::<bool>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
@@ -254,8 +252,7 @@ impl Server {
             None
         };
 
-        session
-            .send(&witness_shard)
+        plex.send(&witness_shard)
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -266,7 +263,7 @@ impl Server {
 
         // Receive and verify the witness certificate
 
-        let witness = session
+        let witness = plex
             .receive::<Certificate>()
             .await
             .pot(ServeError::ConnectionError, here!())?;
@@ -318,10 +315,9 @@ impl Server {
             let _ = last_delivery_shard.changed().await;
         };
 
-        // Send `delivery_shard` to the broker and end the session
+        // Send `delivery_shard` to the broker and end the exchange
 
-        session
-            .send::<DeliveryShard>(&delivery_shard)
+        plex.send::<DeliveryShard>(&delivery_shard)
             .await
             .pot(ServeError::ConnectionError, here!())?;
 
@@ -329,8 +325,6 @@ impl Server {
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(ServerEvent::BatchServed { root });
-
-        session.end();
 
         Ok(())
     }
@@ -348,7 +342,7 @@ mod tests {
     use std::collections::HashMap;
     use talk::{
         crypto::primitives::multi::Signature as MultiSignature,
-        net::{test::TestConnector, SessionConnector},
+        net::{test::TestConnector, PlexConnector},
     };
 
     #[tokio::test]
@@ -359,12 +353,12 @@ mod tests {
         let broker = KeyChain::random();
 
         let connector = TestConnector::new(broker.clone(), connector_map.clone());
-        let connector = SessionConnector::new(connector);
+        let connector = PlexConnector::new(connector, Default::default());
 
         let (root, broadcast_batch) = null_batch(&client_keychains, 1);
         let ids = broadcast_batch.ids.uncram().unwrap();
 
-        let mut sessions = membership
+        let mut plexes = membership
             .servers()
             .keys()
             .map(|server| async {
@@ -378,14 +372,14 @@ mod tests {
             .await;
 
         let mut responses = Vec::new();
-        for (identity, session) in sessions[0..2].iter_mut() {
+        for (identity, plex) in plexes[0..2].iter_mut() {
             let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
-            session.send(&(0u16, 0u64, root)).await.unwrap();
-            session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send(&true).await.unwrap();
+            plex.send(&(0u16, 0u64, root)).await.unwrap();
+            plex.send_raw_bytes(&raw_batch).await.unwrap();
+            plex.send(&true).await.unwrap();
 
-            let response = session
+            let response = plex
                 .receive::<Option<MultiSignature>>()
                 .await
                 .unwrap()
@@ -394,14 +388,14 @@ mod tests {
             responses.push((*identity, response));
         }
 
-        for (_, session) in sessions[2..].iter_mut() {
+        for (_, plex) in plexes[2..].iter_mut() {
             let raw_batch = bincode::serialize(&broadcast_batch).unwrap();
 
-            session.send(&(0u16, 0u64, root)).await.unwrap();
-            session.send_raw_bytes(&raw_batch).await.unwrap();
-            session.send(&false).await.unwrap();
+            plex.send(&(0u16, 0u64, root)).await.unwrap();
+            plex.send_raw_bytes(&raw_batch).await.unwrap();
+            plex.send(&false).await.unwrap();
 
-            session.receive::<Option<MultiSignature>>().await.unwrap();
+            plex.receive::<Option<MultiSignature>>().await.unwrap();
         }
 
         let mut batch = MerkleBatch::expand_unverified(&broadcast_batch).unwrap();
@@ -420,13 +414,13 @@ mod tests {
 
         let certificate = Certificate::aggregate_plurality(&membership, responses);
 
-        for (_, session) in sessions.iter_mut() {
-            session.send(&certificate).await.unwrap();
+        for (_, plex) in plexes.iter_mut() {
+            plex.send(&certificate).await.unwrap();
         }
 
         let mut responses = Vec::new();
-        for (identity, session) in sessions.iter_mut() {
-            let response = session.receive::<DeliveryShard>().await.unwrap();
+        for (identity, plex) in plexes.iter_mut() {
+            let response = plex.receive::<DeliveryShard>().await.unwrap();
 
             responses.push((*identity, response));
         }

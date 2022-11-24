@@ -7,13 +7,14 @@ use crate::{
     warn, BrokerSettings,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::sync::Arc;
+use log::info;
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use talk::{
     crypto::{
         primitives::{hash::Hash, multi::Signature as MultiSignature},
         Identity, KeyCard,
     },
-    net::SessionConnector,
+    net::{MultiplexId, PlexConnector},
     sync::{board::Board, promise::Promise},
 };
 use tokio::sync::mpsc::Sender as MpscSender;
@@ -39,10 +40,10 @@ impl Broker {
         root: Hash,
         broadcast_batch: Arc<BroadcastBatch>,
         server: KeyCard,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         mut verify: Promise<bool>,
         witness_shard_inlet: MultiSignatureInlet,
-        mut witness: Board<Certificate>,
+        mut witness: Board<(Certificate, Instant)>,
         delivery_shard_inlet: DeliveryShardInlet,
         settings: BrokerSettings,
     ) {
@@ -61,10 +62,13 @@ impl Broker {
             raw_batch.as_slice(),
             &server,
             connector.as_ref(),
+            None,
             &mut verify,
             &mut witness_shard_inlet,
             &mut witness,
             &mut delivery_shard_inlet,
+            0,
+            0,
         )
         .await
         {
@@ -80,11 +84,14 @@ impl Broker {
         root: Hash,
         raw_batch: &[u8],
         server: &KeyCard,
-        connector: &SessionConnector,
+        connector: &PlexConnector,
+        affinities: Option<&HashMap<Identity, MultiplexId>>,
         verify: &mut Promise<bool>,
         witness_shard_inlet: &mut Option<MultiSignatureInlet>,
-        witness: &mut Board<Certificate>,
+        witness: &mut Board<(Certificate, Instant)>,
         delivery_shard_inlet: &mut Option<DeliveryShardInlet>,
+        flow_index: usize,
+        batch_index: usize,
     ) -> Result<(), Top<TrySubmitError>> {
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::SubmissionStarted {
@@ -96,10 +103,23 @@ impl Broker {
 
         // Send request
 
-        let mut session = connector
-            .connect(server.identity())
-            .await
-            .pot(TrySubmitError::ConnectFailed, here!())?;
+        let mut plex = if let Some(affinities) = affinities {
+            let (multiplex_id, plex) = connector
+                .connect_with_affinity(server.identity(), affinities[&server.identity()])
+                .await
+                .pot(TrySubmitError::ConnectFailed, here!())?;
+
+            if multiplex_id != affinities[&server.identity()] {
+                warn!("Impossible to establish `Plex` with desired affinity.");
+            }
+
+            plex
+        } else {
+            connector
+                .connect(server.identity())
+                .await
+                .pot(TrySubmitError::ConnectFailed, here!())?
+        };
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::ServerConnected {
@@ -107,13 +127,11 @@ impl Broker {
             server: server.identity(),
         });
 
-        session
-            .send(&(worker_index, sequence, root))
+        plex.send(&(worker_index, sequence, root))
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
-        session
-            .send_raw_bytes(&raw_batch)
+        plex.send_raw_bytes(&raw_batch)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -138,8 +156,7 @@ impl Broker {
         // (possibly invalid yet authentic) reply to the witness shard
         // request has already been processed.
         if verify && witness_shard_inlet.is_some() {
-            session
-                .send(&true)
+            plex.send(&true)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -149,7 +166,7 @@ impl Broker {
                 server: server.identity(),
             });
 
-            let witness_shard = session
+            let witness_shard = plex
                 .receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
@@ -190,8 +207,7 @@ impl Broker {
                     .await;
             }
         } else {
-            session
-                .send(&false)
+            plex.send(&false)
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -201,8 +217,7 @@ impl Broker {
                 server: server.identity(),
             });
 
-            session
-                .receive::<Option<MultiSignature>>()
+            plex.receive::<Option<MultiSignature>>()
                 .await
                 .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -217,7 +232,9 @@ impl Broker {
 
         // Send witness
 
-        let witness = if let Some(witness) = witness.as_ref().await {
+        let start_wait_for_witness = Instant::now();
+
+        let (witness, witness_post_time) = if let Some(witness) = witness.as_ref().await {
             witness
         } else {
             // `Broker` has dropped. Idle waiting for task to be cancelled.
@@ -231,8 +248,14 @@ impl Broker {
             server: server.identity(),
         });
 
-        session
-            .send(witness)
+        info!(
+            "(With a delay of {:?}:{:?}) Sending witness {:?}:{flow_index}:{batch_index}",
+            witness_post_time.elapsed(),
+            start_wait_for_witness.elapsed(),
+            server.identity()
+        );
+
+        plex.send(witness)
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
 
@@ -244,7 +267,7 @@ impl Broker {
 
         // Collect delivery shard
 
-        let delivery_shard = session
+        let delivery_shard = plex
             .receive::<DeliveryShard>()
             .await
             .pot(TrySubmitError::ConnectionError, here!())?;
@@ -260,8 +283,6 @@ impl Broker {
             .unwrap()
             .send((server.identity(), delivery_shard))
             .await;
-
-        session.end();
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::SubmissionCompleted {

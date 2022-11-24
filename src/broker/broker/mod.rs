@@ -8,7 +8,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use std::{net::ToSocketAddrs, sync::Arc};
 use talk::{
     crypto::Identity,
-    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, SessionConnector},
+    net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, PlexConnector},
     sync::fuse::Fuse,
 };
 use tokio::sync::mpsc;
@@ -30,7 +30,7 @@ impl Broker {
         directory: Directory,
         bind: A,
         broker_identity: Identity,
-        connector: SessionConnector,
+        connector: PlexConnector,
         settings: BrokerSettings,
     ) -> Result<Self, Top<BrokerError>>
     where

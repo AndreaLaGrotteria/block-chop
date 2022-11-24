@@ -9,7 +9,7 @@ use doomstack::{here, Doom, ResultExt, Top};
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::sign::Signature, Identity},
-    net::{DatagramSender, SessionConnector},
+    net::{DatagramSender, PlexConnector},
     sync::fuse::Fuse,
 };
 use tokio::{
@@ -37,7 +37,7 @@ impl Broker {
         mut handle_outlet: RequestOutlet,
         sender: Arc<DatagramSender<Response>>,
         broker_identity: Identity,
-        connector: SessionConnector,
+        connector: PlexConnector,
         settings: BrokerSettings,
     ) {
         let connector = Arc::new(connector);

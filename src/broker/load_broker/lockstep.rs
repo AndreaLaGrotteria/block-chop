@@ -1,8 +1,6 @@
-use std::mem;
-
-use talk::sync::promise::Solver;
-
 use crate::broker::LoadBroker;
+use std::mem;
+use talk::sync::promise::Solver;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 type UsizeOutlet = UnboundedReceiver<usize>;
@@ -15,6 +13,7 @@ enum State {
 
 impl LoadBroker {
     pub(in crate::broker::load_broker) async fn lockstep(
+        _flow_id: usize,
         lock_solvers: Vec<Solver<()>>,
         mut free_outlet: UsizeOutlet,
         lockstep_delta: usize,

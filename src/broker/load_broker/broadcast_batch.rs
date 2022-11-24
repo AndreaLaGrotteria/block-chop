@@ -5,10 +5,10 @@ use crate::{
 };
 use futures::future::join_all;
 use rand::{seq::SliceRandom, thread_rng};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::multi::Signature as MultiSignature, Identity},
-    net::SessionConnector,
+    net::PlexConnector,
     sync::{board::Board, fuse::Fuse, promise::Promise},
 };
 use tokio::{
@@ -31,7 +31,7 @@ impl LoadBroker {
         sequence: u64,
         load_batch: LoadBatch,
         membership: Arc<Membership>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         settings: LoadBrokerSettings,
     ) {
         // Preprocess arguments
@@ -39,7 +39,10 @@ impl LoadBroker {
         let LoadBatch {
             root,
             raw_batch,
+            affinities,
             mut lockstep,
+            flow_index,
+            batch_index,
         } = load_batch;
 
         let raw_batch = Arc::new(raw_batch);
@@ -88,11 +91,14 @@ impl LoadBroker {
                 raw_batch.clone(),
                 server.clone(),
                 connector.clone(),
+                affinities.clone(),
                 verify,
                 witness_shard_inlet.clone(),
                 witness_board.clone(),
                 delivery_shard_inlet.clone(),
                 settings.clone(),
+                flow_index,
+                batch_index,
             ));
 
             submit_tasks.push(handle);
@@ -143,14 +149,13 @@ impl LoadBroker {
         // Wait on `lockstep` to ensure lockstepped submission (this reduces,
         // but does not remove, the rate at which servers observe duplicates)
         // Note: additionally waiting for `settings.lockstep_margin` reduces
-        // the probability that two witnesses in independent `Session`s will
+        // the probability that two witnesses in independent `Plex`es will
         // overtake each other in-flight, thus causing causally-dependent
         // batches to be submitted to `Order` in the wrong order.
 
         lockstep.lock().await;
         time::sleep(settings.lockstep_margin).await;
-
-        witness_poster.post(witness);
+        witness_poster.post((witness, Instant::now()));
 
         lockstep.free();
 

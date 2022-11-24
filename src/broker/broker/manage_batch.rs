@@ -7,7 +7,7 @@ use crate::{
 use std::{collections::HashMap, sync::Arc};
 use talk::{
     crypto::Identity,
-    net::{DatagramSender, SessionConnector},
+    net::{DatagramSender, PlexConnector},
 };
 use tokio::sync::{broadcast::Receiver as BroadcastReceiver, mpsc::Sender as MpscSender};
 
@@ -25,7 +25,7 @@ impl Broker {
         top_record: Option<HeightRecord>,
         reduction_outlet: ReductionOutlet,
         sender: Arc<DatagramSender<Response>>,
-        connector: Arc<SessionConnector>,
+        connector: Arc<PlexConnector>,
         worker_recycler: IndexInlet,
         settings: BrokerSettings,
     ) {
@@ -66,7 +66,7 @@ mod tests {
     use std::time::Duration;
     use talk::{
         crypto::KeyChain,
-        net::{test::TestConnector, SessionConnector},
+        net::{test::TestConnector, PlexConnector},
     };
     use tokio::time;
 
@@ -79,14 +79,14 @@ mod tests {
         let keychain = KeyChain::random();
         let broker_identity = keychain.keycard().identity();
         let connector = TestConnector::new(keychain, connector_map.clone());
-        let session_connector = SessionConnector::new(connector);
+        let plex_connector = PlexConnector::new(connector, Default::default());
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
             broker_identity,
-            session_connector,
+            plex_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -116,14 +116,14 @@ mod tests {
         let keychain = KeyChain::random();
         let broker_identity = keychain.keycard().identity();
         let connector = TestConnector::new(keychain, connector_map.clone());
-        let session_connector = SessionConnector::new(connector);
+        let plex_connector = PlexConnector::new(connector, Default::default());
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
             broker_identity,
-            session_connector,
+            plex_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
@@ -167,14 +167,14 @@ mod tests {
         let keychain = KeyChain::random();
         let broker_identity = keychain.keycard().identity();
         let connector = TestConnector::new(keychain, connector_map.clone());
-        let session_connector = SessionConnector::new(connector);
+        let plex_connector = PlexConnector::new(connector, Default::default());
 
         let _broker = Broker::new(
             membership.clone(),
             directory,
             broker_address,
             broker_identity,
-            session_connector,
+            plex_connector,
             BrokerSettings {
                 pool_timeout: Duration::from_millis(10),
                 totality_timeout: Duration::from_millis(100),
