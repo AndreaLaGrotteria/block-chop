@@ -10,7 +10,8 @@ use talk::{
     link::{
         context::ConnectDispatcher,
         rendezvous::{Client as RendezvousClient, Connector as RendezvousConnector},
-    }, net::{PlexConnectorSettings, PlexConnector},
+    },
+    net::{PlexConnector, PlexConnectorSettings},
 };
 use tokio::time;
 
@@ -80,6 +81,17 @@ async fn main() {
 
     let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
 
+    // Fill `connector`
+
+    info!("Filling `PlexConnector`..");
+
+    broker_connector
+        .fill(
+            membership.servers().keys().copied(),
+            Duration::from_millis(100),
+        )
+        .await;
+
     // Rendezvous with servers and brokers
 
     info!("Rendezvous-ing with servers, load brokers..");
@@ -120,11 +132,12 @@ async fn main() {
         broker_connector,
         BrokerSettings {
             workers: 32,
+            maximum_packet_rate: 1.5 * 262144.,
             ..Default::default()
         },
     );
 
-    println!(" .. done! `LoadBroker` running!");
+    println!(" .. done! `HonestBroker` running!");
 
     // Wait indefinitely
 

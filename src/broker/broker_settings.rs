@@ -45,7 +45,7 @@ impl Default for BrokerSettings {
             reduction_interval: Duration::from_millis(10),
             authenticate_channel_capacity: 1024,
             handle_channel_capacity: 1024,
-            reduction_channel_capacity: 65536,
+            reduction_channel_capacity: 5 * 65536,
             submission_schedule: Arc::new(CappedExponential::new(
                 Duration::from_secs(1),
                 2.,

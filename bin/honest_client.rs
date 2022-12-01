@@ -38,6 +38,8 @@ async fn main() {
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
 
+    info!("Client id: {}", client_id);
+
     info!("Loading `Membership`..");
 
     let membership = Membership::load_exact(membership_path, membership_size).unwrap();
@@ -80,7 +82,12 @@ async fn main() {
 
     let identity = directory.get_identity(client_id).unwrap();
     let keychain = passepartout.get(identity).unwrap();
-    let client = Client::new(client_id, keychain, membership, "0.0.0.0:9999");
+    let client = Client::new(
+        client_id,
+        keychain,
+        membership,
+        format!("0.0.0.0:{}", 11000 + client_id),
+    );
     client.add_broker(broker_address).await.unwrap();
 
     rendezvous_client
@@ -117,7 +124,7 @@ async fn main() {
     }
 
     info!(
-        "Honest client finished. Avg: {:.0} +- {:.0} ms",
+        "Honest client finished. Avg: {:.02} +- {:.02} ms",
         statistical::mean(&latencies),
         statistical::standard_deviation(&latencies, None)
     );

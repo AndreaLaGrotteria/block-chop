@@ -1,17 +1,18 @@
 use crate::{
     broker::{BrokerSettings, Response},
     heartbeat::{self, BrokerEvent},
+    info,
     system::Membership,
     Directory,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use std::{net::ToSocketAddrs, sync::Arc};
+use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 use talk::{
     crypto::Identity,
     net::{DatagramDispatcher, DatagramDispatcherSettings, DatagramSender, PlexConnector},
     sync::fuse::Fuse,
 };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time};
 
 pub struct Broker {
     sender: Arc<DatagramSender<Response>>,
@@ -47,6 +48,8 @@ impl Broker {
             bind,
             DatagramDispatcherSettings {
                 maximum_packet_rate: settings.maximum_packet_rate,
+                pace_out_tasks: 10,
+                retransmission_delay: Duration::from_millis(250),
                 ..Default::default()
             },
         )
@@ -96,6 +99,27 @@ impl Broker {
         heartbeat::log(BrokerEvent::Booted {
             identity: broker_identity,
         });
+
+        {
+            let sender = sender.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    time::sleep(Duration::from_secs(1)).await;
+
+                    info!("`DatagramDispatcher` statistics:\n  packets sent: {}\n  packets received: {} ({} msg, {} ack)\n  retransmissions: {}\n  pace_out chokes: {}\n  process_in drops: {}\n  route_out drops: {}\n",
+                        sender.packets_sent(),
+                        sender.packets_received(),
+                        sender.message_packets_processed(),
+                        sender.acknowledgement_packets_processed(),
+                        sender.retransmissions(),
+                        sender.pace_out_chokes(),
+                        sender.process_in_drops(),
+                        sender.route_out_drops()
+                    );
+                }
+            });
+        }
 
         Ok(Broker {
             sender,

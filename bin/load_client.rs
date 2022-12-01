@@ -1,6 +1,6 @@
 use chop_chop::{client, Directory, Passepartout};
 use log::info;
-use std::time::Duration;
+use std::{future, time::Duration};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
@@ -19,6 +19,7 @@ async fn main() {
         Required arguments:
           <rendezvous_address> (string) address of `Rendezvous` server
           <honest_broker_index> (integer) index of the honest broker to connect to
+          <load_client_index> (integer) index of this load client
           <rate> (float) number of operations per second to submit
           <duration> (float) number of seconds to submit for
           <passepartout_path> (string) path to system `Passepartout`
@@ -29,6 +30,7 @@ async fn main() {
 
     let rendezvous_address = args.get_string("rendezvous_address");
     let honest_broker_index = args.get_integer("honest_broker_index") as usize;
+    let load_client_index = args.get_integer("load_client_index") as usize;
     let rate = args.get_float("rate") as f64;
     let duration = args.get_float("duration") as f64;
     let passepartout_path = args.get_string("passepartout_path");
@@ -51,11 +53,11 @@ async fn main() {
 
     // `Client` preprocessing
 
-    let range = (ID_START + (honest_broker_index * CLIENTS_PER_LOAD_CLIENT) as u64)
-        ..(ID_START + ((honest_broker_index + 1) * CLIENTS_PER_LOAD_CLIENT) as u64);
+    let range = (ID_START + (load_client_index * CLIENTS_PER_LOAD_CLIENT) as u64)
+        ..(ID_START + ((load_client_index + 1) * CLIENTS_PER_LOAD_CLIENT) as u64);
 
     if range.end > ID_END {
-        panic!("Range out of bounds. Check that the honest_broker_index is in in [0, 64) ..");
+        panic!("Range out of bounds. Check that the load_client_index is in in [0, 64) ..");
     }
 
     let total_requests = (rate * duration) as usize;
@@ -113,4 +115,6 @@ async fn main() {
     .await;
 
     info!("Load client finished.");
+
+    future::pending::<()>().await;
 }
