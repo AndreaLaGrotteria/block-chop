@@ -18,8 +18,8 @@ async fn main() {
 
         Required arguments:
           <rendezvous_address> (string) address of `Rendezvous` server
-          <honest_broker_index> (integer) index of the honest broker to connect to
           <load_client_index> (integer) index of this load client
+          <broker_address> (string) address of honest `Broker`
           <rate> (float) number of operations per second to submit
           <duration> (float) number of seconds to submit for
           <passepartout_path> (string) path to system `Passepartout`
@@ -29,8 +29,8 @@ async fn main() {
     );
 
     let rendezvous_address = args.get_string("rendezvous_address");
-    let honest_broker_index = args.get_integer("honest_broker_index") as usize;
     let load_client_index = args.get_integer("load_client_index") as usize;
+    let broker_address = args.get_string("broker_address");
     let rate = args.get_float("rate") as f64;
     let duration = args.get_float("duration") as f64;
     let passepartout_path = args.get_string("passepartout_path");
@@ -72,22 +72,6 @@ async fn main() {
     info!("Rendezvous-ing with servers, load brokers..");
 
     let rendezvous_client = RendezvousClient::new(rendezvous_address, Default::default());
-
-    let broker_address = loop {
-        if let Ok(shard) = rendezvous_client
-            .get_shard(1 + honest_broker_index as u32)
-            .await
-        {
-            let broker_address = rendezvous_client
-                .get_address(shard[0].identity())
-                .await
-                .unwrap();
-
-            break broker_address.to_string();
-        }
-
-        time::sleep(Duration::from_millis(500)).await;
-    };
 
     rendezvous_client
         .publish_card(KeyChain::random().keycard(), Some(0))

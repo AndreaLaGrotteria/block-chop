@@ -1,9 +1,12 @@
-use chop_chop::{Broker, BrokerSettings, Directory, Membership};
+use chop_chop::{Broker, BrokerSettings, Directory, Membership, heartbeat};
+use chrono::{Utc, Timelike};
+use futures::StreamExt;
 use log::info;
+use signal_hook::consts::{SIGTERM, SIGINT};
+use signal_hook_tokio::Signals;
 use std::{
-    future,
-    io::{self, Write},
-    time::Duration,
+    io::{Write, BufWriter},
+    time::Duration, fs::File, path::PathBuf,
 };
 use talk::{
     crypto::KeyChain,
@@ -26,21 +29,23 @@ async fn main() {
         Required arguments:
           <rendezvous_address> (string) address of `Rendezvous` server
           <client_port> (integer) `Broker` port to which clients connect
-          <honest_broker_index> (integer) index of this honest broker (`0..#honest_brokers`)
           <membership_path> (string) path to system `Membership` 
           <membership_size> (integer) size of system `Membership`
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
+
+        Heartbeat:
+          --heartbeat-path (string) path to save `heartbeat` data
         ",
     );
 
     let rendezvous_address = args.get_string("rendezvous_address");
     let port = args.get_integer("client_port") as u16;
-    let honest_broker_index = args.get_integer("honest_broker_index") as usize;
     let membership_path = args.get_string("membership_path");
     let membership_size = args.get_integer("membership_size") as usize;
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
+    let heartbeat_path = args.get_string_result("heartbeat-path").ok();
 
     // Load `Membership`
 
@@ -105,11 +110,6 @@ async fn main() {
         .await;
 
     rendezvous_client
-        .publish_card(keychain.keycard(), Some(1 + honest_broker_index as u32))
-        .await
-        .unwrap();
-
-    rendezvous_client
         .publish_card(KeyChain::random().keycard(), Some(0))
         .await
         .unwrap();
@@ -139,9 +139,38 @@ async fn main() {
 
     println!(" .. done! `HonestBroker` running!");
 
-    // Wait indefinitely
+    // Wait for `Ctrl + C`
 
-    println!("\n    [Hit Ctrl + C to stop this daemon]  ");
-    io::stdout().flush().unwrap();
-    future::pending::<()>().await;
+    let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
+    signals.next().await;
+
+    info!("`Ctrl + C` detected, shutting down..");
+
+    // Save heartbeat data (if necessary)
+
+    if let Some(heartbeat_path) = heartbeat_path {
+        let time = Utc::now();
+
+        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+
+        heartbeat_path.push(format!(
+            "heartbeat-broker-{}h{}m{}s.bin",
+            time.hour(),
+            time.minute(),
+            time.second()
+        ));
+
+        println!("Saving heartbeat data to {}", heartbeat_path.display());
+
+        let entries = heartbeat::flush();
+
+        let file = File::create(heartbeat_path).unwrap();
+        let mut file = BufWriter::new(file);
+
+        bincode::serialize_into(&mut file, &entries).unwrap();
+
+        file.flush().unwrap();
+    }
+
+    info!("All done! Chop CHOP!");
 }

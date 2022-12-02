@@ -12,19 +12,16 @@ async fn main() {
 
         Required arguments:
           <port> (integer) port to which to bind the `Rendezvous` server
-          <expected_participants> (integer) total number of `Server`s, `Broker`s (honest + load), and `Client`s to wait for
-          <expected_honest_brokers> (integer) total number of honest (non-load) `Broker`s to wait for
+          <expected_participants> (integer) total number of `Server`s, `Broker`s (honest + load), and `Client`s (honest + load) to wait for
         ",
     );
 
     let port = args.get_integer("port") as u16;
     let expected_participants = args.get_integer("expected_participants") as usize;
-    let expected_honest_brokers = args.get_integer("expected_honest_brokers") as usize;
 
     println!("Starting `Rendezvous` server..");
 
-    let mut shard_sizes = vec![1; 1 + expected_honest_brokers];
-    shard_sizes[0] = expected_participants;
+    let shard_sizes = vec![expected_participants];
 
     let _server = Server::new(("0.0.0.0", port), ServerSettings { shard_sizes })
         .await

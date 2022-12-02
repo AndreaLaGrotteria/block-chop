@@ -1,6 +1,10 @@
-use chop_chop::{client::Client, Directory, Membership, Message, Passepartout};
+use chop_chop::{client::Client, Directory, Membership, Message, Passepartout, heartbeat};
+use chrono::{Utc, Timelike};
+use futures::StreamExt;
 use log::info;
-use std::time::{Duration, Instant};
+use signal_hook::consts::{SIGTERM, SIGINT};
+use signal_hook_tokio::Signals;
+use std::{time::{Duration, Instant}, path::PathBuf, fs::File, io::{BufWriter, Write}};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
@@ -15,7 +19,7 @@ async fn main() {
         Required arguments:
           <rendezvous_address> (string) address of `Rendezvous` server
           <client_id> (integer) id of the client
-          <honest_broker_index> (integer) index of the honest broker to connect to
+          <broker_address> (string) address of honest `Broker`
           <duration> (float) number of seconds to submit for
           <membership_path> (string) path to system `Membership` 
           <membership_size> (integer) size of system `Membership`
@@ -23,20 +27,21 @@ async fn main() {
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
 
-          Logging:
-          --latency-path (string) path to save latency data to
+        Heartbeat:
+          --heartbeat-path (string) path to save `heartbeat` data
         ",
     );
 
     let rendezvous_address = args.get_string("rendezvous_address");
     let client_id = args.get_integer("client_id") as u64;
-    let honest_broker_index = args.get_integer("honest_broker_index") as usize;
+    let broker_address = args.get_string("broker_address");
     let duration = args.get_float("duration") as f64;
     let membership_path = args.get_string("membership_path");
     let membership_size = args.get_integer("membership_size") as usize;
     let passepartout_path = args.get_string("passepartout_path");
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
+    let heartbeat_path = args.get_string_result("heartbeat-path").ok();
 
     info!("Client id: {}", client_id);
 
@@ -63,22 +68,6 @@ async fn main() {
     info!("Rendezvous-ing with servers, load brokers..");
 
     let rendezvous_client = RendezvousClient::new(rendezvous_address, Default::default());
-
-    let broker_address = loop {
-        if let Ok(shard) = rendezvous_client
-            .get_shard(1 + honest_broker_index as u32)
-            .await
-        {
-            let broker_address = rendezvous_client
-                .get_address(shard[0].identity())
-                .await
-                .unwrap();
-
-            break broker_address.to_string();
-        }
-
-        time::sleep(Duration::from_millis(500)).await;
-    };
 
     let identity = directory.get_identity(client_id).unwrap();
     let keychain = passepartout.get(identity).unwrap();
@@ -122,6 +111,41 @@ async fn main() {
             break;
         }
     }
+
+    // Wait for `Ctrl + C`
+
+    let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
+    signals.next().await;
+
+    info!("`Ctrl + C` detected, shutting down..");
+
+    // Save heartbeat data (if necessary)
+
+    if let Some(heartbeat_path) = heartbeat_path {
+        let time = Utc::now();
+
+        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+
+        heartbeat_path.push(format!(
+            "heartbeat-client-{}h{}m{}s.bin",
+            time.hour(),
+            time.minute(),
+            time.second()
+        ));
+
+        println!("Saving heartbeat data to {}", heartbeat_path.display());
+
+        let entries = heartbeat::flush();
+
+        let file = File::create(heartbeat_path).unwrap();
+        let mut file = BufWriter::new(file);
+
+        bincode::serialize_into(&mut file, &entries).unwrap();
+
+        file.flush().unwrap();
+    }
+
+    info!("All done! Chop CHOP!");
 
     info!(
         "Honest client finished. Avg: {:.02} +- {:.02} ms",
