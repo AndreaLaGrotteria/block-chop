@@ -1,10 +1,15 @@
-use chop_chop::{client::Client, Directory, Membership, Message, Passepartout, heartbeat};
-use chrono::{Utc, Timelike};
+use chop_chop::{client::Client, heartbeat, Directory, Membership, Message, Passepartout};
+use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use log::info;
-use signal_hook::consts::{SIGTERM, SIGINT};
+use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook_tokio::Signals;
-use std::{time::{Duration, Instant}, path::PathBuf, fs::File, io::{BufWriter, Write}};
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 

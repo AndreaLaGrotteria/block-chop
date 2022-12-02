@@ -1,4 +1,9 @@
-use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Membership, heartbeat::{self, ClientEvent}};
+use crate::{
+    broadcast::Message,
+    crypto::records::Delivery as DeliveryRecord,
+    heartbeat::{self, ClientEvent},
+    Membership,
+};
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
     net::{SocketAddr, ToSocketAddrs},

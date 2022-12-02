@@ -2,8 +2,10 @@ use crate::{
     broadcast::{Batch as BroadcastBatch, Straggler},
     broker::{Batch as BrokerBatch, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
-    debug, info,
-    system::Directory, heartbeat::{self, BrokerEvent},
+    debug,
+    heartbeat::{self, BrokerEvent},
+    info,
+    system::Directory,
 };
 use rayon::slice::ParallelSliceMut;
 use std::{

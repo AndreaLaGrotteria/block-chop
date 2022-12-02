@@ -54,6 +54,22 @@ impl Request {
             }
         }
     }
+
+    #[cfg(feature = "benchmark")]
+    pub fn generate(id: u64, token: u64, max_offer: u64) -> Request {
+        if rand::random::<bool>() {
+            Request::Bid {
+                bidder: id,
+                token: token % (1 << 31),
+                offer: rand::random::<u64>() % (1 << 31) % max_offer,
+            }
+        } else {
+            Request::Take {
+                taker: id,
+                token: token % (1 << 31),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

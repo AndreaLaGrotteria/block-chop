@@ -114,7 +114,7 @@ pub enum BrokerEvent {
         root: Hash,
     },
 
-    // Local `Broker` has finished 
+    // Local `Broker` has finished
     ReductionReceptionEnded {
         root: Hash,
         timed_out: bool,
@@ -212,7 +212,7 @@ pub enum BrokerEvent {
     DisseminatingDeliveries {
         second_root: Hash,
         third_root: Hash,
-    }
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -260,11 +260,11 @@ pub enum ClientEvent {
         sequence: u64,
     },
 
-    // Local `Client` has verified the delivery from a broker and 
+    // Local `Client` has verified the delivery from a broker and
     // has completed the broadcast
     BroadcastComplete {
         sequence: u64,
-    }
+    },
 }
 
 impl Event {

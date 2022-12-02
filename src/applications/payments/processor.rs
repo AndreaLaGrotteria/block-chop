@@ -322,3 +322,58 @@ impl Processor {
         &payments[start..end]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broadcast::Entry;
+    use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+    use std::time::Duration;
+    use tokio::time;
+
+    #[tokio::test]
+    async fn payments_stress() {
+        let accounts = 257_000_000;
+
+        println!("Generating messages..");
+
+        let messages = (0..3000)
+            .map(|batch| {
+                (0..65536)
+                    .into_par_iter()
+                    .map(|offset| {
+                        let id = batch * 65536 + offset;
+                        let payment = Payment::generate(id, accounts, 10);
+                        Entry {
+                            id,
+                            sequence: 0,
+                            message: payment.to_message().1,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let processor = Arc::new(Processor::new(accounts, 100_000, Default::default()));
+
+        println!("Starting processor..");
+
+        {
+            let processor = processor.clone();
+
+            tokio::spawn(async move {
+                for batch in messages {
+                    processor.push(batch).await
+                }
+            });
+        }
+
+        let mut old_count = 0;
+        for _ in 0..20 {
+            let new_count = processor.operations_processed();
+            println!("Payments processed per second: {}", new_count - old_count);
+            old_count = new_count;
+            time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+}

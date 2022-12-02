@@ -1,12 +1,14 @@
-use chop_chop::{Broker, BrokerSettings, Directory, Membership, heartbeat};
-use chrono::{Utc, Timelike};
+use chop_chop::{heartbeat, Broker, BrokerSettings, Directory, Membership};
+use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use log::info;
-use signal_hook::consts::{SIGTERM, SIGINT};
+use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook_tokio::Signals;
 use std::{
-    io::{Write, BufWriter},
-    time::Duration, fs::File, path::PathBuf,
+    fs::File,
+    io::{BufWriter, Write},
+    path::PathBuf,
+    time::Duration,
 };
 use talk::{
     crypto::KeyChain,

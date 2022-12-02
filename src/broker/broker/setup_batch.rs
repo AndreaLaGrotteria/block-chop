@@ -2,7 +2,8 @@ use crate::{
     broadcast::{Entry, PACKING},
     broker::{Batch, Broker, Response, Submission},
     crypto::records::Height as HeightRecord,
-    info, heartbeat::{self, BrokerEvent},
+    heartbeat::{self, BrokerEvent},
+    info,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},

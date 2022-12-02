@@ -9,7 +9,9 @@ use crate::{
             ReductionAuthentication as ReductionAuthenticationStatement,
         },
     },
-    debug, info, warn, Membership, heartbeat::{self, ClientEvent},
+    debug,
+    heartbeat::{self, ClientEvent},
+    info, warn, Membership,
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
@@ -80,7 +82,10 @@ impl Client {
             };
 
             #[cfg(feature = "benchmark")]
-            heartbeat::log(ClientEvent::StartingBroadcast { message, sequence: *sequence_range.start() });
+            heartbeat::log(ClientEvent::StartingBroadcast {
+                message,
+                sequence: *sequence_range.start(),
+            });
 
             info!("Broadcasting a new message.");
             debug!("Message to broadcast: {:?}", message);
@@ -162,7 +167,10 @@ impl Client {
                 }
 
                 #[cfg(feature = "benchmark")]
-                heartbeat::log(ClientEvent::ReceivedInclusion { message: message.clone(), root });
+                heartbeat::log(ClientEvent::ReceivedInclusion {
+                    message: message.clone(),
+                    root,
+                });
 
                 // Verify that `message` is included in `root`
 
@@ -208,7 +216,11 @@ impl Client {
                 // Multi-sign and authenticate `Reduction` statement
 
                 #[cfg(feature = "benchmark")]
-                heartbeat::log(ClientEvent::SigningReduction { message: message.clone(), root, raise });
+                heartbeat::log(ClientEvent::SigningReduction {
+                    message: message.clone(),
+                    root,
+                    raise,
+                });
 
                 let reduction_statement = ReductionStatement { root: &root };
                 let multisignature = keychain.multisign(&reduction_statement).unwrap();
@@ -232,7 +244,10 @@ impl Client {
                 };
 
                 #[cfg(feature = "benchmark")]
-                heartbeat::log(ClientEvent::SendingReduction { message: message.clone(), root });
+                heartbeat::log(ClientEvent::SendingReduction {
+                    message: message.clone(),
+                    root,
+                });
 
                 sender.send(source, request).await;
 

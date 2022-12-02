@@ -1,4 +1,7 @@
-use chop_chop::{Batch, Directory, Entry, Passepartout};
+use chop_chop::{
+    applications::{payments::Payment, pixel_war::Paint, auctions::Request},
+    Batch, Directory, Entry, Message, Passepartout,
+};
 use rand::{
     distributions::{Distribution, WeightedIndex},
     seq::SliceRandom,
@@ -45,6 +48,12 @@ fn main() {
           <cooldown> (integer) number of batches to wait before re-broadcasting
           <reduction_probability> (float) probability that any broadcast will be reduced
           <output_path> (string) path to output
+
+        Application messages (choose one):
+          --random
+          --payments
+          --auction
+          --pixel_war
         ",
     );
 
@@ -62,6 +71,24 @@ fn main() {
 
     let total_batches = flows * batches_per_flow;
 
+    let random = args.get_bool("random");
+    let payments = args.get_bool("payments");
+    let auction = args.get_bool("auction");
+    let pixel_war = args.get_bool("pixel_war");
+
+    let applications_selected = if random { 1 } else { 0 }
+        + if payments { 1 } else { 0 }
+        + if auction { 1 } else { 0 }
+        + if pixel_war { 1 } else { 0 };
+
+    if applications_selected == 0 {
+        println!("Please select the underlying application message type.");
+        return;
+    } else if applications_selected > 1 {
+        println!("Please select only one underlying application message type.");
+        return;
+    }
+
     // Load `Passepartout` and `Directory`
 
     println!("Loading `Passepartout` and `Directory`..");
@@ -72,6 +99,24 @@ fn main() {
         unsafe { Directory::load_raw(directory_path) }
     } else {
         Directory::load(directory_path).unwrap()
+    };
+
+    let directory_size = directory.capacity() as u64;
+
+    let create_message: fn(u64, u64) -> Message = if random {
+        |_, _| -> Message { rand::random() }
+    } else if payments {
+        |source: u64, directory_size: u64| -> Message {
+            Payment::generate(source, directory_size, 10).to_message().1
+        }
+    } else if auction {
+        |source: u64, _: u64| -> Message {
+            Request::generate(source, source / 65536, 10).to_message().1
+        }
+    } else if pixel_war {
+        |source, _| -> Message { Paint::random(source).to_message().1 }
+    } else {
+        unreachable!()
     };
 
     println!(" .. done!");
@@ -165,7 +210,7 @@ fn main() {
                     .map(|broadcaster| Entry {
                         id: broadcaster.id,
                         sequence: broadcaster.state.borrow().next_sequence,
-                        message: rand::random(),
+                        message: create_message(broadcaster.id, directory_size),
                     })
                     .collect::<Vec<_>>();
 

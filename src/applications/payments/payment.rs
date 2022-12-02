@@ -37,6 +37,15 @@ impl Payment {
 
         (self.from, Message { bytes })
     }
+
+    #[cfg(feature = "benchmark")]
+    pub fn generate(from: u64, num_accounts: u64, max_amount: u64) -> Payment {
+        Payment {
+            from,
+            to: rand::random::<u32>() as u64 % num_accounts,
+            amount: rand::random::<u32>() as u64 % max_amount,
+        }
+    }
 }
 
 #[cfg(test)]

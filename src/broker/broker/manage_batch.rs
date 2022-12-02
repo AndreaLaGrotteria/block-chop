@@ -39,7 +39,8 @@ impl Broker {
         let mut broker_batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
 
         let first_root = broker_batch.entries.root();
-        #[cfg(feature = "benchmark")] {
+        #[cfg(feature = "benchmark")]
+        {
             heartbeat::log(BrokerEvent::ReductionReceptionStarted {
                 worker_index,
                 sequence,
@@ -51,7 +52,7 @@ impl Broker {
             Broker::reduce_batch(directory, &mut broker_batch, reduction_outlet, &settings).await;
 
         let second_root = broker_batch.entries.root();
-        
+
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::ReductionEnded {
             first_root,
