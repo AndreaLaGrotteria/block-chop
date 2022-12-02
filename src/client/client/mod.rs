@@ -1,4 +1,4 @@
-use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Membership};
+use crate::{broadcast::Message, crypto::records::Delivery as DeliveryRecord, Membership, heartbeat::{self, ClientEvent}};
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -41,6 +41,8 @@ impl Client {
 
         let fuse = Fuse::new();
 
+        let identity = keychain.keycard().identity();
+
         {
             let brokers = brokers.clone();
             fuse.spawn(Client::run(
@@ -52,6 +54,9 @@ impl Client {
                 broadcast_outlet,
             ));
         }
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(ClientEvent::Booted { identity });
 
         Client {
             brokers,

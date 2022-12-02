@@ -2,7 +2,9 @@ use crate::{
     broadcast::Entry,
     broker::{Broker, BrokerSettings, Reduction, Request, Response, Submission},
     crypto::records::Height as HeightRecord,
-    debug, info,
+    debug,
+    heartbeat::{self, BrokerEvent},
+    info,
     system::{Directory, Membership},
 };
 use doomstack::{here, Doom, ResultExt, Top};
@@ -86,6 +88,13 @@ impl Broker {
                             signature,
                             height_record,
                         ) {
+                            #[cfg(feature = "benchmark")]
+                            {
+                                if pool.len() == 0 {
+                                    heartbeat::log(BrokerEvent::PoolCreation);
+                                }
+                            }
+
                             pool.insert(submission.entry.id, submission);
 
                             next_flush =

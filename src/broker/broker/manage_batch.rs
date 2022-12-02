@@ -2,6 +2,7 @@ use crate::{
     broker::{Broker, BrokerSettings, Reduction, Response, Submission},
     crypto::records::Height as HeightRecord,
     debug,
+    heartbeat::{self, BrokerEvent},
     system::{Directory, Membership},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -29,10 +30,33 @@ impl Broker {
         worker_recycler: IndexInlet,
         settings: BrokerSettings,
     ) {
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::PoolFlush {
+            worker_index,
+            sequence,
+        });
+
         let mut broker_batch = Broker::setup_batch(pool, top_record, sender.as_ref()).await;
+
+        let first_root = broker_batch.entries.root();
+        #[cfg(feature = "benchmark")] {
+            heartbeat::log(BrokerEvent::ReductionReceptionStarted {
+                worker_index,
+                sequence,
+                root: first_root,
+            });
+        }
 
         let broadcast_batch =
             Broker::reduce_batch(directory, &mut broker_batch, reduction_outlet, &settings).await;
+
+        let second_root = broker_batch.entries.root();
+        
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::ReductionEnded {
+            first_root,
+            second_root,
+        });
 
         let (height, delivery_certificate) = Broker::broadcast_batch(
             broker_identity,
@@ -49,6 +73,12 @@ impl Broker {
         worker_recycler.send(worker_index).await.unwrap();
 
         debug!("Got height and delivery certificate!");
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::DisseminatingDeliveries {
+            second_root,
+            third_root: broker_batch.entries.root(),
+        });
 
         Broker::disseminate_deliveries(broker_batch, height, delivery_certificate, sender.as_ref())
             .await;

@@ -8,7 +8,7 @@ use crate::{
             Broadcast as BroadcastStatement,
             BroadcastAuthentication as BroadcastAuthenticationStatement,
         },
-    },
+    }, heartbeat::{self, ClientEvent},
 };
 use std::{
     net::SocketAddr,
@@ -67,6 +67,9 @@ impl Client {
             };
 
             // Send request to `broker`
+
+            #[cfg(feature = "benchmark")]
+            heartbeat::log(ClientEvent::SendingMessage { sequence, broker_index: index });
 
             sender.send(broker, request.clone()).await;
 

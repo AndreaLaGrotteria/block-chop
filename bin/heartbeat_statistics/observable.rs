@@ -6,17 +6,7 @@ pub(crate) struct Observable {
     pub applicability: f64,
     pub average: f64,
     pub standard_deviation: f64,
-    pub percentiles: Percentiles,
-}
-
-pub(crate) struct Percentiles {
-    pub zero: f64,
-    pub five: f64,
-    pub twenty_five: f64,
-    pub fifty: f64,
-    pub seventy_five: f64,
-    pub ninety_five: f64,
-    pub hundred: f64,
+    pub percentiles: [f64; 101],
 }
 
 impl Observable {
@@ -47,27 +37,24 @@ impl Observable {
 
         values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let zero = *values.first().unwrap();
-        let five = values[((values.len() as f64) * 0.05) as usize];
-        let twenty_five = values[((values.len() as f64) * 0.25) as usize];
-        let fifty = values[((values.len() as f64) * 0.5) as usize];
-        let seventy_five = values[((values.len() as f64) * 0.75) as usize];
-        let ninety_five = values[((values.len() as f64) * 0.95) as usize];
-        let hundred = *values.last().unwrap();
+        let mut percentiles = [0f64; 101];
+        percentiles.copy_from_slice(
+            &(0..=100)
+                .map(|percentile| {
+                    let index = std::cmp::min(
+                        ((values.len() as f64) * percentile as f64 / 100f64) as usize,
+                        values.len(),
+                    );
+                    values[index]
+                })
+                .collect::<Vec<_>>(),
+        );
 
         Observable {
             applicability,
             average,
             standard_deviation,
-            percentiles: Percentiles {
-                zero,
-                five,
-                twenty_five,
-                fifty,
-                seventy_five,
-                ninety_five,
-                hundred,
-            },
+            percentiles,
         }
     }
 }
@@ -103,13 +90,13 @@ impl Debug for Observable {
                 format_time(self.average),
                 format_time(self.standard_deviation),
                 self.applicability,
-                format_time(self.percentiles.zero),
-                format_time(self.percentiles.five),
-                format_time(self.percentiles.twenty_five),
-                format_time(self.percentiles.fifty),
-                format_time(self.percentiles.seventy_five),
-                format_time(self.percentiles.ninety_five),
-                format_time(self.percentiles.hundred),
+                format_time(self.percentiles[0]),
+                format_time(self.percentiles[5]),
+                format_time(self.percentiles[25]),
+                format_time(self.percentiles[50]),
+                format_time(self.percentiles[75]),
+                format_time(self.percentiles[95]),
+                format_time(self.percentiles[100]),
             )
         } else {
             write!(
@@ -118,13 +105,13 @@ impl Debug for Observable {
                 self.average,
                 self.standard_deviation,
                 self.applicability,
-                self.percentiles.zero,
-                self.percentiles.five,
-                self.percentiles.twenty_five,
-                self.percentiles.fifty,
-                self.percentiles.seventy_five,
-                self.percentiles.ninety_five,
-                self.percentiles.hundred,
+                format_time(self.percentiles[0]),
+                format_time(self.percentiles[5]),
+                format_time(self.percentiles[25]),
+                format_time(self.percentiles[50]),
+                format_time(self.percentiles[75]),
+                format_time(self.percentiles[95]),
+                format_time(self.percentiles[100]),
             )
         }
     }

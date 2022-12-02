@@ -2,7 +2,7 @@ use crate::{
     broadcast::{Entry, PACKING},
     broker::{Batch, Broker, Response, Submission},
     crypto::records::Height as HeightRecord,
-    info,
+    info, heartbeat::{self, BrokerEvent},
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -49,6 +49,11 @@ impl Broker {
             entries.root(),
             entries.len()
         );
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::BatchBuilt {
+            root: entries.root(),
+        });
 
         // Disseminate proofs of inclusion
 

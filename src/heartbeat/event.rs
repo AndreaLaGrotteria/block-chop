@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use talk::crypto::{primitives::hash::Hash, Identity};
 
+use crate::Message;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Event {
     Server(ServerEvent),
     Broker(BrokerEvent),
+    Client(ClientEvent),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -86,49 +89,182 @@ pub enum BrokerEvent {
     // Local `Broker` with identity `Identity` booted (this event should
     // be logged only once per execution, and assumes that no two instances
     // of `Broker` will be run on the same `chop_chop` process)
-    Booted { identity: Identity },
+    Booted {
+        identity: Identity,
+    },
+
+    // Local `Broker` inserted the first message of a new pool
+    PoolCreation,
+
+    // Local `Broker` flushed the pool
+    PoolFlush {
+        worker_index: u16,
+        sequence: u64,
+    },
+
+    // Local `Broker` has assembled the batch (merkle tree) from the pool
+    BatchBuilt {
+        root: Hash,
+    },
+
+    // Local `Broker` is waiting for reductions
+    ReductionReceptionStarted {
+        worker_index: u16,
+        sequence: u64,
+        root: Hash,
+    },
+
+    // Local `Broker` has finished 
+    ReductionReceptionEnded {
+        root: Hash,
+        timed_out: bool,
+    },
+
+    // Local `Broker` is waiting for reductions
+    AggregateComputed {
+        root: Hash,
+    },
+
+    // Local `Broker` is waiting for reductions
+    ReductionEnded {
+        first_root: Hash,
+        second_root: Hash,
+    },
 
     // Local `Broker` begun executing `Broker::try_submit_batch`
-    SubmissionStarted { root: Hash, server: Identity },
+    SubmissionStarted {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` established a connection to submission `Server`
-    ServerConnected { root: Hash, server: Identity },
+    ServerConnected {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` sent raw batch to submisison `Server`
-    BatchSent { root: Hash, server: Identity },
+    BatchSent {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` requested a witness shard from submission `Server`
-    WitnessShardRequested { root: Hash, server: Identity },
+    WitnessShardRequested {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` received a witness shard from submission `Server`
-    WitnessShardReceived { root: Hash, server: Identity },
+    WitnessShardReceived {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` successfully verified the witness shard received
     // from submission `Server`
-    WitnessShardVerified { root: Hash, server: Identity },
+    WitnessShardVerified {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` waived requesting a witness shard from submission
     // `Server` (i.e., `Server` is an idler)
-    WitnessShardWaived { root: Hash, server: Identity },
+    WitnessShardWaived {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` concluded witnessing submission batch (this event
     // is triggered both if the witness shard was requested and obtained,
     // or waived)
-    WitnessShardConcluded { root: Hash, server: Identity },
+    WitnessShardConcluded {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` aggregated a complete witness `Certificate` from a
     // plurality of submission `Server`s, and is ready to be sent the
     // witness to the submission `Server`
-    WitnessAcquired { root: Hash, server: Identity },
+    WitnessAcquired {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` sent witness `Certificate` to submission `Server`
-    WitnessSent { root: Hash, server: Identity },
+    WitnessSent {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` received `DeliveryShard` from submission `Server`
-    DeliveryShardReceived { root: Hash, server: Identity },
+    DeliveryShardReceived {
+        root: Hash,
+        server: Identity,
+    },
 
     // Local `Broker` completed its submission to submission `Server`
-    SubmissionCompleted { root: Hash, server: Identity },
+    SubmissionCompleted {
+        root: Hash,
+        server: Identity,
+    },
+
+    DisseminatingDeliveries {
+        second_root: Hash,
+        third_root: Hash,
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum ClientEvent {
+    // Local `Client` with identity `Identity` booted (this event should
+    // be logged only once per execution, and assumes that no two instances
+    // of `Client` will be run on the same `chop_chop` process)
+    Booted {
+        identity: Identity,
+    },
+
+    // Local `Client` is starting a new message broadcast
+    StartingBroadcast {
+        message: Message,
+        sequence: u64,
+    },
+
+    // Local `Client` is sending a message to a broker
+    SendingMessage {
+        sequence: u64,
+        broker_index: usize,
+    },
+
+    // Local `Client` has received the inclusion from the broker
+    ReceivedInclusion {
+        message: Message,
+        root: Hash,
+    },
+
+    // Local `Client` has approved and starts signing the reductions
+    SigningReduction {
+        message: Message,
+        root: Hash,
+        raise: u64,
+    },
+
+    // Local `Client` has started sending the reduction to the broker
+    SendingReduction {
+        message: Message,
+        root: Hash,
+    },
+
+    // Local `Client` has received a delivery notification from a broker
+    ReceivedDelivery {
+        sequence: u64,
+    },
+
+    // Local `Client` has verified the delivery from a broker and 
+    // has completed the broadcast
+    BroadcastComplete {
+        sequence: u64,
+    }
 }
 
 impl Event {
@@ -136,6 +272,7 @@ impl Event {
         match self {
             Event::Server(event) => event.is_boot(),
             Event::Broker(event) => event.is_boot(),
+            Event::Client(event) => event.is_boot(),
         }
     }
 }
@@ -160,6 +297,16 @@ impl BrokerEvent {
     }
 }
 
+impl ClientEvent {
+    pub fn is_boot(&self) -> bool {
+        if let ClientEvent::Booted { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl From<ServerEvent> for Event {
     fn from(event: ServerEvent) -> Self {
         Event::Server(event)
@@ -169,5 +316,11 @@ impl From<ServerEvent> for Event {
 impl From<BrokerEvent> for Event {
     fn from(event: BrokerEvent) -> Self {
         Event::Broker(event)
+    }
+}
+
+impl From<ClientEvent> for Event {
+    fn from(event: ClientEvent) -> Self {
+        Event::Client(event)
     }
 }

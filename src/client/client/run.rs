@@ -9,7 +9,7 @@ use crate::{
             ReductionAuthentication as ReductionAuthenticationStatement,
         },
     },
-    debug, info, warn, Membership,
+    debug, info, warn, Membership, heartbeat::{self, ClientEvent},
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use std::{
@@ -78,6 +78,9 @@ impl Client {
                 Some(broadcast) => broadcast,
                 None => return, // `Client` has dropped, shutdown
             };
+
+            #[cfg(feature = "benchmark")]
+            heartbeat::log(ClientEvent::StartingBroadcast { message, sequence: *sequence_range.start() });
 
             info!("Broadcasting a new message.");
             debug!("Message to broadcast: {:?}", message);
@@ -158,6 +161,9 @@ impl Client {
                     return HandleError::MisdirectedResponse.fail().spot(here!());
                 }
 
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(ClientEvent::ReceivedInclusion { message: message.clone(), root });
+
                 // Verify that `message` is included in `root`
 
                 let entry = Some(Entry {
@@ -201,6 +207,9 @@ impl Client {
 
                 // Multi-sign and authenticate `Reduction` statement
 
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(ClientEvent::SigningReduction { message: message.clone(), root, raise });
+
                 let reduction_statement = ReductionStatement { root: &root };
                 let multisignature = keychain.multisign(&reduction_statement).unwrap();
 
@@ -222,6 +231,9 @@ impl Client {
                     authentication,
                 };
 
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(ClientEvent::SendingReduction { message: message.clone(), root });
+
                 sender.send(source, request).await;
 
                 Ok(None)
@@ -235,6 +247,9 @@ impl Client {
                 proof,
             } => {
                 info!("Handling delivery. Sequence: {}", sequence);
+
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(ClientEvent::ReceivedDelivery { sequence });
 
                 // Verify that the delivered sequence is within the current sequence range
 
@@ -260,6 +275,9 @@ impl Client {
                     );
                     return HandleError::InvalidDeliveryRecord.fail().spot(here!());
                 }
+
+                #[cfg(feature = "benchmark")]
+                heartbeat::log(ClientEvent::BroadcastComplete { sequence });
 
                 info!("All delivery checks completed successfully.");
 

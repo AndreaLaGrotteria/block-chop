@@ -3,7 +3,7 @@ use crate::{
     broker::{Batch as BrokerBatch, Broker, BrokerSettings, Reduction},
     crypto::statements::Reduction as ReductionStatement,
     debug, info,
-    system::Directory,
+    system::Directory, heartbeat::{self, BrokerEvent},
 };
 use rayon::slice::ParallelSliceMut;
 use std::{
@@ -130,6 +130,12 @@ impl Broker {
             }
         }
 
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::ReductionReceptionEnded {
+            root: broker_batch.entries.root(),
+            timed_out: Instant::now() >= reduction_deadline,
+        });
+
         // Flush reductions lingering in `burst_buffer` to `Broker::stream_reduction`,
         // join `Broker::stream_reduction` to obtain aggregate multisignature and
         // a list of (Byzantine) clients that reduced incorrectly.
@@ -141,6 +147,11 @@ impl Broker {
         let _ = command_inlet.send(StreamReductionCommand::Terminate);
 
         let (multisignature, byzantines) = stream_reduction_task.await.unwrap().unwrap();
+
+        #[cfg(feature = "benchmark")]
+        heartbeat::log(BrokerEvent::AggregateComputed {
+            root: broker_batch.entries.root(),
+        });
 
         // Collect and sort straggler ids (both late and Byzantine)
 
@@ -163,7 +174,7 @@ impl Broker {
             ids.push(submission.entry.id);
             messages.push(submission.entry.message.clone());
 
-            // Note that both `straggler_ids` and `batch.subimssions[..].entry.id` are sorted
+            // Note that both `straggler_ids` and `batch.submissions[..].entry.id` are sorted
             if straggler_ids.peek() == Some(&submission.entry.id) {
                 straggler_ids.next().unwrap();
 
