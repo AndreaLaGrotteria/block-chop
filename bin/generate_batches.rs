@@ -1,7 +1,8 @@
 use chop_chop::{
-    applications::{payments::Payment, pixel_war::Paint, auctions::Request},
+    applications::{auctions::Request, payments::Payment, pixel_war::Paint},
     Batch, Directory, Entry, Message, Passepartout,
 };
+use log::info;
 use rand::{
     distributions::{Distribution, WeightedIndex},
     seq::SliceRandom,
@@ -82,16 +83,16 @@ fn main() {
         + if pixel_war { 1 } else { 0 };
 
     if applications_selected == 0 {
-        println!("Please select the underlying application message type.");
+        info!("Please select the underlying application message type.");
         return;
     } else if applications_selected > 1 {
-        println!("Please select only one underlying application message type.");
+        info!("Please select only one underlying application message type.");
         return;
     }
 
     // Load `Passepartout` and `Directory`
 
-    println!("Loading `Passepartout` and `Directory`..");
+    info!("Loading `Passepartout` and `Directory`..");
 
     let passepartout = Passepartout::load(passepartout_path).unwrap();
 
@@ -119,11 +120,11 @@ fn main() {
         unreachable!()
     };
 
-    println!(" .. done!");
+    info!(" .. done!");
 
     // Partition id range among flows
 
-    println!("Partitioning id range in flows..");
+    info!("Partitioning id range in flows..");
 
     let mut ids = (range_start..range_end).into_iter().collect::<Vec<_>>();
     ids.shuffle(&mut rand::thread_rng());
@@ -137,11 +138,11 @@ fn main() {
         .map(|flow| flow.to_vec())
         .collect::<Vec<_>>();
 
-    println!(" .. done!");
+    info!(" .. done!");
 
     // Generate flows
 
-    println!("\nGenerating flows..");
+    info!("\nGenerating flows..");
 
     let batch_count = AtomicU64::new(0);
 
@@ -272,6 +273,6 @@ fn main() {
             }
         });
 
-    println!(" .. done!                                           \n");
-    println!("All done! Chop CHOP!");
+    info!(" .. done!                                           \n");
+    info!("All done! Chop CHOP!");
 }

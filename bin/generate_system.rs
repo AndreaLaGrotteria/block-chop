@@ -1,4 +1,5 @@
 use chop_chop::{Directory, Membership, Passepartout};
+use log::info;
 use rayon::{iter::ParallelIterator, prelude::IntoParallelIterator};
 use std::{
     io::{self, prelude::*},
@@ -28,11 +29,11 @@ fn main() {
     let membership_path = args.get_string("membership_path");
     let directory_path = args.get_string("directory_path");
 
-    println!("Initializing `Passepartout`..");
+    info!("Initializing `Passepartout`..");
 
     let mut passepartout = Passepartout::new();
 
-    println!("\nGenerating `Membership`..");
+    info!("\nGenerating `Membership`..");
 
     let membership = Membership::new(iter::repeat_with(KeyChain::random).take(servers).map(
         |keychain| {
@@ -43,9 +44,9 @@ fn main() {
         },
     ));
 
-    println!(" .. done!");
+    info!(" .. done!");
 
-    println!("\nGenerating keypairs..");
+    info!("\nGenerating keypairs..");
 
     let counter = AtomicUsize::new(0);
 
@@ -66,9 +67,9 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    println!("\r .. done!                             ");
+    info!("\r .. done!                             ");
 
-    println!("\nBuilding `Passepartout` and `Directory`..");
+    info!("\nBuilding `Passepartout` and `Directory`..");
 
     let mut directory = Directory::new();
 
@@ -82,13 +83,13 @@ fn main() {
         directory.insert(index as u64, keycard);
     }
 
-    println!("\r .. done!                    ");
+    info!("\r .. done!                    ");
 
-    println!("\nSaving `Passepartout`, `Membership` and `Directory`..");
+    info!("\nSaving `Passepartout`, `Membership` and `Directory`..");
 
     passepartout.save(passepartout_path).unwrap();
     membership.save(membership_path).unwrap();
     directory.save(directory_path).unwrap();
 
-    println!("All done! Chop CHOP!");
+    info!("All done! Chop CHOP!");
 }

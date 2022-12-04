@@ -1,4 +1,8 @@
 use chop_chop::{
+    applications::{
+        auctions::Processor as AuctionsProcessor, payments::Processor as PaymentsProcessor,
+        pixel_war::Processor as PixelWarProcessor,
+    },
     heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
 };
 use chrono::{Timelike, Utc};
@@ -50,6 +54,12 @@ async fn main() {
           --hotstuff (string) address to `HotStuff`'s endpoint
           --bftsmart (string) address to `BftSmart`'s endpoint
 
+        Application messages (choose one):
+          --random
+          --payments
+          --auction
+          --pixel_war
+
         Heartbeat:
           --heartbeat-path (string) path to save `heartbeat` data
         ",
@@ -68,6 +78,11 @@ async fn main() {
     let hotstuff = args.get_string_result("hotstuff").ok();
     let bftsmart = args.get_string_result("bftsmart").ok();
 
+    let random = args.get_bool("random");
+    let payments = args.get_bool("payments");
+    let auction = args.get_bool("auction");
+    let pixel_war = args.get_bool("pixel_war");
+
     let orders_selected = if loopback { 1 } else { 0 }
         + if hotstuff.is_some() { 1 } else { 0 }
         + if bftsmart.is_some() { 1 } else { 0 };
@@ -77,6 +92,19 @@ async fn main() {
         return;
     } else if orders_selected > 1 {
         println!("Please select only one underlying Total Order Broadcast.");
+        return;
+    }
+
+    let applications_selected = if random { 1 } else { 0 }
+        + if payments { 1 } else { 0 }
+        + if auction { 1 } else { 0 }
+        + if pixel_war { 1 } else { 0 };
+
+    if applications_selected == 0 {
+        println!("Please select the underlying application message type.");
+        return;
+    } else if applications_selected > 1 {
+        println!("Please select only one underlying application message type.");
         return;
     }
 
@@ -179,6 +207,8 @@ async fn main() {
 
     info!("Starting `Server`..");
 
+    let num_clients = directory.capacity() as u64;
+
     let mut server = Server::new(
         keychain,
         membership,
@@ -198,9 +228,74 @@ async fn main() {
         let counter = counter.clone();
 
         tokio::spawn(async move {
-            loop {
-                let batch = server.next_batch().await;
-                counter.fetch_add(batch.count(), Ordering::Relaxed);
+            if random {
+                loop {
+                    let batch = server.next_batch().await;
+                    counter.fetch_add(batch.count(), Ordering::Relaxed);
+                }
+            } else if payments {
+                let processor = Arc::new(PaymentsProcessor::new(
+                    num_clients,
+                    100_000,
+                    Default::default(),
+                ));
+
+                {
+                    let processor = processor.clone();
+
+                    tokio::spawn(async move {
+                        time::sleep(Duration::from_millis(100)).await;
+                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                    });
+                }
+
+                loop {
+                    let batch = server.next_batch().await;
+                    processor.push(batch).await;
+                }
+            } else if auction {
+                let owners = (0..num_clients / 65536)
+                    .map(|num| num * 65536)
+                    .collect::<Vec<_>>();
+                let processor = Arc::new(AuctionsProcessor::new(
+                    num_clients,
+                    100_000,
+                    owners,
+                    Default::default(),
+                ));
+
+                {
+                    let processor = processor.clone();
+
+                    tokio::spawn(async move {
+                        time::sleep(Duration::from_millis(100)).await;
+                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                    });
+                }
+
+                loop {
+                    let batch = server.next_batch().await;
+                    processor.push(batch).await;
+                }
+            } else if pixel_war {
+                let processor =
+                    Arc::new(PixelWarProcessor::new(num_clients, 5, Default::default()));
+
+                {
+                    let processor = processor.clone();
+
+                    tokio::spawn(async move {
+                        time::sleep(Duration::from_millis(100)).await;
+                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                    });
+                }
+
+                loop {
+                    let batch = server.next_batch().await;
+                    processor.push(batch).await;
+                }
+            } else {
+                unreachable!()
             }
         });
     }
