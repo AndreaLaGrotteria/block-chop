@@ -43,7 +43,7 @@ impl Observable {
                 .map(|percentile| {
                     let index = std::cmp::min(
                         ((values.len() as f64) * percentile as f64 / 100f64) as usize,
-                        values.len(),
+                        values.len() - 1,
                     );
                     values[index]
                 })
