@@ -244,8 +244,14 @@ async fn main() {
                     let processor = processor.clone();
 
                     tokio::spawn(async move {
-                        time::sleep(Duration::from_millis(100)).await;
-                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                        loop {
+                            time::sleep(Duration::from_millis(100)).await;
+
+                            counter.store(
+                                processor.operations_processed() as usize,
+                                Ordering::Relaxed,
+                            );
+                        }
                     });
                 }
 
@@ -257,6 +263,7 @@ async fn main() {
                 let owners = (0..num_clients / 65536)
                     .map(|num| num * 65536)
                     .collect::<Vec<_>>();
+
                 let processor = Arc::new(AuctionsProcessor::new(
                     num_clients,
                     100_000,
@@ -268,8 +275,14 @@ async fn main() {
                     let processor = processor.clone();
 
                     tokio::spawn(async move {
-                        time::sleep(Duration::from_millis(100)).await;
-                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                        loop {
+                            time::sleep(Duration::from_millis(100)).await;
+
+                            counter.store(
+                                processor.operations_processed() as usize,
+                                Ordering::Relaxed,
+                            );
+                        }
                     });
                 }
 
@@ -285,8 +298,14 @@ async fn main() {
                     let processor = processor.clone();
 
                     tokio::spawn(async move {
-                        time::sleep(Duration::from_millis(100)).await;
-                        counter.store(processor.operations_processed() as usize, Ordering::Relaxed);
+                        loop {
+                            time::sleep(Duration::from_millis(100)).await;
+
+                            counter.store(
+                                processor.operations_processed() as usize,
+                                Ordering::Relaxed,
+                            );
+                        }
                     });
                 }
 
