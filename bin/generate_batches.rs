@@ -269,7 +269,7 @@ fn main() {
 
                 let batch_count = batch_count.fetch_add(1, Ordering::Relaxed);
 
-                info!("\r    Generated {batch_count} / {total_batches} batches");
+                println!("\r    Generated {batch_count} / {total_batches} batches");
                 io::stdout().flush().unwrap();
             }
         });
