@@ -11,6 +11,10 @@ pub fn message(_: TokenStream) -> TokenStream {
         .parse()
         .expect("Environment variable `CHOP_CHOP_MESSAGE_SIZE` must be an integer.");
 
+    if message_size % 8 != 0 {
+        panic!("Environment variable `CHOP_CHOP_MESSAGE_SIZE` must be a multiple of 8.");
+    }
+
     let packing = PACKING_BYTES / message_size;
 
     format!(
