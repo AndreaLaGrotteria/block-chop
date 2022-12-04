@@ -31,6 +31,7 @@ struct State {
 }
 
 fn main() {
+    env_logger::init();
     // Parse command-line arguments
 
     let args = lapp::parse_args(

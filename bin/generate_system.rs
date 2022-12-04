@@ -9,6 +9,8 @@ use std::{
 use talk::crypto::KeyChain;
 
 fn main() {
+    env_logger::init();
+    
     let args = lapp::parse_args(
         "
         Welcome to `chop-chop`'s system-generation utility.
