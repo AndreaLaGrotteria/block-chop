@@ -1,4 +1,4 @@
-use crate::broadcast::{Entry, Message};
+use crate::broadcast::{Entry, Message, MESSAGE_SIZE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -8,7 +8,7 @@ pub enum Request {
 
 impl Request {
     pub fn from_entry(entry: Entry) -> Self {
-        let message = u64::from_le_bytes(entry.message.bytes);
+        let message = u64::from_le_bytes(entry.message.bytes[0..8].try_into().unwrap());
 
         let is_take = (message >> 63) == 1;
         let token = message >> 32 & ((1 << 31) - 1);
@@ -40,7 +40,10 @@ impl Request {
                 debug_assert!(*offer < (1 << 32));
 
                 let message = (token << 32) | offer;
-                let bytes = message.to_le_bytes();
+                let message = message.to_le_bytes();
+
+                let mut bytes = [0; MESSAGE_SIZE];
+                bytes[0..8].copy_from_slice(&message);
 
                 (*bidder, Message { bytes })
             }
@@ -48,7 +51,10 @@ impl Request {
                 debug_assert!(*token < (1 << 31));
 
                 let message = (1 << 63) | (token << 32);
-                let bytes = message.to_le_bytes();
+                let message = message.to_le_bytes();
+
+                let mut bytes = [0; MESSAGE_SIZE];
+                bytes[0..8].copy_from_slice(&message);
 
                 (*taker, Message { bytes })
             }

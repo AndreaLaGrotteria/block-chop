@@ -1,6 +1,6 @@
 use crate::{
     applications::pixel_war::{Color, Coordinates, CANVAS_EDGE},
-    broadcast::{Entry, Message},
+    broadcast::{Entry, Message, MESSAGE_SIZE},
 };
 use std::sync::atomic::AtomicBool;
 
@@ -39,7 +39,7 @@ impl Paint {
     }
 
     pub fn from_entry(entry: Entry) -> Self {
-        let message = u64::from_le_bytes(entry.message.bytes);
+        let message = u64::from_le_bytes(entry.message.bytes[0..8].try_into().unwrap());
 
         let x = message >> (64 - 16);
         let y = (message >> (64 - 32)) & ((1 << 16) - 1);
@@ -71,7 +71,10 @@ impl Paint {
         message |= (self.color.green as u64) << (64 - 48);
         message |= (self.color.blue as u64) << (64 - 56);
 
-        let bytes = message.to_le_bytes();
+        let message = message.to_le_bytes();
+
+        let mut bytes = [0; MESSAGE_SIZE];
+        bytes[0..8].copy_from_slice(&message);
 
         (self.painter, Message { bytes })
     }
