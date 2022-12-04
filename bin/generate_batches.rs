@@ -158,8 +158,6 @@ fn main() {
 
             fs::create_dir_all(flow_path.as_path()).unwrap();
 
-            info!("\nA..");
-
             // Setup `Client`s
 
             let clients = flow
@@ -181,8 +179,6 @@ fn main() {
                     }
                 })
                 .collect::<Vec<_>>();
-
-            info!("\nB..");
 
             // Generate `Batch`es
 
@@ -206,8 +202,6 @@ fn main() {
 
                     broadcasters.insert(client.id, client);
                 }
-
-                info!("\nC..");
 
                 let broadcasters = broadcasters.into_values().collect::<Vec<_>>();
 
@@ -234,8 +228,6 @@ fn main() {
                         .take(broadcasters.len())
                         .collect::<Vec<_>>();
 
-                info!("\nD..");
-
                 // Assemble `Batch`
 
                 let requests = broadcasters
@@ -247,8 +239,6 @@ fn main() {
                     });
 
                 let (root, batch) = Batch::assemble(requests);
-
-                info!("\nE..");
 
                 // Update `next_sequence`s in `broadcasters`
 
@@ -263,8 +253,6 @@ fn main() {
                     };
                 }
 
-                info!("\nF..");
-
                 // Save `root` and `batch`
 
                 let mut batch_path = flow_path.clone();
@@ -276,8 +264,7 @@ fn main() {
                 let mut file = File::create(batch_path).unwrap();
                 file.write_all(root.as_slice()).unwrap();
                 file.write_all(batch.as_slice()).unwrap();
-
-                info!("\nG..");
+                
                 // Log progress
 
                 let batch_count = batch_count.fetch_add(1, Ordering::Relaxed);
