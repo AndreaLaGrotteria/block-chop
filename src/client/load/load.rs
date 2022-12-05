@@ -1,5 +1,6 @@
 use crate::{
-    broadcast::{Entry, Message},
+    applications::{create_message, Application},
+    broadcast::Entry,
     broker::{Request as BrokerRequest, Response},
     crypto::statements::{
         Broadcast as BroadcastStatement, Reduction as ReductionStatement,
@@ -24,6 +25,7 @@ pub fn preprocess(
     passepartout: Passepartout,
     range: Range<u64>,
     request_total: usize,
+    application: Application,
 ) -> (Vec<KeyChain>, Vec<Request>) {
     info!("Loading keychains..");
 
@@ -39,6 +41,10 @@ pub fn preprocess(
 
     info!("Generating requests..");
 
+    info!("Directory capacity: {}", directory.capacity());
+
+    let create = create_message(application);
+
     let mut broadcasts = Vec::with_capacity(request_total);
 
     for sequence in 0..(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
@@ -48,8 +54,7 @@ pub fn preprocess(
             .map(|(index, keychain)| {
                 let id = range.start + (index as u64);
 
-                let mut message = Message::default();
-                message.bytes[0..8].copy_from_slice((id + sequence).to_be_bytes().as_slice());
+                let message = create(id, directory.capacity() as u64);
 
                 let entry = Entry {
                     id,
@@ -91,10 +96,17 @@ pub async fn load<A>(
     range: Range<u64>,
     rate: f64,
     request_total: usize,
+    application: Application,
 ) where
     A: Clone + ToSocketAddrs,
 {
-    let (keychains, broadcasts) = preprocess(directory, passepartout, range.clone(), request_total);
+    let (keychains, broadcasts) = preprocess(
+        directory,
+        passepartout,
+        range.clone(),
+        request_total,
+        application,
+    );
     load_with(
         bind_address,
         broker_address,

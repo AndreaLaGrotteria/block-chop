@@ -1,4 +1,8 @@
-use chop_chop::{client::Client, heartbeat, Directory, Membership, Message, Passepartout};
+use chop_chop::{
+    applications::{create_message, Application},
+    client::Client,
+    heartbeat, Directory, Membership, Passepartout,
+};
 use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use log::info;
@@ -32,6 +36,12 @@ async fn main() {
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
 
+        Application messages (choose one):
+          --random
+          --payments
+          --auction
+          --pixel_war
+
         Heartbeat:
           --heartbeat-path (string) path to save `heartbeat` data
         ",
@@ -47,6 +57,24 @@ async fn main() {
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
     let heartbeat_path = args.get_string_result("heartbeat-path").ok();
+
+    let random = args.get_bool("random");
+    let payments = args.get_bool("payments");
+    let auction = args.get_bool("auction");
+    let pixel_war = args.get_bool("pixel_war");
+
+    let applications_selected = if random { 1 } else { 0 }
+        + if payments { 1 } else { 0 }
+        + if auction { 1 } else { 0 }
+        + if pixel_war { 1 } else { 0 };
+
+    if applications_selected == 0 {
+        println!("Please select the underlying application message type.");
+        return;
+    } else if applications_selected > 1 {
+        println!("Please select only one underlying application message type.");
+        return;
+    }
 
     info!("Client id: {}", client_id);
 
@@ -99,14 +127,28 @@ async fn main() {
 
     info!("Starting honest client..");
 
+    let application = if random {
+        Application::Random
+    } else if auction {
+        Application::Auction
+    } else if payments {
+        Application::Payments
+    } else if pixel_war {
+        Application::PixelWar
+    } else {
+        unreachable!()
+    };
+
+    let create = create_message(application);
+
     let start = Instant::now();
 
     let mut latencies = Vec::new();
     for i in 0u64.. {
-        let mut message = Message::default();
-        message.bytes[0..8].copy_from_slice(i.to_be_bytes().as_slice());
+        let message = create(client_id, directory.capacity() as u64);
+
         let time = Instant::now();
-        info!("Broadcasting message {}", i);
+        info!("Broadcasting message {}. Contents: {:?}", i, message);
         client.broadcast(message).await;
         let latency = time.elapsed().as_millis();
         info!("Message delivered! Took {} ms", latency);

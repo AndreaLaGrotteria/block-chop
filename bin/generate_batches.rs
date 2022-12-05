@@ -1,5 +1,5 @@
 use chop_chop::{
-    applications::{auctions::Request, payments::Payment, pixel_war::Paint},
+    applications::{Application, create_message},
     Batch, Directory, Entry, Message, Passepartout,
 };
 use log::info;
@@ -106,17 +106,13 @@ fn main() {
     let directory_size = directory.capacity() as u64;
 
     let create_message: fn(u64, u64) -> Message = if random {
-        |_, _| -> Message { rand::random() }
+        create_message(Application::Random)
     } else if payments {
-        |source: u64, directory_size: u64| -> Message {
-            Payment::generate(source, directory_size, 10).to_message().1
-        }
+        create_message(Application::Payments)
     } else if auction {
-        |source: u64, _: u64| -> Message {
-            Request::generate(source, source / 65536, 10).to_message().1
-        }
+        create_message(Application::Auction)
     } else if pixel_war {
-        |source, _| -> Message { Paint::random(source).to_message().1 }
+        create_message(Application::PixelWar)
     } else {
         unreachable!()
     };

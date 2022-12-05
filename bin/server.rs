@@ -209,6 +209,8 @@ async fn main() {
 
     let num_clients = directory.capacity() as u64;
 
+    info!("Directory capacity {}", num_clients);
+
     let mut server = Server::new(
         keychain,
         membership,

@@ -1,12 +1,12 @@
-use chop_chop::{client, Directory, Passepartout};
+use chop_chop::{applications::Application, client, Directory, Passepartout};
 use log::info;
 use std::{future, time::Duration};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
-const CLIENTS_PER_LOAD_CLIENT: usize = 1_000_000;
+const CLIENTS_PER_LOAD_CLIENT: usize = 500_000;
 const ID_START: u64 = 1_000_000;
-const ID_END: u64 = 65_000_000; // exclusive
+const ID_END: u64 = 10_000_000; // exclusive
 
 #[tokio::main]
 async fn main() {
@@ -25,6 +25,12 @@ async fn main() {
           <passepartout_path> (string) path to system `Passepartout`
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
+
+        Application messages (choose one):
+          --random
+          --payments
+          --auction
+          --pixel_war
         ",
     );
 
@@ -36,6 +42,24 @@ async fn main() {
     let passepartout_path = args.get_string("passepartout_path");
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
+
+    let random = args.get_bool("random");
+    let payments = args.get_bool("payments");
+    let auction = args.get_bool("auction");
+    let pixel_war = args.get_bool("pixel_war");
+
+    let applications_selected = if random { 1 } else { 0 }
+        + if payments { 1 } else { 0 }
+        + if auction { 1 } else { 0 }
+        + if pixel_war { 1 } else { 0 };
+
+    if applications_selected == 0 {
+        println!("Please select the underlying application message type.");
+        return;
+    } else if applications_selected > 1 {
+        println!("Please select only one underlying application message type.");
+        return;
+    }
 
     info!("Loading `Passepartout`..");
 
@@ -64,8 +88,25 @@ async fn main() {
 
     info!("Total requests: {}", total_requests);
 
-    let (keychains, broadcasts) =
-        client::preprocess(directory, passepartout, range.clone(), total_requests);
+    let application = if random {
+        Application::Random
+    } else if auction {
+        Application::Auction
+    } else if payments {
+        Application::Payments
+    } else if pixel_war {
+        Application::PixelWar
+    } else {
+        unreachable!()
+    };
+
+    let (keychains, broadcasts) = client::preprocess(
+        directory,
+        passepartout,
+        range.clone(),
+        total_requests,
+        application,
+    );
 
     // Rendezvous with servers and brokers
 
