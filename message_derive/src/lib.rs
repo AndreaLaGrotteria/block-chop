@@ -15,16 +15,22 @@ pub fn message(_: TokenStream) -> TokenStream {
         panic!("Environment variable `CHOP_CHOP_MESSAGE_SIZE` must be a multiple of 8.");
     }
 
-    let packing = PACKING_BYTES / message_size;
+    let packing = std::cmp::max(1, PACKING_BYTES / message_size);
 
     format!(
         "
             pub const MESSAGE_SIZE: usize = {message_size};
             pub(crate) const PACKING: usize = {packing}; 
 
-            #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Message {{
                 pub bytes: [u8; {message_size}]
+            }}
+
+            impl Default for Message {{
+                fn default() -> Self {{ 
+                    Message {{ bytes: [0u8; {message_size}] }} 
+                }}
             }}
         "
     )
