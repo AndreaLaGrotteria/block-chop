@@ -47,7 +47,7 @@ pub fn preprocess(
 
     let mut broadcasts = Vec::with_capacity(request_total);
 
-    for sequence in 0..1 { //(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
+    for sequence in 1..2 { //(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
         let new_broadcasts = keychains
             .par_iter()
             .enumerate()
