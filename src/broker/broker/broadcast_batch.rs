@@ -70,7 +70,7 @@ impl Broker {
         let mut submit_tasks = Vec::with_capacity(membership.servers().len());
 
         for (index, server) in servers.into_iter().enumerate() {
-            let verify = if index < membership.plurality() {
+            let verify = if index < membership.plurality() + settings.optimistic_margin {
                 Promise::solved(true) // Verifier
             } else if index < membership.quorum() {
                 let (promise, solver) = Promise::pending(); // Backup verifier

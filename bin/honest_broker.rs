@@ -35,6 +35,7 @@ async fn main() {
           <membership_size> (integer) size of system `Membership`
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
+          --margin (default 0) number of extra servers to request immediate witnessing
 
         Heartbeat:
           --heartbeat-path (string) path to save `heartbeat` data
@@ -48,6 +49,7 @@ async fn main() {
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
     let heartbeat_path = args.get_string_result("heartbeat-path").ok();
+    let margin = args.get_integer("margin") as usize;
 
     // Load `Membership`
 
@@ -135,6 +137,7 @@ async fn main() {
         BrokerSettings {
             workers: 32,
             maximum_packet_rate: 1.5 * 262144.,
+            optimistic_margin: margin,
             ..Default::default()
         },
     );

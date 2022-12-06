@@ -26,6 +26,8 @@ pub struct BrokerSettings {
     pub submission_schedule: Arc<dyn SleepSchedule>,
     pub witnessing_timeout: Duration,
     pub totality_timeout: Duration,
+
+    pub optimistic_margin: usize,
 }
 
 impl Default for BrokerSettings {
@@ -53,6 +55,7 @@ impl Default for BrokerSettings {
             )),
             witnessing_timeout: Duration::from_secs(1),
             totality_timeout: Duration::from_secs(30),
+            optimistic_margin: 0,
         }
     }
 }

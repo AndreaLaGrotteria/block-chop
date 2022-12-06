@@ -1,5 +1,5 @@
 use chop_chop::{
-    applications::{Application, create_message},
+    applications::{create_message, Application},
     Batch, Directory, Entry, Message, Passepartout,
 };
 use log::info;
@@ -260,7 +260,7 @@ fn main() {
                 let mut file = File::create(batch_path).unwrap();
                 file.write_all(root.as_slice()).unwrap();
                 file.write_all(batch.as_slice()).unwrap();
-                
+
                 // Log progress
 
                 let batch_count = batch_count.fetch_add(1, Ordering::Relaxed);

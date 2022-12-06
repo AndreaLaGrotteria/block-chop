@@ -7,6 +7,7 @@ pub struct ServerSettings {
     pub batch_channel_capacity: usize,
     pub next_batch_channel_capacity: usize,
     pub broker_listener_settings: PlexListenerSettings,
+    pub garbage_collect_excluded: usize,
 }
 
 impl Default for ServerSettings {
@@ -16,6 +17,7 @@ impl Default for ServerSettings {
             batch_channel_capacity: 8192,
             next_batch_channel_capacity: 8192,
             broker_listener_settings: Default::default(),
+            garbage_collect_excluded: 0,
         }
     }
 }

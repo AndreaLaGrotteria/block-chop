@@ -4,6 +4,7 @@ use chop_chop::{
         pixel_war::Processor as PixelWarProcessor,
     },
     heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
+    ServerSettings,
 };
 use chrono::{Timelike, Utc};
 use futures::stream::StreamExt;
@@ -48,6 +49,7 @@ async fn main() {
           <passepartout_path> (string) path to system `Passepartout`
           <directory_path> (string) path to system `Directory`
           --raw-directory load `Directory` as raw
+          --gc_exclude (default 0) number of servers to exclude for garbage collection
         
         Underlying Total Order Broadcast (choose one):
           --loopback use `LoopBack` order (warning: does not actually guarantee Total Order!)
@@ -72,6 +74,7 @@ async fn main() {
     let passepartout_path = args.get_string("passepartout_path");
     let directory_path = args.get_string("directory_path");
     let raw_directory = args.get_bool("raw-directory");
+    let gc_exclude = args.get_integer("gc_exclude") as usize;
     let heartbeat_path = args.get_string_result("heartbeat-path").ok();
 
     let loopback = args.get_bool("loopback");
@@ -219,7 +222,10 @@ async fn main() {
         broker_listener,
         totality_connector,
         totality_listener,
-        Default::default(),
+        ServerSettings {
+            garbage_collect_excluded: gc_exclude,
+            ..Default::default()
+        },
     );
 
     // Pull batches

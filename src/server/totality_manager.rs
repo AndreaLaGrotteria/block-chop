@@ -110,6 +110,13 @@ impl TotalityManager {
     {
         // Preprocess arguments
 
+        if settings.garbage_collect_excluded >= membership.plurality() {
+            panic!(
+                "Should not exclude more than {} servers!",
+                membership.plurality() - 1
+            );
+        }
+
         let membership = Arc::new(membership);
 
         let connector = PlexConnector::new(connector, settings.connector_settings.clone());
@@ -303,11 +310,13 @@ impl TotalityManager {
                 // each entry of `vector_clock` lower-bounds the value of
                 // `delivery_queue.offset` at the corresponding server).
 
-                let min_clock = vector_clock
+                let mut clocks = vector_clock
                     .values()
                     .map(|clock| clock.load(Ordering::Relaxed))
-                    .min()
-                    .unwrap();
+                    .collect::<Vec<_>>();
+
+                clocks.sort();
+                let min_clock = clocks[settings.garbage_collect_excluded];
 
                 // Garbage-collect all elements of `totality_queue` whose height
                 // is smaller than `min_clock`, i.e., pop elements from the front of

@@ -1,7 +1,10 @@
 use crate::{
     heartbeat::{self, ServerEvent},
     order::Order,
-    server::{Deduplicator, ServerSettings, TotalityManager, WitnessCache},
+    server::{
+        totality_manager_settings::TotalityManagerSettings, Deduplicator, ServerSettings,
+        TotalityManager, WitnessCache,
+    },
     system::{Directory, Membership},
     Entry,
 };
@@ -57,7 +60,10 @@ impl Server {
             membership.clone(),
             totality_connector,
             totality_listener,
-            Default::default(),
+            TotalityManagerSettings {
+                garbage_collect_excluded: settings.garbage_collect_excluded,
+                ..Default::default()
+            },
         );
 
         let deduplicator = Deduplicator::with_capacity(directory.capacity(), Default::default());

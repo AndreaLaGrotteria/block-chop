@@ -12,6 +12,8 @@ pub(in crate::server) struct TotalityManagerSettings {
 
     pub connector_settings: PlexConnectorSettings,
     pub listener_settings: PlexListenerSettings,
+
+    pub garbage_collect_excluded: usize,
 }
 
 impl Default for TotalityManagerSettings {
@@ -24,6 +26,7 @@ impl Default for TotalityManagerSettings {
             wake_interval: Duration::from_millis(200),
             connector_settings: Default::default(),
             listener_settings: Default::default(),
+            garbage_collect_excluded: 0,
         }
     }
 }

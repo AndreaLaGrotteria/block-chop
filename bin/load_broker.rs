@@ -41,6 +41,7 @@ async fn main() {
           <flow_range_start> (integer) start of the range of flows to broadcast
           <flow_range_end> (integer) end of the range of flows to broadcast
           --batches-per-flow (default 1920) number of batches per flow
+          --margin (default 0) number of extra servers to request immediate witnessing
           
         Heartbeat:
           --heartbeat-path (string) path to save `heartbeat` data
@@ -56,6 +57,7 @@ async fn main() {
     let flow_range_end = args.get_integer("flow_range_end") as usize;
     let batches_per_flow = args.get_integer("batches-per-flow") as usize;
     let heartbeat_path = args.get_string_result("heartbeat-path").ok();
+    let margin = args.get_integer("margin") as usize;
 
     // Load `Membership`
 
@@ -145,6 +147,7 @@ async fn main() {
         LoadBrokerSettings {
             rate,
             workers: cmp::max((rate * 30.) as u16, 1),
+            optimistic_margin: margin,
             ..Default::default()
         },
     )
