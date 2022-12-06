@@ -1,6 +1,7 @@
 use crate::{
     applications::auctions::{Bid, ProcessorSettings, Request, Token},
     broadcast::Entry,
+    heartbeat::{self, ServerEvent},
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -157,7 +158,11 @@ impl Processor {
                 }
             }
 
-            // // Increment `operations_processed`
+            // Log `heartbeat` event and increment `operations_processed`
+
+            heartbeat::log(ServerEvent::AuctionsBurstProcessed {
+                size: batch_operation_count as u32,
+            });
 
             operations_processed.fetch_add(batch_operation_count, Ordering::Relaxed);
         }

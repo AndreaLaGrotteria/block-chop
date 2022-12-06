@@ -1,6 +1,7 @@
 use crate::{
     applications::pixel_war::{Color, Paint, ProcessorSettings, CANVAS_EDGE},
     broadcast::Entry,
+    heartbeat::{self, ServerEvent},
 };
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::{
@@ -221,6 +222,12 @@ impl Processor {
             for paint in paints {
                 canvas[paint.coordinates.x as usize][paint.coordinates.y as usize] = paint.color;
             }
+
+            // Log `heartbeat` event and increment `operations_processed`
+
+            heartbeat::log(ServerEvent::PixelWarBurstProcessed {
+                size: burst_operation_count as u32,
+            });
 
             operations_processed.fetch_add(burst_operation_count, Ordering::Relaxed);
         }

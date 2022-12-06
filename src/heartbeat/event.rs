@@ -82,6 +82,21 @@ pub enum ServerEvent {
     BatchServed {
         root: Hash,
     },
+
+    // Local `Server` processed a burst of `payments` operations
+    PaymentsBurstProcessed {
+        size: u32,
+    },
+
+    // Local `Server` processed a burst of `autions` operations
+    AuctionsBurstProcessed {
+        size: u32,
+    },
+
+    // Local `Server` processed a burst of `pixel_war` operations
+    PixelWarBurstProcessed {
+        size: u32,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]

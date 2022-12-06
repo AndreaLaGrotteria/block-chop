@@ -1,6 +1,7 @@
 use crate::{
     applications::payments::{Deposit, Payment, ProcessorSettings},
     broadcast::Entry,
+    heartbeat::{self, ServerEvent},
 };
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::{
@@ -198,7 +199,11 @@ impl Processor {
                 .collect::<()>()
                 .await;
 
-            // Increment `operations_processed`
+            // Log `heartbeat` event and increment `operations_processed`
+
+            heartbeat::log(ServerEvent::PaymentsBurstProcessed {
+                size: burst_operation_count as u32,
+            });
 
             operations_processed.fetch_add(burst_operation_count, Ordering::Relaxed);
         }
