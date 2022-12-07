@@ -191,6 +191,28 @@ async fn main() {
     let totality_connector = connect_dispatcher.register("totality".to_string());
     let totality_listener = listen_dispatcher.register("totality".to_string());
 
+    // Start `Server`
+
+    info!("Starting `Server`..");
+
+    let num_clients = directory.capacity() as u64;
+
+    info!("Directory capacity {}", num_clients);
+
+    let mut server = Server::new(
+        keychain.clone(),
+        membership,
+        directory,
+        order,
+        broker_listener,
+        totality_connector,
+        totality_listener,
+        ServerSettings {
+            garbage_collect_excluded: gc_exclude,
+            ..Default::default()
+        },
+    );
+
     // Rendezvous with servers and brokers
 
     info!("Rendezvous-ing with servers and brokers..");
@@ -205,28 +227,6 @@ async fn main() {
     while rendezvous_client.get_shard(0).await.is_err() {
         time::sleep(Duration::from_millis(500)).await;
     }
-
-    // Start `Server`
-
-    info!("Starting `Server`..");
-
-    let num_clients = directory.capacity() as u64;
-
-    info!("Directory capacity {}", num_clients);
-
-    let mut server = Server::new(
-        keychain,
-        membership,
-        directory,
-        order,
-        broker_listener,
-        totality_connector,
-        totality_listener,
-        ServerSettings {
-            garbage_collect_excluded: gc_exclude,
-            ..Default::default()
-        },
-    );
 
     // Pull batches
 

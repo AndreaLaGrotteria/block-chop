@@ -8,6 +8,7 @@ use crate::{
     system::{Directory, Membership},
 };
 use doomstack::{here, Doom, ResultExt, Top};
+use log::warn;
 use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
 use talk::{
     crypto::{primitives::sign::Signature, Identity},
@@ -178,6 +179,7 @@ impl Broker {
         }
 
         if entry.sequence > top {
+            warn!("Unjustified Height! Sequence number: {}, Max Height: {}", entry.sequence, top);
             return FilterError::UnjustifiedHeight.fail().spot(here!())?;
         }
 
