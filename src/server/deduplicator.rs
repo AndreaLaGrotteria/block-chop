@@ -1,5 +1,5 @@
 use crate::{
-    broadcast::{Entry, Message},
+    broadcast::Entry,
     server::{DeduplicatorSettings, Duplicate, InflatedBatch},
 };
 use futures::{future::pending, stream::FuturesOrdered, StreamExt};
@@ -29,6 +29,8 @@ type BatchBurstOutlet = MpscReceiver<Arc<Vec<InflatedBatch>>>;
 type DuplicatesBurstInlet = MpscSender<Vec<Vec<Duplicate>>>;
 type DuplicatesBurstOutlet = MpscReceiver<Vec<Vec<Duplicate>>>;
 
+const HEADER_BYTES: usize = 8;
+
 pub(in crate::server) struct Deduplicator {
     dispatch_inlet: BatchInlet,
     pull_outlet: DeduplicatedBatchOutlet,
@@ -38,7 +40,7 @@ pub(in crate::server) struct Deduplicator {
 #[derive(Clone)]
 struct Log {
     last_sequence: u64,
-    last_message: Message,
+    last_header: [u8; HEADER_BYTES],
 }
 
 impl Deduplicator {
@@ -467,7 +469,7 @@ impl Deduplicator {
     fn deduplicate(log: &mut Option<Log>, entry: &Entry) -> Option<Duplicate> {
         match log {
             Some(log) => {
-                if entry.message == log.last_message {
+                if &entry.message.bytes[0..HEADER_BYTES] == &log.last_header {
                     if entry.sequence != log.last_sequence {
                         // The same message was previously delivered with a different
                         // sequence number: acknowledge with old sequence number to
@@ -488,7 +490,9 @@ impl Deduplicator {
                         // The message is new and its sequence number is the highest observed
                         // at delivery time: acknowledge and deliver.
                         log.last_sequence = entry.sequence;
-                        log.last_message = entry.message;
+
+                        log.last_header
+                            .copy_from_slice(&entry.message.bytes[0..HEADER_BYTES]);
 
                         None
                     } else {
@@ -504,7 +508,7 @@ impl Deduplicator {
 
                 *log = Some(Log {
                     last_sequence: entry.sequence,
-                    last_message: entry.message,
+                    last_header: entry.message.bytes[0..HEADER_BYTES].try_into().unwrap(),
                 });
 
                 None
