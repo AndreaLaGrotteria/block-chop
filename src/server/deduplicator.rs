@@ -134,7 +134,7 @@ impl Deduplicator {
                 let mut process_snap_tasks = FuturesOrdered::new();
                 let mut process_tail_task = None; // This will hold the handle to the `process_tail` task..
 
-                let core_ids = core_affinity::get_core_ids().unwrap();
+                let core_ids = core_affinity::get_core_ids().unwrap().into_iter().cycle();
 
                 for (index, ((process_outlet, join_duplicates_burst_inlet), core_id)) in
                     process_outlets

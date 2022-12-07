@@ -1,6 +1,6 @@
 use chop_chop::{applications::Application, client, Directory, Passepartout};
 use log::info;
-use std::{future, time::Duration, sync::Arc};
+use std::{future, sync::Arc, time::Duration};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
@@ -120,8 +120,8 @@ async fn main() {
 
     for i in 0..WORKERS {
         let machine_offset = ID_START + load_client_index * CLIENTS_PER_LOAD_CLIENT;
-        let worker_start = machine_offset + i * CLIENTS_PER_LOAD_CLIENT/WORKERS;
-        let worker_end = machine_offset + (i+1) * CLIENTS_PER_LOAD_CLIENT/WORKERS;
+        let worker_start = machine_offset + i * CLIENTS_PER_LOAD_CLIENT / WORKERS;
+        let worker_end = machine_offset + (i + 1) * CLIENTS_PER_LOAD_CLIENT / WORKERS;
         let range = worker_start..worker_end;
 
         if range.end > ID_END {
@@ -138,11 +138,11 @@ async fn main() {
                 client::load(
                     directory,
                     passepartout,
-                    format!("0.0.0.0:{}", 10000+i),
+                    format!("0.0.0.0:{}", 10000 + i),
                     broker_address,
                     range,
-                    rate/(WORKERS as f64),
-                    total_requests/WORKERS as usize,
+                    rate / (WORKERS as f64),
+                    total_requests / WORKERS as usize,
                     application,
                 )
                 .await;
