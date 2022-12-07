@@ -1,11 +1,11 @@
 use crate::{
     broker::{Broker, BrokerSettings, Reduction, Response, Submission},
     crypto::records::Height as HeightRecord,
-    debug,
     heartbeat::{self, BrokerEvent},
     system::{Directory, Membership},
 };
 use std::{collections::HashMap, sync::Arc};
+use log::info;
 use talk::{
     crypto::Identity,
     net::{DatagramSender, PlexConnector},
@@ -73,7 +73,7 @@ impl Broker {
 
         worker_recycler.send(worker_index).await.unwrap();
 
-        debug!("Got height and delivery certificate!");
+        info!("Got height and delivery certificate!");
 
         #[cfg(feature = "benchmark")]
         heartbeat::log(BrokerEvent::DisseminatingDeliveries {

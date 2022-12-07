@@ -5,6 +5,7 @@ use crate::{
     warn, BrokerSettings, Membership,
 };
 use futures::future::join_all;
+use log::info;
 use rand::{seq::SliceRandom, thread_rng};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use talk::{
@@ -117,16 +118,24 @@ impl Broker {
                     .for_each(|solver| solver.solve(false));
             }
             Err(_) => {
+                warn!("Timeout: could not collect witness without backup verifiers.");
+
                 backup_verify_solvers
                     .into_iter()
                     .for_each(|solver| solver.solve(true));
 
+
+                info!("Waiting for witness collector progress..");
                 witness_collector.progress().await
             }
         }
 
+        info!("Finalizing witness collector..");
+
         let witness = witness_collector.finalize();
         witness_poster.post((witness, Instant::now()));
+
+        info!("Collecting delivery shards");
 
         // Collect and aggregate (f + 1) `DeliveryShard`s:
         //  - Collect `DeliveryShard`s until the same set of `Amendment`s is
@@ -152,6 +161,8 @@ impl Broker {
         )
         .await;
 
+        info!("Aggregating delivery shards");
+
         let certificate = Self::aggregate_delivery_shards(
             broker_batch.entries.root(),
             batch_height,
@@ -163,6 +174,8 @@ impl Broker {
 
         // Move `fuse` to a long-lived task, submitting `broker_batch`
         // to straggler servers until a timeout expires
+
+        info!("Spawning totality task");
 
         task::spawn(async move {
             let _fuse = fuse;
