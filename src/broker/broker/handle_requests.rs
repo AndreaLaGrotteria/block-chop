@@ -9,7 +9,13 @@ use crate::{
 };
 use doomstack::{here, Doom, ResultExt, Top};
 use log::warn;
-use std::{collections::HashMap, mem, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+    net::SocketAddr,
+    sync::Arc,
+    time::Instant,
+};
 use talk::{
     crypto::{primitives::sign::Signature, Identity},
     net::{DatagramSender, PlexConnector},
@@ -55,6 +61,7 @@ impl Broker {
         let mut top_record = None;
         let mut next_flush = None;
         let mut pool = HashMap::new();
+        let mut last_pool_entries = HashSet::new();
 
         let (reduction_inlet, _) = broadcast::channel(settings.reduction_channel_capacity);
 
@@ -96,7 +103,11 @@ impl Broker {
                                 }
                             }
 
-                            pool.insert(submission.entry.id, submission);
+                            if !last_pool_entries
+                                .contains(&(submission.entry.id, submission.entry.sequence))
+                            {
+                                pool.insert(submission.entry.id, submission);
+                            }
 
                             next_flush =
                                 next_flush.or(Some(Instant::now() + settings.pool_timeout));
@@ -128,6 +139,11 @@ impl Broker {
                     info!("Flushing pool into a batch ({} entries).", pool.len());
 
                     next_flush = None;
+
+                    last_pool_entries = pool
+                        .values()
+                        .map(|submission| (submission.entry.id, submission.entry.sequence))
+                        .collect();
 
                     let next_sequence = worker_sequences.get_mut(worker_index as usize).unwrap();
 
