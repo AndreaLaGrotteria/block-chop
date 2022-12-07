@@ -6,7 +6,7 @@ use chop_chop::{
     heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
     ServerSettings,
 };
-use chrono::{Timelike, Utc};
+// use chrono::{Timelike, Utc};
 use futures::stream::StreamExt;
 use log::info;
 use signal_hook::consts::signal::*;

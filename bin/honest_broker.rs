@@ -1,5 +1,5 @@
 use chop_chop::{heartbeat, Broker, BrokerSettings, Directory, Membership};
-use chrono::{Timelike, Utc};
+// use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use log::info;
 use signal_hook::consts::{SIGINT, SIGTERM};
@@ -156,7 +156,7 @@ async fn main() {
     if let Some(heartbeat_path) = heartbeat_path {
         // let time = Utc::now();
 
-        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+        let heartbeat_path = PathBuf::from(heartbeat_path);
 
         // heartbeat_path.push(format!(
         //     "heartbeat-broker-{}h{}m{}s.bin",

@@ -1,5 +1,5 @@
 use chop_chop::{heartbeat, LoadBroker, LoadBrokerSettings, Membership};
-use chrono::{Timelike, Utc};
+// use chrono::{Timelike, Utc};
 use futures::stream::StreamExt;
 use log::info;
 use signal_hook::consts::signal::*;
@@ -170,7 +170,7 @@ async fn main() {
     if let Some(heartbeat_path) = heartbeat_path {
         // let time = Utc::now();
 
-        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+        let heartbeat_path = PathBuf::from(heartbeat_path);
 
         // heartbeat_path.push(format!(
         //     "heartbeat-loadbroker-{}Bs-{}h{}m{}s.bin",
