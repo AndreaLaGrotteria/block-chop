@@ -124,7 +124,6 @@ impl Broker {
                     .into_iter()
                     .for_each(|solver| solver.solve(true));
 
-
                 info!("Waiting for witness collector progress..");
                 witness_collector.progress().await
             }

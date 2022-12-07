@@ -4,8 +4,8 @@ use crate::{
     heartbeat::{self, BrokerEvent},
     system::{Directory, Membership},
 };
-use std::{collections::HashMap, sync::Arc};
 use log::info;
+use std::{collections::HashMap, sync::Arc};
 use talk::{
     crypto::Identity,
     net::{DatagramSender, PlexConnector},
