@@ -15,7 +15,7 @@ use crate::{
     Entry,
 };
 use doomstack::{here, Doom, ResultExt, Top};
-use log::warn;
+use log::{warn, info};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
@@ -192,6 +192,9 @@ impl Server {
 
         let mut to_omit = Vec::new();
 
+        let mut ignore_count = 0;
+        let mut nudge_count = 0;
+        let mut drop_count = 0;
         for duplicate in duplicates.iter() {
             // Locate `duplicate` within `batch`
 
@@ -210,6 +213,7 @@ impl Server {
             match duplicate {
                 Duplicate::Ignore { .. } => {
                     to_omit.push(index);
+                    ignore_count+=1;
                 }
                 Duplicate::Nudge { sequence, .. } => {
                     // TODO: Streamline the following code when `Vector` supports in-place updates
@@ -218,11 +222,17 @@ impl Server {
                     batch.entries_mut().set(index, Some(entry)).unwrap();
 
                     to_omit.push(index);
+                    nudge_count+=1;
                 }
                 Duplicate::Drop { .. } => {
                     batch.entries_mut().set(index, None).unwrap();
+                    drop_count+=1;
                 }
             }
+        }
+
+        if ignore_count + nudge_count + drop_count > 0 {
+            info!("Batch duplicates! Ignores: {}, Nudges: {}, Drops: {}", ignore_count, nudge_count, drop_count);
         }
 
         let amended_root = batch.root();
