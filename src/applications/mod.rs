@@ -4,6 +4,7 @@ pub mod auctions;
 pub mod payments;
 pub mod pixel_war;
 
+#[derive(Clone)]
 pub enum Application {
     Random,
     Auction,

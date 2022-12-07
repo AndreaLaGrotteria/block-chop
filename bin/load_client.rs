@@ -1,10 +1,11 @@
 use chop_chop::{applications::Application, client, Directory, Passepartout};
 use log::info;
-use std::{future, time::Duration};
+use std::{future, time::Duration, sync::Arc};
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
-const CLIENTS_PER_LOAD_CLIENT: usize = 500_000;
+const CLIENTS_PER_LOAD_CLIENT: u64 = 500_000;
+const WORKERS: u64 = 32;
 const ID_START: u64 = 1_000_000;
 const ID_END: u64 = 10_000_000; // exclusive
 
@@ -35,7 +36,7 @@ async fn main() {
     );
 
     let rendezvous_address = args.get_string("rendezvous_address");
-    let load_client_index = args.get_integer("load_client_index") as usize;
+    let load_client_index = args.get_integer("load_client_index") as u64;
     let broker_address = args.get_string("broker_address");
     let rate = args.get_float("rate") as f64;
     let duration = args.get_float("duration") as f64;
@@ -77,13 +78,6 @@ async fn main() {
 
     // `Client` preprocessing
 
-    let range = (ID_START + (load_client_index * CLIENTS_PER_LOAD_CLIENT) as u64)
-        ..(ID_START + ((load_client_index + 1) * CLIENTS_PER_LOAD_CLIENT) as u64);
-
-    if range.end > ID_END {
-        panic!("Range out of bounds. Check that the load_client_index is in in [0, 64) ..");
-    }
-
     let total_requests = (rate * duration) as usize;
 
     info!("Total requests: {}", total_requests);
@@ -99,14 +93,6 @@ async fn main() {
     } else {
         unreachable!()
     };
-
-    let (keychains, broadcasts) = client::preprocess(
-        directory,
-        passepartout,
-        range.clone(),
-        total_requests,
-        application,
-    );
 
     // Rendezvous with servers and brokers
 
@@ -129,15 +115,40 @@ async fn main() {
 
     info!("Starting load client..");
 
-    client::load_with(
-        "0.0.0.0:10000",
-        &broker_address,
-        range,
-        rate,
-        broadcasts,
-        keychains,
-    )
-    .await;
+    let directory = Arc::new(directory);
+    let passepartout = Arc::new(passepartout);
+
+    for i in 0..WORKERS {
+        let machine_offset = ID_START + load_client_index * CLIENTS_PER_LOAD_CLIENT;
+        let worker_start = machine_offset + i * CLIENTS_PER_LOAD_CLIENT/WORKERS;
+        let worker_end = machine_offset + (i+1) * CLIENTS_PER_LOAD_CLIENT/WORKERS;
+        let range = worker_start..worker_end;
+
+        if range.end > ID_END {
+            panic!("Range out of bounds. Check that the load_client_index is in in [0, 64) ..");
+        }
+
+        {
+            let directory = directory.clone();
+            let passepartout = passepartout.clone();
+            let broker_address = broker_address.clone();
+            let application = application.clone();
+
+            tokio::spawn(async move {
+                client::load(
+                    directory,
+                    passepartout,
+                    format!("0.0.0.0:{}", 10000+i),
+                    broker_address,
+                    range,
+                    rate/(WORKERS as f64),
+                    total_requests/WORKERS as usize,
+                    application,
+                )
+                .await;
+            });
+        }
+    }
 
     info!("Load client finished.");
 

@@ -35,8 +35,8 @@ struct Top {
 }
 
 pub fn preprocess(
-    directory: Directory,
-    passepartout: Passepartout,
+    directory: Arc<Directory>,
+    passepartout: Arc<Passepartout>,
     range: Range<u64>,
     request_total: usize,
     application: Application,
@@ -78,8 +78,8 @@ pub fn preprocess(
 }
 
 pub async fn load<A>(
-    directory: Directory,
-    passepartout: Passepartout,
+    directory: Arc<Directory>,
+    passepartout: Arc<Passepartout>,
     bind_address: A,
     broker_address: A,
     range: Range<u64>,
