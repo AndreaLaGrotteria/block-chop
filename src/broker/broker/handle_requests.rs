@@ -179,7 +179,10 @@ impl Broker {
         }
 
         if entry.sequence > top {
-            warn!("Unjustified Height! Sequence number: {}, Max Height: {}", entry.sequence, top);
+            warn!(
+                "Unjustified Height! Sequence number: {}, Max Height: {}",
+                entry.sequence, top
+            );
             return FilterError::UnjustifiedHeight.fail().spot(here!())?;
         }
 
