@@ -15,6 +15,7 @@ pub struct LoadBrokerSettings {
     pub submission_interval: Duration,
     pub resubmission_schedule: Arc<dyn SleepSchedule>,
     pub optimistic_margin: usize,
+    pub garbage_collect_exclude: usize,
 }
 
 impl Default for LoadBrokerSettings {
@@ -36,6 +37,7 @@ impl Default for LoadBrokerSettings {
                 Duration::from_secs(60),
             )),
             optimistic_margin: 0,
+            garbage_collect_exclude: 0,
         }
     }
 }

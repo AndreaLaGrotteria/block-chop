@@ -3,7 +3,7 @@ use crate::{
     crypto::Certificate,
     warn, Membership,
 };
-use futures::future::join_all;
+use futures::{stream::FuturesUnordered, StreamExt};
 use rand::{seq::SliceRandom, thread_rng};
 use std::{sync::Arc, time::Instant};
 use talk::{
@@ -171,9 +171,17 @@ impl LoadBroker {
 
         // Wait until all `submit_tasks` are completed, or a timeout expires
 
-        let submissions = join_all(submit_tasks.into_iter());
+        let server_count = membership.servers().len();
+        let totality_condition = async move {
+            let mut submissions = submit_tasks.into_iter().collect::<FuturesUnordered<_>>();
+            let mut counter = 0;
+            while counter < server_count - settings.garbage_collect_exclude {
+                let _ = submissions.next();
+                counter += 1;
+            }
+        };
 
-        if time::timeout(settings.totality_timeout, submissions)
+        if time::timeout(settings.totality_timeout, totality_condition)
             .await
             .is_err()
         {
