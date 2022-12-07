@@ -140,10 +140,10 @@ pub async fn load_with<A>(
     let dispatcher = DatagramDispatcher::<BrokerRequest, Response>::bind(
         bind_address,
         DatagramDispatcherSettings {
-            maximum_packet_rate: 393216.,
+            maximum_packet_rate: 393216./2.,
             pace_out_tasks: 10,
             process_in_tasks: 8,
-            retransmission_delay: Duration::from_millis(250),
+            retransmission_delay: Duration::from_millis(100),
             ..Default::default()
         },
     )
