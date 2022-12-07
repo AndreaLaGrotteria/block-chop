@@ -365,17 +365,17 @@ async fn main() {
     info!("`Ctrl + C` detected, shutting down..");
 
     if let Some(heartbeat_path) = heartbeat_path {
-        let time = Utc::now();
+        // let time = Utc::now();
 
-        let mut heartbeat_path = PathBuf::from(heartbeat_path);
+        let heartbeat_path = PathBuf::from(heartbeat_path);
 
-        heartbeat_path.push(format!(
-            "heartbeat-server{}-{}h{}m{}s.bin",
-            server_index,
-            time.hour(),
-            time.minute(),
-            time.second()
-        ));
+        // heartbeat_path.push(format!(
+        //     "heartbeat-server{}-{}h{}m{}s.bin",
+        //     server_index,
+        //     time.hour(),
+        //     time.minute(),
+        //     time.second()
+        // ));
 
         println!("Saving heartbeat data to {}", heartbeat_path.display());
 

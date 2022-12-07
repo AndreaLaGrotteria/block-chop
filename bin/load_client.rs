@@ -111,7 +111,7 @@ async fn main() {
 
     // Start `Client`
 
-    time::sleep(Duration::from_secs(20)).await;
+    time::sleep(Duration::from_secs(7)).await;
 
     info!("Starting load client..");
 

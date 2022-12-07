@@ -169,16 +169,16 @@ async fn main() {
     // Save heartbeat data (if necessary)
 
     if let Some(heartbeat_path) = heartbeat_path {
-        let time = Utc::now();
+        // let time = Utc::now();
 
         let mut heartbeat_path = PathBuf::from(heartbeat_path);
 
-        heartbeat_path.push(format!(
-            "heartbeat-client-{}h{}m{}s.bin",
-            time.hour(),
-            time.minute(),
-            time.second()
-        ));
+        // heartbeat_path.push(format!(
+        //     "heartbeat-client-{}h{}m{}s.bin",
+        //     time.hour(),
+        //     time.minute(),
+        //     time.second()
+        // ));
 
         println!("Saving heartbeat data to {}", heartbeat_path.display());
 
