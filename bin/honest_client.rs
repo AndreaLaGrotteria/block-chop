@@ -121,7 +121,7 @@ async fn main() {
         time::sleep(Duration::from_millis(500)).await;
     }
 
-    time::sleep(Duration::from_secs(5)).await;
+    time::sleep(Duration::from_secs(3)).await;
 
     // Start `Client`
 
