@@ -1,16 +1,27 @@
 use crate::{
     applications::{create_message, Application},
-    broadcast::Entry,
+    broadcast::{Entry, Message},
     broker::{Request as BrokerRequest, Response},
-    crypto::statements::{
-        Broadcast as BroadcastStatement, Reduction as ReductionStatement,
-        ReductionAuthentication as ReductionAuthenticationStatement,
+    crypto::{
+        records::Height as HeightRecord,
+        statements::{
+            Broadcast as BroadcastStatement,
+            BroadcastAuthentication as BroadcastAuthenticationStatement,
+            Reduction as ReductionStatement,
+            ReductionAuthentication as ReductionAuthenticationStatement,
+        },
     },
     debug, info,
     system::{Directory, Passepartout},
 };
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter, net::ToSocketAddrs, ops::Range, sync::Arc, time::Duration};
+use std::{
+    cmp,
+    collections::VecDeque,
+    net::{SocketAddr, ToSocketAddrs},
+    ops::Range,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use talk::{
     crypto::KeyChain,
     net::{DatagramDispatcher, DatagramDispatcherSettings},
@@ -18,7 +29,10 @@ use talk::{
 };
 use tokio::time;
 
-pub struct Request(BrokerRequest);
+struct Top {
+    height: u64,
+    record: Option<HeightRecord>,
+}
 
 pub fn preprocess(
     directory: Directory,
@@ -26,7 +40,7 @@ pub fn preprocess(
     range: Range<u64>,
     request_total: usize,
     application: Application,
-) -> (Vec<KeyChain>, Vec<Request>) {
+) -> (Vec<KeyChain>, Vec<(u64, Message)>) {
     info!("Loading keychains..");
 
     let keychains = range
@@ -39,53 +53,28 @@ pub fn preprocess(
         })
         .collect::<Vec<_>>();
 
-    info!("Generating requests..");
+    info!("Generating messages..");
 
     info!("Directory capacity: {}", directory.capacity());
 
     let create = create_message(application);
 
-    let mut broadcasts = Vec::with_capacity(request_total);
+    let mut messages = Vec::with_capacity(request_total);
 
-    for sequence in 0..(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
-        let new_broadcasts = keychains
-            .par_iter()
-            .enumerate()
-            .map(|(index, keychain)| {
-                let id = range.start + (index as u64);
+    for _ in 0..(request_total as f64 / (range.end - range.start) as f64).ceil() as u64 {
+        let new_messages = (0..keychains.len()).map(|index| {
+            let id = range.start + (index as u64);
+            let message = create(id, directory.capacity() as u64);
 
-                let message = create(id, directory.capacity() as u64);
+            (id, message)
+        });
 
-                let entry = Entry {
-                    id,
-                    sequence,
-                    message,
-                };
-
-                let statement = BroadcastStatement {
-                    sequence: &entry.sequence,
-                    message: &entry.message,
-                };
-
-                let signature = keychain.sign(&statement).unwrap();
-
-                let request = BrokerRequest::Broadcast {
-                    entry,
-                    signature,
-                    height_record: None,
-                    authentication: None,
-                };
-
-                Request(request)
-            })
-            .collect::<Vec<_>>();
-
-        broadcasts.extend(new_broadcasts);
+        messages.extend(new_messages);
     }
 
-    broadcasts.truncate(request_total);
+    messages.truncate(request_total);
 
-    (keychains, broadcasts)
+    (keychains, messages)
 }
 
 pub async fn load<A>(
@@ -100,19 +89,20 @@ pub async fn load<A>(
 ) where
     A: Clone + ToSocketAddrs,
 {
-    let (keychains, broadcasts) = preprocess(
+    let (keychains, messages) = preprocess(
         directory,
         passepartout,
         range.clone(),
         request_total,
         application,
     );
+
     load_with(
         bind_address,
         broker_address,
         range,
         rate,
-        broadcasts,
+        messages,
         keychains,
     )
     .await;
@@ -123,7 +113,7 @@ pub async fn load_with<A>(
     broker_address: A,
     range: Range<u64>,
     rate: f64,
-    broadcasts: Vec<Request>,
+    messages: Vec<(u64, Message)>,
     keychains: Vec<KeyChain>,
 ) where
     A: Clone + ToSocketAddrs,
@@ -131,10 +121,6 @@ pub async fn load_with<A>(
     info!("Setting up dispatcher..");
 
     let keychains = Arc::new(keychains);
-    let broadcasts = broadcasts
-        .into_iter()
-        .map(|request| request.0)
-        .collect::<Vec<_>>();
 
     let dispatcher = DatagramDispatcher::<BrokerRequest, Response>::bind(
         bind_address,
@@ -148,6 +134,11 @@ pub async fn load_with<A>(
     )
     .unwrap();
 
+    let top = Arc::new(Mutex::new(Top {
+        height: 0,
+        record: None,
+    }));
+
     let (sender, mut receiver) = dispatcher.split();
     let sender = Arc::new(sender);
 
@@ -159,6 +150,7 @@ pub async fn load_with<A>(
         let range = range.clone();
         let keychains = keychains.clone();
         let sender = sender.clone();
+        let top = top.clone();
 
         fuse.spawn(async move {
             loop {
@@ -166,10 +158,17 @@ pub async fn load_with<A>(
 
                 let keychains = keychains.clone();
                 let sender = sender.clone();
+                let top = top.clone();
 
                 tokio::spawn(async move {
                     match response {
-                        Response::Inclusion { id, root, .. } => {
+                        Response::Inclusion {
+                            id,
+                            root,
+                            raise,
+                            top_record,
+                            ..
+                        } => {
                             let keychain = keychains.get((id - range.start) as usize).unwrap();
                             let reduction_statement = ReductionStatement { root: &root };
                             let multisignature = keychain.multisign(&reduction_statement).unwrap();
@@ -191,8 +190,23 @@ pub async fn load_with<A>(
                             };
 
                             sender.send(source, request).await;
+
+                            let mut top = top.lock().unwrap();
+
+                            top.height = cmp::max(top.height, raise);
+                            top.record = cmp::max(top.record.clone(), top_record);
                         }
-                        Response::Delivery { .. } => {}
+                        Response::Delivery {
+                            height,
+                            root,
+                            certificate,
+                            ..
+                        } => {
+                            let new_record = HeightRecord::new(height, root, certificate);
+
+                            let mut top = top.lock().unwrap();
+                            top.record = cmp::max(top.record.clone(), Some(new_record));
+                        }
                     }
                 });
             }
@@ -202,8 +216,6 @@ pub async fn load_with<A>(
     info!("Pacing requests..");
 
     let broker_address = broker_address.to_socket_addrs().unwrap().next().unwrap();
-
-    let datagrams = iter::repeat(broker_address).zip(broadcasts.into_iter());
 
     {
         let sender = sender.clone();
@@ -226,5 +238,72 @@ pub async fn load_with<A>(
         });
     }
 
+    let datagrams = Datagrams {
+        broker_address,
+        messages: messages.into_iter().collect(),
+        keychains,
+        top: top.clone(),
+        range,
+    };
+
     sender.pace(datagrams, rate).await;
+}
+
+struct Datagrams {
+    broker_address: SocketAddr,
+    messages: VecDeque<(u64, Message)>,
+    keychains: Arc<Vec<KeyChain>>,
+    top: Arc<Mutex<Top>>,
+    range: Range<u64>,
+}
+
+impl Iterator for Datagrams {
+    type Item = (SocketAddr, BrokerRequest);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (id, message) = if let Some(message) = self.messages.pop_front() {
+            message
+        } else {
+            return None;
+        };
+
+        let (sequence, height_record) = {
+            let top = self.top.lock().unwrap();
+            (top.height + 1, top.record.clone())
+        };
+
+        let entry = Entry {
+            id,
+            sequence,
+            message,
+        };
+
+        let broadcast_statement = BroadcastStatement {
+            sequence: &entry.sequence,
+            message: &entry.message,
+        };
+
+        let keychain = self
+            .keychains
+            .get((id - self.range.start) as usize)
+            .unwrap();
+
+        let signature = keychain.sign(&broadcast_statement).unwrap();
+
+        let authentication = height_record.as_ref().map(|height_record| {
+            let broadcast_authentication_statement =
+                BroadcastAuthenticationStatement { height_record };
+
+            keychain.sign(&broadcast_authentication_statement).unwrap()
+        });
+
+        let request = BrokerRequest::Broadcast {
+            entry,
+            signature,
+            height_record,
+            authentication,
+        };
+
+        Some((self.broker_address, request))
+    }
 }
