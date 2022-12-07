@@ -47,7 +47,7 @@ impl Broker {
         let dispatcher = DatagramDispatcher::bind(
             bind,
             DatagramDispatcherSettings {
-                maximum_packet_rate: settings.maximum_packet_rate * 2.,
+                maximum_packet_rate: settings.maximum_packet_rate,
                 pace_out_tasks: 10,
                 retransmission_delay: Duration::from_millis(250),
                 ..Default::default()
