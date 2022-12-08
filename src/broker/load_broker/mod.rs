@@ -43,6 +43,14 @@ impl LoadBroker {
 
         let membership = Arc::new(membership);
 
+        // Fill `connector`
+
+        info!("Filling `PlexConnector`..");
+
+        connector
+            .fill(membership.servers().keys().copied(), settings.fill_interval)
+            .await;
+
         // Compile multiplexes
 
         let mut multiplexes = HashMap::new();

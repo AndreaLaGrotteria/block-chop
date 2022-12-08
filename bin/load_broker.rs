@@ -90,14 +90,6 @@ async fn main() {
 
     let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
 
-    // Fill `connector`
-
-    info!("Filling `PlexConnector`..");
-
-    broker_connector
-        .fill(membership.servers().keys().copied(), Duration::from_millis(100))
-        .await;
-
     // Load batches
 
     info!("Loading batches..");
@@ -156,6 +148,8 @@ async fn main() {
         flows,
         LoadBrokerSettings {
             rate,
+            fill_interval: Duration::from_millis(250),
+            warmup: Duration::from_secs(25),
             workers: cmp::max((rate * 30.) as u16, 1),
             optimistic_margin: margin,
             garbage_collect_exclude: gc_exclude,
