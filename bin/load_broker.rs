@@ -90,6 +90,14 @@ async fn main() {
 
     let broker_connector = PlexConnector::new(broker_connector, plex_connector_settings);
 
+    // Fill `connector`
+
+    info!("Filling `PlexConnector`..");
+
+    broker_connector
+        .fill(membership.servers().keys().copied(), Duration::from_millis(100))
+        .await;
+
     // Load batches
 
     info!("Loading batches..");
