@@ -84,7 +84,7 @@ async fn main() {
     let broker_connector = connect_dispatcher.register("broker".to_string());
 
     let plex_connector_settings = PlexConnectorSettings {
-        connections_per_remote: 32,
+        connections_per_remote: 10,
         ..Default::default()
     };
 
