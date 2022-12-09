@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
-use tokio::time;
+use tokio::{time, task};
 
 #[tokio::main]
 async fn main() {
@@ -139,25 +139,33 @@ async fn main() {
         unreachable!()
     };
 
-    let create = create_message(application);
+    task::spawn(async move {
+        let create = create_message(application);
 
-    let start = Instant::now();
-
-    let mut latencies = Vec::new();
-    for i in 0u64.. {
-        let message = create(client_id, directory.capacity() as u64);
-
-        let time = Instant::now();
-        info!("Broadcasting message {}. Contents: {:?}", i, message);
-        client.broadcast(message).await;
-        let latency = time.elapsed().as_millis();
-        info!("Message delivered! Took {} ms", latency);
-        latencies.push(latency as f64);
-
-        if start.elapsed() > Duration::from_secs_f64(duration) {
-            break;
+        let start = Instant::now();
+    
+        let mut latencies = Vec::new();
+        for i in 0u64.. {
+            let message = create(client_id, directory.capacity() as u64);
+    
+            let time = Instant::now();
+            info!("Broadcasting message {}. Contents: {:?}", i, message);
+            client.broadcast(message).await;
+            let latency = time.elapsed().as_millis();
+            info!("Message delivered! Took {} ms", latency);
+            latencies.push(latency as f64);
+    
+            if start.elapsed() > Duration::from_secs_f64(duration) {
+                break;
+            }
         }
-    }
+
+        info!(
+            "Honest client finished. Avg: {:.02} +- {:.02} ms",
+            statistical::mean(&latencies),
+            statistical::standard_deviation(&latencies, None)
+        );
+    });
 
     // Wait for `Ctrl + C`
 
@@ -193,10 +201,4 @@ async fn main() {
     }
 
     info!("All done! Chop CHOP!");
-
-    info!(
-        "Honest client finished. Avg: {:.02} +- {:.02} ms",
-        statistical::mean(&latencies),
-        statistical::standard_deviation(&latencies, None)
-    );
 }
