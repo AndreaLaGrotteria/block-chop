@@ -75,7 +75,17 @@ pub fn shallow_server(path: String, start: f32, duration: f32) {
         utils::option_delta_f64(submission.batch_received, submission.batch_deserialized)
     });
 
+    let batch_sizes = Observable::from_samples(submissions.values().flatten(), |submission| {
+        Some(submission.batch_entries as f64)
+    });
+
+    let batch_stragglers = Observable::from_samples(submissions.values().flatten(), |submission| {
+        Some(submission.batch_stragglers as f64)
+    });
+
     println!("Deserialization times: {deserialization:#?}");
+    println!("Batch sizes: {batch_sizes:#?}");
+    println!("Deserialization times: {batch_stragglers:#?}");
 
     // Verification request
 

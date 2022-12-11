@@ -8,6 +8,8 @@ pub(crate) struct ServerSubmission {
     pub batch_announced: SystemTime,
     pub batch_received: Option<SystemTime>,
     pub batch_deserialized: Option<SystemTime>,
+    pub batch_entries: u32,
+    pub batch_stragglers: u32,
     pub batch_expansion_started: Option<SystemTime>,
     pub batch_expansion_completed: Option<SystemTime>,
     pub batch_witnessed: Option<SystemTime>,
@@ -50,6 +52,8 @@ impl ServerSubmission {
                         batch_announced: time,
                         batch_received: None,
                         batch_deserialized: None,
+                        batch_entries: 0,
+                        batch_stragglers: 0,
                         batch_expansion_started: None,
                         batch_expansion_completed: None,
                         batch_witnessed: None,
@@ -64,9 +68,11 @@ impl ServerSubmission {
                         submission.batch_received = Some(time);
                     }
                 }
-                chop_chop::heartbeat::ServerEvent::BatchDeserialized { root, .. } => {
+                chop_chop::heartbeat::ServerEvent::BatchDeserialized { root, entries, stragglers } => {
                     if let Some(submission) = last_submission(&mut submissions, root) {
                         submission.batch_deserialized = Some(time);
+                        submission.batch_entries = entries;
+                        submission.batch_stragglers = stragglers;
                     }
                 }
                 chop_chop::heartbeat::ServerEvent::BatchExpansionStarted { root, .. } => {
