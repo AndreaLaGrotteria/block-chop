@@ -137,7 +137,8 @@ async fn main() {
 
     // Start `LoadBroker`
 
-    time::sleep(Duration::from_secs(5)).await;
+    let sleep_time = 3000 + rand::random::<u64>() % 2000; 
+    time::sleep(Duration::from_millis(sleep_time)).await;
 
     info!("Starting `LoadBroker`..");
 
