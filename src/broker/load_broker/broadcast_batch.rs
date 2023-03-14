@@ -176,7 +176,7 @@ impl LoadBroker {
             let mut submissions = submit_tasks.into_iter().collect::<FuturesUnordered<_>>();
             let mut counter = 0;
             while counter < server_count - settings.garbage_collect_exclude {
-                let _ = submissions.next();
+                let _ = submissions.next().await;
                 counter += 1;
             }
         };
