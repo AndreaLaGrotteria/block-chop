@@ -5,9 +5,14 @@ use talk::{crypto::KeyChain, link::rendezvous::Client as RendezvousClient};
 use tokio::time;
 
 const CLIENTS_PER_LOAD_CLIENT: u64 = 500_000;
+// const CLIENTS_PER_LOAD_CLIENT: u64 = 500;
 const WORKERS: u64 = 32;
+// const WORKERS: u64 = 8;
 const ID_START: u64 = 1_000_000;
+// const ID_START: u64 = 500;
 const ID_END: u64 = 10_000_000; // exclusive
+// const ID_END: u64 = 10_000; // exclusive
+
 
 #[tokio::main]
 async fn main() {
@@ -118,8 +123,8 @@ async fn main() {
     let directory = Arc::new(directory);
     let passepartout = Arc::new(passepartout);
 
-    for i in 0..WORKERS {
-        let machine_offset = ID_START + load_client_index * CLIENTS_PER_LOAD_CLIENT;
+    for i in 0..WORKERS { //0..32
+        let machine_offset = ID_START + load_client_index * CLIENTS_PER_LOAD_CLIENT; // 1_000 + 0 * 500
         let worker_start = machine_offset + i * CLIENTS_PER_LOAD_CLIENT / WORKERS;
         let worker_end = machine_offset + (i + 1) * CLIENTS_PER_LOAD_CLIENT / WORKERS;
         let range = worker_start..worker_end;

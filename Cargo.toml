@@ -70,8 +70,8 @@ benchmark = [ "dep:memmap", "dep:signal-hook", "dep:signal-hook-tokio", "dep:sta
 message_derive = { path = "./message_derive" }
 
 doomstack = { git = "https://github.com/distributed-epfl/doomstack" }
-talk = { git = "https://github.com/distributed-epfl/talk", features = ["test_utilities"] }
-zebra = { git = "https://github.com/distributed-epfl/zebra" }
+talk = { path="zebra/talk", features = ["test_utilities"] }
+zebra = { path="zebra" }
 varcram = { git = "https://github.com/distributed-epfl/varcram" }
 
 tokio = { version = "1.12.0", features = [ "macros", "net", "rt-multi-thread", "io-util", "sync", "time" ] }
@@ -107,6 +107,8 @@ rand_chacha = { version = "0.3.1" }
 statistical = { version = "1.0.0", optional = true }
 
 chrono = { version = "0.4.22"}
+
+ethers = "2.0.3"
 
 [profile.release]
 lto = "fat"

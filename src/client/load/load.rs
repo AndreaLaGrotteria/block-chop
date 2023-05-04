@@ -169,6 +169,11 @@ pub async fn load_with<A>(
                             top_record,
                             ..
                         } => {
+                            println!(
+                                "Inclusion: {}",
+                                id,
+                            );
+                            println!("Range: {}..{}", range.start, range.end);
                             let keychain = keychains.get((id - range.start) as usize).unwrap();
                             let reduction_statement = ReductionStatement { root: &root };
                             let multisignature = keychain.multisign(&reduction_statement).unwrap();

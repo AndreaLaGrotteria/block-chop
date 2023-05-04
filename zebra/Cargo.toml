@@ -1,0 +1,25 @@
+[package]
+name = "zebra"
+version = "0.1.0"
+authors = ["Matteo Monti <matteo.monti@epfl.ch>", "Manuel Vidigueira <manuel.ribeirovidigueira@epfl.ch>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+talk = { path = "talk" }
+serde = { version = "~1.0", features = [ "derive", "rc" ] }
+oh-snap = { version = "0.0.2" }
+doomstack = { git = "https://github.com/Distributed-EPFL/doomstack" }
+rayon = { version = "1.5.1" }
+bit-vec = { version = "0.6", features = ["serde"] }
+bincode = { version = "1" }
+serde_bytes = { version = "0.11.7" }
+
+[dev-dependencies]
+rand = { version = "0.8.4" }
+array-init = {version = "2.0.0"}
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

@@ -110,3 +110,7 @@ lcov.info
 ### Playground binary ###
 
 src/bin/playground.rs
+directory.db
+membership.db
+passepartout.db
+flows

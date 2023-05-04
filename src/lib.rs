@@ -24,7 +24,7 @@ pub use broadcast::{Batch, Entry, Message, Straggler, MESSAGE_SIZE};
 pub use broker::{Broker, BrokerSettings};
 pub use client::Client;
 pub use crypto::{DeliveryRecord, DeliveryRecordError};
-pub use order::{BftSmart, HotStuff, LoopBack, Order};
+pub use order::{BftSmart, Blockchain, HotStuff, LoopBack, Order};
 pub use server::{Server, ServerSettings};
 pub use system::{Directory, Membership};
 

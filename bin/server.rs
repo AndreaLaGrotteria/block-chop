@@ -3,7 +3,7 @@ use chop_chop::{
         auctions::Processor as AuctionsProcessor, payments::Processor as PaymentsProcessor,
         pixel_war::Processor as PixelWarProcessor,
     },
-    heartbeat, BftSmart, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
+    heartbeat, BftSmart, Blockchain, Directory, HotStuff, LoopBack, Membership, Order, Passepartout, Server,
     ServerSettings,
 };
 // use chrono::{Timelike, Utc};
@@ -55,6 +55,7 @@ async fn main() {
           --loopback use `LoopBack` order (warning: does not actually guarantee Total Order!)
           --hotstuff (string) address to `HotStuff`'s endpoint
           --bftsmart (string) address to `BftSmart`'s endpoint
+          --blockchain (string) address to `Blockchain`'s smart contract
 
         Application messages (choose one):
           --random
@@ -80,6 +81,7 @@ async fn main() {
     let loopback = args.get_bool("loopback");
     let hotstuff = args.get_string_result("hotstuff").ok();
     let bftsmart = args.get_string_result("bftsmart").ok();
+    let blockchain = args.get_string_result("blockchain").ok();
 
     let random = args.get_bool("random");
     let payments = args.get_bool("payments");
@@ -87,6 +89,7 @@ async fn main() {
     let pixel_war = args.get_bool("pixel_war");
 
     let orders_selected = if loopback { 1 } else { 0 }
+        + if blockchain.is_some() { 1 } else { 0 }
         + if hotstuff.is_some() { 1 } else { 0 }
         + if bftsmart.is_some() { 1 } else { 0 };
 
@@ -150,6 +153,8 @@ async fn main() {
 
     let order: Arc<dyn Order> = if loopback {
         Arc::new(LoopBack::new())
+    } else if let Some(blockchain) = blockchain {
+        Arc::new(Blockchain::connect(&blockchain.parse().unwrap()).await.unwrap())
     } else if let Some(hotstuff) = hotstuff {
         Arc::new(HotStuff::connect(&hotstuff.parse().unwrap()).await.unwrap())
     } else if let Some(bftsmart) = bftsmart {
