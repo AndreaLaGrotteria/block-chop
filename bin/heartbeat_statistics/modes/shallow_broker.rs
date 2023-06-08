@@ -106,6 +106,8 @@ pub fn shallow_broker(path: String, start: f32, duration: f32) {
 
     // Witness shard (verifier, per server)
 
+    let mut exclude: Vec<usize> = Vec::new();
+
     for (index, server) in membership.iter().copied().enumerate() {
         let witness_shard_verifiers =
             Observable::from_samples(submissions.values().flatten(), |submission| {
@@ -118,8 +120,12 @@ pub fn shallow_broker(path: String, start: f32, duration: f32) {
                     None
                 }
             });
-
-        println!("Witness shard times (verifiers, server {index}): {witness_shard_verifiers:#?}");
+        if witness_shard_verifiers.average == -1.0 {
+            println!("Server {index} was late/crashed");
+            exclude.push(index);
+        } else{
+            println!("Witness shard times (verifiers, server {index}): {witness_shard_verifiers:#?}");
+        }
     }
 
     println!();
@@ -156,7 +162,8 @@ pub fn shallow_broker(path: String, start: f32, duration: f32) {
                     None
                 }
             });
-
-        println!("Delivery shard times (server {index}): {delivery_shard:#?}");
+        if !exclude.contains(&index) {
+            println!("Delivery shard times (server {index}): {delivery_shard:#?}");
+        }
     }
 }

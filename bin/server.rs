@@ -55,7 +55,7 @@ async fn main() {
           --loopback use `LoopBack` order (warning: does not actually guarantee Total Order!)
           --hotstuff (string) address to `HotStuff`'s endpoint
           --bftsmart (string) address to `BftSmart`'s endpoint
-          --blockchain (string) address to `Blockchain`'s smart contract
+          --blockchain (string) address of `Blockchain`'s smart contract, unlock account and ipc path (semi-column separated)
 
         Application messages (choose one):
           --random
@@ -154,7 +154,8 @@ async fn main() {
     let order: Arc<dyn Order> = if loopback {
         Arc::new(LoopBack::new())
     } else if let Some(blockchain) = blockchain {
-        Arc::new(Blockchain::connect(&blockchain.parse().unwrap()).await.unwrap())
+        let splits: Vec<&str> = blockchain.split(";").collect();
+        Arc::new(Blockchain::connect(splits[0], splits[1], splits[2]).await.unwrap())
     } else if let Some(hotstuff) = hotstuff {
         Arc::new(HotStuff::connect(&hotstuff.parse().unwrap()).await.unwrap())
     } else if let Some(bftsmart) = bftsmart {

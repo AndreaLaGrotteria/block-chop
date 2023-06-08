@@ -1,6 +1,6 @@
 use crate::order::Order;
 use async_trait::async_trait;
-use std::{error::Error, sync::Arc};
+use std::{error::Error, sync::Arc, path::Path};
 use talk::sync::fuse::Fuse;
 use tokio::{
     sync::{
@@ -8,11 +8,11 @@ use tokio::{
         Mutex,
     },
 };
-use ethers::types::U256;
 use ethers::{
     contract::abigen,
     core::types::Address,
-    providers::{Provider, StreamExt, Http},
+    types::U256,
+    providers::{Provider, StreamExt, Http, Ipc}, signers::{Wallet, LocalWallet}, prelude::{SignerMiddleware, k256::{ecdsa::{self, SigningKey}, Secp256k1}, EthError},
 };
 use std::convert::TryFrom;
 
@@ -28,11 +28,15 @@ pub struct Blockchain {
 }
 
 impl Blockchain{
-    pub async fn connect(addr: &String) -> Result<Self, Box<dyn Error>> {
-        let address = addr.parse::<Address>().expect("Wrong address");
+    pub async fn connect(addr: &str, from: &str, path: &str) -> Result<Self, Box<dyn Error>> {
+        let contract_addr = addr.parse::<Address>().expect("Wrong address");
+        let from_addr = from.parse::<Address>().expect("Wrong address");
+        let path_ipc = Path::new(path);
 
-        let client = Arc::new(Provider::<Http>::try_from("http://localhost:8545").unwrap());
-        let contract = Consensus::new(address,client);
+        let provider = Provider::connect_ipc(path_ipc).await.unwrap().with_sender(from_addr);
+        let client = Arc::new(provider);
+        
+        let contract = Consensus::new(contract_addr,client);
 
         let (send_inlet, send_outlet) = mpsc::unbounded_channel();
         let (deliver_inlet, deliver_outlet) = mpsc::unbounded_channel();
@@ -44,8 +48,6 @@ impl Blockchain{
 
         let deliver_outlet = Mutex::new(deliver_outlet);
 
-        
-
         Ok(Blockchain {
             send_inlet,
             deliver_outlet,
@@ -53,7 +55,7 @@ impl Blockchain{
         })
     }
 
-    async fn send(contract: Consensus<Provider<Http>>, mut send_outlet: MessageOutlet){
+    async fn send(contract: Consensus<Provider<Ipc>>, mut send_outlet: MessageOutlet){
         loop {
             let payload = if let Some(payload) = send_outlet.recv().await {
                 payload
@@ -62,17 +64,18 @@ impl Blockchain{
                 return;
             };
 
-            let from = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266".parse::<Address>().expect("Wrong from");
-            contract.method::<_,U256>("submitTest",payload).expect("Wrong submit").from(from).send().await.ok();
+            contract.method::<_,U256>("submitTest",payload).expect("Wrong submit").legacy().send().await.ok();
 
         }
 
     }
 
-    async fn receive(contract: Consensus<Provider<Http>>, deliver_inlet: MessageInlet){
-        let events = contract.events();
+    async fn receive(contract: Consensus<Provider<Ipc>>, deliver_inlet: MessageInlet){
         let inlet = &deliver_inlet;
+
+        let events = contract.events();        
         let stream = events.stream().await.expect("error stream");
+
         stream.for_each_concurrent(None, |event_result| async move{
             let event = event_result.expect("event result error");
             inlet.send(event.payload.to_owned()).unwrap();

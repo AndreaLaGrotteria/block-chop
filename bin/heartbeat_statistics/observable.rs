@@ -1,5 +1,5 @@
 use rayon::slice::ParallelSliceMut;
-use std::fmt::{self, Debug, Formatter};
+use std::{fmt::{self, Debug, Formatter}};
 
 #[allow(dead_code)]
 pub(crate) struct Observable {
@@ -32,23 +32,28 @@ impl Observable {
 
         let applicability = (values.len() as f64) / ((values.len() + non_applicable) as f64);
 
-        let average = statistical::mean(values.as_slice());
-        let standard_deviation = statistical::standard_deviation(values.as_slice(), None);
-
-        values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-
+        let mut average: f64 = -1.0;
+        let mut standard_deviation: f64 = -1.0;
         let mut percentiles = [0f64; 101];
-        percentiles.copy_from_slice(
-            &(0..=100)
-                .map(|percentile| {
-                    let index = std::cmp::min(
-                        ((values.len() as f64) * percentile as f64 / 100f64) as usize,
-                        values.len() - 1,
-                    );
-                    values[index]
-                })
-                .collect::<Vec<_>>(),
-        );
+
+        if (values.len() > 1) {
+            average = statistical::mean(values.as_slice());
+            standard_deviation = statistical::standard_deviation(values.as_slice(), None);
+    
+            values.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            
+            percentiles.copy_from_slice(
+                &(0..=100)
+                    .map(|percentile| {
+                        let index = std::cmp::min(
+                            ((values.len() as f64) * percentile as f64 / 100f64) as usize,
+                            values.len() - 1,
+                        );
+                        values[index]
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
 
         Observable {
             applicability,
